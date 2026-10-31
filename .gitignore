@@ -1,0 +1,40 @@
+# Local source materials and credentials
+/res/
+.aws/
+.env
+.env.*
+!.env.example
+
+# AI tooling
+.claude/
+.agents/
+.codex/
+
+# Dependencies and generated output
+node_modules/
+dist/
+coverage/
+.cache/
+core/.cache/
+fixtures/generated/
+test-discs/
+
+# Private PlayStation inputs
+*.mcd
+*.mcr
+*.srm
+*.state
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Operating-system files
+.DS_Store
+Thumbs.db

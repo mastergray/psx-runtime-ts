@@ -1,0 +1,58 @@
+{
+  "name": "psx-runtime-ts",
+  "version": "0.0.0",
+  "description": "Headless TypeScript runtime for playing user-supplied PlayStation games in the browser",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "run-s check:src check:tests",
+    "check:src": "tsc --noEmit",
+    "check:tests": "tsc -p tsconfig.tests.json",
+    "clean": "node scripts/clean-dist.mjs",
+    "compile": "tsc",
+    "compile:package": "tsc -p tsconfig.package.json",
+    "build": "run-s clean compile",
+    "build:package": "run-s clean compile:package",
+    "test": "node --import tsx tests/run.ts spec",
+    "test:spec": "node --import tsx tests/run.ts spec",
+    "test:browser": "node --import tsx tests/run.ts browser",
+    "test:all": "node --import tsx tests/run.ts spec browser"
+  },
+  "author": "mastergray",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mastergray/psx-runtime-ts.git"
+  },
+  "homepage": "https://github.com/mastergray/psx-runtime-ts#readme",
+  "bugs": {
+    "url": "https://github.com/mastergray/psx-runtime-ts/issues"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ctg-js-browser-test": "github:claymoretechgroup/ctg-js-browser-test#v2.0.0",
+    "ctg-js-test": "github:claymoretechgroup/ctg-js-test#v4.0.0",
+    "npm-run-all": "^4.1.5",
+    "playwright": "1.62.0",
+    "tsx": "^4.23.11",
+    "typescript": "^5.9.0"
+  }
+}
