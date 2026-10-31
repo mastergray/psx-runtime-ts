@@ -308,9 +308,14 @@ export function isAuditedDisc(value: unknown): value is AuditedDisc {
         || !isNonNegativeInteger(value.totalBytes)
         || !isArrayOf(value.warnings, (warning) => typeof warning === "string")) return false;
     const cues = value.discs.map(({ cue }) => cue.toLowerCase());
-    const trackBytes = value.discs.flatMap(({ tracks }) => tracks)
-        .reduce((total, track) => total + track.bytes, 0);
-    return isUnique(cues) && value.totalBytes >= trackBytes;
+    const uniqueTracks = new Map<string, number>();
+    for (const track of value.discs.flatMap(({ tracks }) => tracks)) {
+        const previous = uniqueTracks.get(track.file);
+        if (previous !== undefined && previous !== track.bytes) return false;
+        uniqueTracks.set(track.file, track.bytes);
+    }
+    const trackBytes = [...uniqueTracks.values()].reduce((total, bytes) => total + bytes, 0);
+    return isUnique(cues) && Number.isSafeInteger(trackBytes) && value.totalBytes >= trackBytes;
 }
 
 export function isControllerPort(value: unknown): value is ControllerPort {

@@ -1,8 +1,17 @@
 export { default as PsxRuntimeError } from "./PsxRuntimeError/PsxRuntimeError.js";
+export { default as DiscSetAudit } from "./DiscSetAudit/DiscSetAudit.js";
 export {
     isPsxRuntimeErrorConfig,
     type PsxRuntimeErrorConfig,
 } from "./PsxRuntimeError/types.js";
+export {
+    isDiscSetAuditResult,
+    isDiscSetIssue,
+    type DiscSetAuditResult,
+    type DiscSetIssue,
+    type DiscSetIssueCode,
+    type DiscSetIssueSeverity,
+} from "./DiscSetAudit/types.js";
 
 export {
     isAuditedDisc,

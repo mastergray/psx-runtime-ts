@@ -19,14 +19,16 @@ are in [the implementation spec](psx-runtime-spec.md).
   - [x] Select PCSX-ReARMed and commit the production source/toolchain pins.
 - [x] M1: implement public contracts, errors and deterministic build metadata.
 - [x] M2: implement the libretro shim and deterministic Worker protocol.
-- [ ] M3–M9: content, adapter, browser surfaces and storage.
+- [x] M3: implement disc-set auditing and zero-copy WORKERFS mount plans.
+- [ ] M4–M9: adapter, browser surfaces and storage.
 - [ ] M10: pass all `v1.0.0` release gates.
 
-## Next work: M3
+## Next work: M4
 
-M0–M2 are complete. The private Worker foundation now validates every command
-and output, executes mutating work FIFO, paces PAL and NTSC independently of
-host cadence, converts negotiated AV formats, enforces a three-buffer video
-pool and performs one-shot terminal cleanup. A native synthetic libretro core
-also verifies the narrow C shim lifecycle. M3 implements `DiscSetAudit` and
-safe WORKERFS mount-plan generation.
+M0–M3 are complete. `DiscSetAudit` now produces complete ordered issue lists
+for bounded CUE/M3U inputs, associates SBI sidecars and rejects unsafe or
+incomplete media graphs before Worker creation. The private mount planner
+regenerates deterministic descriptors and passes large track blobs directly
+to WORKERFS without reading or copying them. M4 implements
+`LibretroPsxAdapter`, its Worker client and the public session lifecycle on top
+of the M2 bridge and M3 content pipeline.
