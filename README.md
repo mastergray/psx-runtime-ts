@@ -7,7 +7,7 @@ PlayStation-specific libretro bridge, Worker-hosted WebAssembly core, disc
 handling, controller ports, memory cards and save states.
 
 M0 feasibility, the M1 public-contract foundation, the M2 bridge/Worker
-foundation and the M3 content pipeline are complete.
+foundation, the M3 content pipeline and the M4 adapter/session are complete.
 PCSX-ReARMed at the commit recorded in
 `core/SOURCE.json` is the selected core, and Emscripten 6.0.2 is the pinned
 toolchain. The P1–P12 evidence covers real-BIOS boot, dedicated-Worker disc
@@ -28,6 +28,10 @@ synthetic libretro core cover lifecycle and terminal cleanup.
 M3 adds ordered CUE/M3U auditing, same-basename SBI association and a
 generated content mount plan. Large track blobs remain in WORKERFS while only
 small normalized descriptors and sidecars are written to MEMFS.
+
+M4 adds the public libretro adapter and restartable session, validated Worker
+client, production Emscripten bridge, firmware/card installation and complete
+input, reset, disc, state and terminal-cleanup lifecycle.
 
 See the [implementation spec](docs/psx-runtime-spec.md) for the architecture,
 public contracts, probe plan, milestones and release gates. Current progress

@@ -1,0 +1,115 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>M4 adapter probe</title>
+<script type="module">
+import LibretroPsxAdapter from "../../dist/LibretroPsxAdapter/LibretroPsxAdapter.js";
+
+const getBlob = async (url) => {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("probe input request failed");
+    return response.blob();
+};
+
+const buildId = "e".repeat(64);
+const build = {
+    formatVersion: 1,
+    adapter: "libretro-psx",
+    buildId,
+    core: "PCSX-ReARMed",
+    coreVersion: "9f8b028",
+    coreCommit: "9f8b028cd66200bb9a18a878a5e73925a629b0a7",
+    emsdkVersion: "6.0.2",
+    artifacts: ["psx-core.js", "psx-core.wasm", "core.worker.js"],
+    supportedContent: ["cue", "m3u", "sbi"],
+    controllerTypes: ["none", "digital", "dualshock"],
+    firmware: {
+        required: true,
+        byteLengths: [524288],
+        systemFilenames: {
+            "ntsc-u": "scph5501.bin",
+            "ntsc-j": "scph5500.bin",
+            pal: "scph5502.bin",
+        },
+    },
+    memory: { initialPages: 1024, maximumPages: 8192 },
+    pthreads: false,
+    licenses: [{ id: "GPL-2.0-or-later", notice: "notices/COPYING.txt" }],
+};
+
+try {
+    const [cueOne, binOne, cueTwo, binTwo, bios] = await Promise.all([
+        getBlob("/fixtures/generated/m0/multidisc/disc1/m0-fixture.cue"),
+        getBlob("/fixtures/generated/m0/multidisc/disc1/m0-fixture.bin"),
+        getBlob("/fixtures/generated/m0/multidisc/disc2/m0-fixture.cue"),
+        getBlob("/fixtures/generated/m0/multidisc/disc2/m0-fixture.bin"),
+        getBlob("/private/bios"),
+    ]);
+    const game = {
+        gameId: "m4-browser-fixture",
+        entry: "set/game.m3u",
+        files: [
+            { path: "set/game.m3u", blob: new Blob(["disc1/game.cue\ndisc2/game.cue\n"]) },
+            { path: "set/disc1/game.cue", blob: cueOne },
+            { path: "set/disc1/m0-fixture.bin", blob: binOne },
+            { path: "set/disc2/game.cue", blob: cueTwo },
+            { path: "set/disc2/m0-fixture.bin", blob: binTwo },
+        ],
+    };
+    const adapter = new LibretroPsxAdapter({
+        buildUrl: "/dist/worker",
+        build,
+        createWorker: (url) => new Worker(url, { type: "module" }),
+    });
+    const session = await adapter.start({
+        game,
+        bios: { name: "Private firmware", region: "pal", blob: bios },
+        controllers: { 1: "dualshock", 2: "digital" },
+    });
+    let ticks = 0;
+    let frames = 1;
+    let sounds = 0;
+    session.onTick(() => { ticks++; });
+    session.onFrame(() => { frames++; });
+    session.onSound(() => { sounds++; });
+    session.setButton({ port: 1, button: "cross" }, true);
+    session.setButton({ port: 2, button: "start" }, true);
+    session.setAxis({ port: 1, axis: "left-x" }, 0.5);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    session.setButton({ port: 1, button: "cross" }, false);
+    session.setButton({ port: 2, button: "start" }, false);
+    const state = await session.serializeState();
+    await session.unserializeState(state);
+    await session.reset("soft");
+    await session.setDisc(1);
+    const cardOne = await session.readMemoryCard(1);
+    const cardTwo = await session.readMemoryCard(2);
+    await session.reset("hard");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const result = {
+        ok: ticks > 0 && frames > 0 && sounds > 0
+            && state.byteLength > 0
+            && cardOne.byteLength === 131072 && cardTwo.byteLength === 131072
+            && session.machine.buildId === buildId
+            && session.machine.firmware === "bios"
+            && session.machine.discCount === 2,
+        ticks,
+        frames,
+        sounds,
+        stateBytes: state.byteLength,
+        cardBytes: [cardOne.byteLength, cardTwo.byteLength],
+        discCount: session.machine.discCount,
+        firmware: session.machine.firmware,
+    };
+    await session.exit();
+    await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+} catch (error) {
+    await fetch("/result", {
+        method: "POST",
+        body: JSON.stringify({
+            ok: false,
+            message: error instanceof Error ? error.message : String(error),
+            data: error && typeof error === "object" && "data" in error ? error.data : null,
+        }),
+    });
+}
+</script>

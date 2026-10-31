@@ -20,15 +20,15 @@ are in [the implementation spec](psx-runtime-spec.md).
 - [x] M1: implement public contracts, errors and deterministic build metadata.
 - [x] M2: implement the libretro shim and deterministic Worker protocol.
 - [x] M3: implement disc-set auditing and zero-copy WORKERFS mount plans.
-- [ ] M4–M9: adapter, browser surfaces and storage.
+- [x] M4: implement the libretro adapter and public session lifecycle.
+- [ ] M5–M9: input, browser surfaces and storage.
 - [ ] M10: pass all `v1.0.0` release gates.
 
-## Next work: M4
+## Next work: M5
 
-M0–M3 are complete. `DiscSetAudit` now produces complete ordered issue lists
-for bounded CUE/M3U inputs, associates SBI sidecars and rejects unsafe or
-incomplete media graphs before Worker creation. The private mount planner
-regenerates deterministic descriptors and passes large track blobs directly
-to WORKERFS without reading or copying them. M4 implements
-`LibretroPsxAdapter`, its Worker client and the public session lifecycle on top
-of the M2 bridge and M3 content pipeline.
+M0–M4 are complete. `LibretroPsxAdapter` now validates content and firmware,
+starts a fresh module Worker, waits for the first real frame and exposes the
+public session lifecycle. Soft and hard reset, two controllers, both cards,
+state round trips, multi-disc changes, timeout cleanup and repeated start/stop
+are covered through deterministic doubles and the selected core. M5 implements
+the multi-channel input coordinator and keyboard/gamepad sources.

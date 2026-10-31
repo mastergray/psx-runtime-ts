@@ -137,14 +137,14 @@ const testFile: TestFile = {
                     descriptors: {
                         "/content/index/disc-000.cue": [
                             "REM normalized by the planner",
-                            "FILE \"../blob/track-000.bin\" BINARY",
+                            "FILE \"/content/blob/track-000.bin\" BINARY",
                             "  TRACK 01 MODE2/2352",
                             "    INDEX 01 00:00:00",
                             "",
                         ].join("\n"),
                         "/content/index/disc-001.cue": [
                             "REM normalized by the planner",
-                            "FILE \"../blob/track-001.bin\" BINARY",
+                            "FILE \"/content/blob/track-001.bin\" BINARY",
                             "  TRACK 01 MODE2/2352",
                             "    INDEX 01 00:00:00",
                             "",
@@ -197,8 +197,8 @@ const testFile: TestFile = {
                         { name: "track-001.bin", identity: true },
                     ],
                     writes: [
-                        { path: "/content/index/disc-000.cue", size: 110 },
-                        { path: "/content/index/disc-001.cue", size: 110 },
+                        { path: "/content/index/disc-000.cue", size: 116 },
+                        { path: "/content/index/disc-001.cue", size: 116 },
                         { path: "/content/index/game.m3u", size: 26 },
                         { path: "/content/index/disc-000.sbi", size: 3 },
                     ],

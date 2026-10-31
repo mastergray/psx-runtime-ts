@@ -1,5 +1,6 @@
 export { default as PsxRuntimeError } from "./PsxRuntimeError/PsxRuntimeError.js";
 export { default as DiscSetAudit } from "./DiscSetAudit/DiscSetAudit.js";
+export { default as LibretroPsxAdapter } from "./LibretroPsxAdapter/LibretroPsxAdapter.js";
 export {
     isPsxRuntimeErrorConfig,
     type PsxRuntimeErrorConfig,
@@ -12,6 +13,19 @@ export {
     type DiscSetIssueCode,
     type DiscSetIssueSeverity,
 } from "./DiscSetAudit/types.js";
+export {
+    isLibretroPsxAdapterConfig,
+    isLibretroPsxAdapterInitConfig,
+    isPsxWorker,
+    isWorkerFactory,
+    type LibretroPsxAdapterConfig,
+    type LibretroPsxAdapterInitConfig,
+    type PsxClock,
+    type PsxWorker,
+    type WorkerFactory,
+    type WorkerErrorEventLike,
+    type WorkerMessageEventLike,
+} from "./LibretroPsxAdapter/types.js";
 
 export {
     isAuditedDisc,

@@ -31,6 +31,8 @@ void psx_stop(void);
 
 unsigned psx_video_width(void);
 unsigned psx_video_height(void);
+unsigned psx_base_width(void);
+unsigned psx_base_height(void);
 unsigned psx_video_pitch(void);
 unsigned psx_video_format(void);
 const uint8_t *psx_video_data(void);
@@ -40,6 +42,7 @@ const int16_t *psx_audio_data(void);
 size_t psx_audio_frames(void);
 double psx_frames_per_second(void);
 double psx_sample_rate(void);
+int psx_is_pal(void);
 float psx_aspect_ratio(void);
 unsigned psx_max_width(void);
 unsigned psx_max_height(void);

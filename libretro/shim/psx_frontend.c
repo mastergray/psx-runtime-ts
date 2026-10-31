@@ -13,6 +13,7 @@
 #define PSX_AXES 4
 #define PSX_CARD_BYTES (128u * 1024u)
 #define PSX_LOG_BYTES (32u * 1024u)
+#define PSX_DEVICE_DUALSHOCK (((1u + 1u) << 8) | RETRO_DEVICE_ANALOG)
 
 struct psx_frontend_state {
     bool initialized;
@@ -41,6 +42,13 @@ struct psx_frontend_state {
 };
 
 static struct psx_frontend_state frontend;
+static char failed_start_log[PSX_LOG_BYTES];
+static size_t failed_start_log_size;
+
+#ifdef PSX_RUNTIME_PCSX_REARMED
+extern char Mcd1Data[PSX_CARD_BYTES];
+extern char Mcd2Data[PSX_CARD_BYTES];
+#endif
 
 static bool reserve_video(size_t bytes) {
     if (bytes <= frontend.video_capacity) return true;
@@ -261,13 +269,25 @@ static int16_t input_state_callback(unsigned port, unsigned device, unsigned ind
     return 0;
 }
 
+static unsigned controller_device(const char *options_json, unsigned port) {
+    if (options_json == NULL) return RETRO_DEVICE_JOYPAD;
+    const char *key = port == 0 ? "\"1\":\"" : "\"2\":\"";
+    const char *value = strstr(options_json, key);
+    if (value == NULL) return RETRO_DEVICE_JOYPAD;
+    value += strlen(key);
+    if (strncmp(value, "none\"", 5) == 0) return RETRO_DEVICE_NONE;
+    if (strncmp(value, "dualshock\"", 10) == 0) return PSX_DEVICE_DUALSHOCK;
+    return RETRO_DEVICE_JOYPAD;
+}
+
 int psx_frontend_start(const char *content_path, const char *options_json) {
-    (void) options_json;
     if (frontend.started || content_path == NULL || content_path[0] == '\0') return 0;
     frontend.pixel_format = RETRO_PIXEL_FORMAT_0RGB1555;
     frontend.failed = false;
     frontend.log_size = 0;
     frontend.log[0] = '\0';
+    failed_start_log_size = 0;
+    failed_start_log[0] = '\0';
     retro_set_environment(environment_callback);
     retro_set_video_refresh(video_callback);
     retro_set_audio_sample(audio_sample_callback);
@@ -277,8 +297,8 @@ int psx_frontend_start(const char *content_path, const char *options_json) {
     if (retro_api_version() != RETRO_API_VERSION) return 0;
     retro_init();
     frontend.initialized = true;
-    retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
-    retro_set_controller_port_device(1, RETRO_DEVICE_JOYPAD);
+    retro_set_controller_port_device(0, controller_device(options_json, 0));
+    retro_set_controller_port_device(1, controller_device(options_json, 1));
     const struct retro_game_info game = {
         .path = content_path,
         .data = NULL,
@@ -286,6 +306,8 @@ int psx_frontend_start(const char *content_path, const char *options_json) {
         .meta = NULL,
     };
     if (!retro_load_game(&game)) {
+        failed_start_log_size = frontend.log_size;
+        memcpy(failed_start_log, frontend.log, failed_start_log_size + 1);
         psx_frontend_stop();
         return 0;
     }
@@ -336,21 +358,37 @@ int psx_frontend_unserialize(const void *data, size_t size) {
 
 size_t psx_frontend_memory_card_size(unsigned slot) {
     if (!frontend.started || slot >= PSX_PORTS) return 0;
+#ifdef PSX_RUNTIME_PCSX_REARMED
+    return PSX_CARD_BYTES;
+#else
     size_t bytes = retro_get_memory_size(RETRO_MEMORY_SAVE_RAM);
     return bytes >= (slot + 1u) * PSX_CARD_BYTES ? PSX_CARD_BYTES : 0;
+#endif
 }
 
 int psx_frontend_read_memory_card(unsigned slot, void *out, size_t size) {
+#ifdef PSX_RUNTIME_PCSX_REARMED
+    const uint8_t *cards = (const uint8_t *) (slot == 0 ? Mcd1Data : Mcd2Data);
+    if (out == NULL || size != psx_frontend_memory_card_size(slot)) return 0;
+    memcpy(out, cards, PSX_CARD_BYTES);
+#else
     uint8_t *cards = (uint8_t *) retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
     if (out == NULL || cards == NULL || size != psx_frontend_memory_card_size(slot)) return 0;
     memcpy(out, cards + slot * PSX_CARD_BYTES, PSX_CARD_BYTES);
+#endif
     return 1;
 }
 
 int psx_frontend_write_memory_card(unsigned slot, const void *data, size_t size) {
+#ifdef PSX_RUNTIME_PCSX_REARMED
+    uint8_t *cards = (uint8_t *) (slot == 0 ? Mcd1Data : Mcd2Data);
+    if (data == NULL || size != psx_frontend_memory_card_size(slot)) return 0;
+    memcpy(cards, data, PSX_CARD_BYTES);
+#else
     uint8_t *cards = (uint8_t *) retro_get_memory_data(RETRO_MEMORY_SAVE_RAM);
     if (data == NULL || cards == NULL || size != psx_frontend_memory_card_size(slot)) return 0;
     memcpy(cards + slot * PSX_CARD_BYTES, data, PSX_CARD_BYTES);
+#endif
     return 1;
 }
 
@@ -388,6 +426,8 @@ void psx_frontend_stop(void) {
 
 unsigned psx_video_width(void) { return frontend.video_width; }
 unsigned psx_video_height(void) { return frontend.video_height; }
+unsigned psx_base_width(void) { return frontend.av_info.geometry.base_width; }
+unsigned psx_base_height(void) { return frontend.av_info.geometry.base_height; }
 unsigned psx_video_pitch(void) { return (unsigned) frontend.video_pitch; }
 unsigned psx_video_format(void) { return (unsigned) frontend.pixel_format; }
 const uint8_t *psx_video_data(void) { return frontend.video; }
@@ -397,6 +437,7 @@ const int16_t *psx_audio_data(void) { return frontend.audio; }
 size_t psx_audio_frames(void) { return frontend.audio_frame_count; }
 double psx_frames_per_second(void) { return frontend.av_info.timing.fps; }
 double psx_sample_rate(void) { return frontend.av_info.timing.sample_rate; }
+int psx_is_pal(void) { return frontend.started && retro_get_region() == 1 ? 1 : 0; }
 float psx_aspect_ratio(void) {
     float aspect = frontend.av_info.geometry.aspect_ratio;
     return aspect > 0.0f || frontend.av_info.geometry.base_height == 0
@@ -419,5 +460,9 @@ int psx_tray_open(void) {
 uint16_t psx_rumble(unsigned port, unsigned effect) {
     return port < PSX_PORTS && effect < 2 ? frontend.rumble[port][effect] : 0;
 }
-size_t psx_log_size(void) { return frontend.log_size; }
-const char *psx_log_data(void) { return frontend.log; }
+size_t psx_log_size(void) {
+    return frontend.log_size != 0 ? frontend.log_size : failed_start_log_size;
+}
+const char *psx_log_data(void) {
+    return frontend.log_size != 0 ? frontend.log : failed_start_log;
+}

@@ -39,6 +39,7 @@
     "probe:state-disc": "node core/probes/run-browser-probe.mjs stateDisc",
     "probe:memory": "node core/probes/run-browser-probe.mjs memory",
     "probe:bios": "node core/probes/run-browser-probe.mjs bios",
+    "probe:m4": "node core/probes/run-browser-probe.mjs m4",
     "test": "node --import tsx tests/run.ts spec",
     "test:spec": "node --import tsx tests/run.ts spec",
     "test:shim": "node scripts/test-native-shim.mjs",

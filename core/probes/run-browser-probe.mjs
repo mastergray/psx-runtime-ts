@@ -21,16 +21,17 @@ const probes = {
     stateDisc: "/core/probes/pcsx-state-disc-probe.html",
     memory: "/core/probes/pcsx-memory-probe.html",
     bios: "/core/probes/pcsx-bios-probe.html",
+    m4: "/core/probes/m4-adapter-probe.html",
 };
 
 if (probe === undefined || !(probe in probes)) {
-    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry|media|cards|stateDisc|memory|bios>");
+    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry|media|cards|stateDisc|memory|bios|m4>");
     process.exit(2);
 }
 
 const root = resolve(import.meta.dirname, "../..");
 let privateBiosPath;
-if (probe === "bios") {
+if (probe === "bios" || probe === "m4") {
     if (process.env.PSX_BIOS_PATH === undefined || process.env.PSX_BIOS_PATH.length === 0) {
         console.error("P3 requires PSX_BIOS_PATH to identify the private BIOS input");
         process.exit(3);
@@ -92,6 +93,7 @@ const routes = new Map([
     ["/core/probes/pcsx-memory-probe.worker.mjs", ["core/probes/pcsx-memory-probe.worker.mjs", "text/javascript; charset=utf-8"]],
     ["/core/probes/pcsx-bios-probe.html", ["core/probes/pcsx-bios-probe.html", "text/html; charset=utf-8"]],
     ["/core/probes/pcsx-bios-probe.worker.mjs", ["core/probes/pcsx-bios-probe.worker.mjs", "text/javascript; charset=utf-8"]],
+    ["/core/probes/m4-adapter-probe.html", ["core/probes/m4-adapter-probe.html", "text/html; charset=utf-8"]],
     ["/dist/probes/workerfs-module.mjs", ["dist/probes/workerfs-module.mjs", "text/javascript; charset=utf-8"]],
     ["/dist/probes/workerfs-module.wasm", ["dist/probes/workerfs-module.wasm", "application/wasm"]],
     ["/dist/probes/pcsx-boot.mjs", ["dist/probes/pcsx-boot.mjs", "text/javascript; charset=utf-8"]],
@@ -128,7 +130,7 @@ const server = createServer((request, response) => {
         response.end();
         return;
     }
-    if (url.pathname === "/private/bios" && probe === "bios" && privateBiosPath !== undefined) {
+    if (url.pathname === "/private/bios" && (probe === "bios" || probe === "m4") && privateBiosPath !== undefined) {
         response.writeHead(200, {
             "content-type": "application/octet-stream",
             "cache-control": "no-store",
@@ -169,7 +171,13 @@ const server = createServer((request, response) => {
         return;
     }
 
-    const route = routes.get(url.pathname);
+    let route = routes.get(url.pathname);
+    if (route === undefined && url.pathname.startsWith("/dist/") && !url.pathname.includes("..")) {
+        const type = url.pathname.endsWith(".wasm")
+            ? "application/wasm"
+            : "text/javascript; charset=utf-8";
+        route = [url.pathname.slice(1), type];
+    }
     if (route === undefined) {
         response.writeHead(404);
         response.end();

@@ -40,6 +40,51 @@ export interface EmscriptenFsLike {
     writeFile(path: string, bytes: Uint8Array): unknown;
 }
 
+const isObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null;
+
+const isBlobLike = (value: unknown): value is Blob => isObject(value)
+    && typeof value.size === "number" && Number.isSafeInteger(value.size) && value.size >= 0
+    && typeof value.arrayBuffer === "function" && typeof value.slice === "function"
+    && typeof value.stream === "function" && typeof value.text === "function";
+
+const isUint8Array = (value: unknown): value is Uint8Array => value instanceof Uint8Array
+    || Object.prototype.toString.call(value) === "[object Uint8Array]";
+
+const isGeneratedPath = (value: unknown, extension: ".cue" | ".m3u" | ".sbi"): value is string =>
+    typeof value === "string" && value.startsWith(`${INDEX_ROOT}/`)
+    && value.endsWith(extension) && !value.includes("\\") && !value.includes("..");
+
+export function isMountPlan(value: unknown): value is MountPlan {
+    if (!isObject(value) || typeof value.entryPath !== "string"
+        || (!isGeneratedPath(value.entryPath, ".cue") && !isGeneratedPath(value.entryPath, ".m3u"))
+        || !Array.isArray(value.tracks) || value.tracks.length === 0
+        || !Array.isArray(value.descriptors) || value.descriptors.length === 0
+        || !Array.isArray(value.sidecars)) return false;
+    const trackNames = new Set<string>();
+    for (const track of value.tracks) {
+        if (!isObject(track) || typeof track.name !== "string"
+            || !/^track-\d{3}\.bin$/u.test(track.name) || trackNames.has(track.name)
+            || !isBlobLike(track.blob)) return false;
+        trackNames.add(track.name);
+    }
+    const descriptorPaths = new Set<string>();
+    for (const descriptor of value.descriptors) {
+        if (!isObject(descriptor)
+            || (!isGeneratedPath(descriptor.path, ".cue") && !isGeneratedPath(descriptor.path, ".m3u"))
+            || descriptorPaths.has(descriptor.path) || !isUint8Array(descriptor.bytes)
+            || descriptor.bytes.byteLength === 0) return false;
+        descriptorPaths.add(descriptor.path);
+    }
+    const sidecarPaths = new Set<string>();
+    for (const sidecar of value.sidecars) {
+        if (!isObject(sidecar) || !isGeneratedPath(sidecar.path, ".sbi")
+            || sidecarPaths.has(sidecar.path) || !isBlobLike(sidecar.blob)) return false;
+        sidecarPaths.add(sidecar.path);
+    }
+    return descriptorPaths.has(value.entryPath);
+}
+
 const directoryOf = (path: string): string => {
     const slash = path.lastIndexOf("/");
     return slash < 0 ? "" : path.slice(0, slash);
@@ -87,7 +132,7 @@ const rewriteCue = async (
         if (generatedName === undefined) {
             return invariant("An audited CUE references a track absent from its mount plan.", sourcePath);
         }
-        return `${match[1]}FILE "../blob/${generatedName}" ${match[4]!.toUpperCase()}`;
+        return `${match[1]}FILE "${BLOB_ROOT}/${generatedName}" ${match[4]!.toUpperCase()}`;
     });
     return new TextEncoder().encode(`${output.join("\n").replace(/\n+$/u, "")}\n`);
 };

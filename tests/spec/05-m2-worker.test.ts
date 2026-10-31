@@ -14,11 +14,32 @@ import type {
     WorkerOutput,
     WorkerStartPayload,
 } from "../../src/LibretroPsxAdapter/protocol.ts";
-import type { PsxMachineInfo } from "../../src/index.ts";
+import type { PsxBuildInfo, PsxMachineInfo } from "../../src/index.ts";
 import type { CoreRunOutput, WorkerCore } from "../../src/worker/WorkerRuntime.ts";
 import type { TestFile } from "../run.ts";
 
 const buildId = "a".repeat(64);
+const workerBlob = new Blob([new Uint8Array([1])]);
+const workerBuild: PsxBuildInfo = {
+    formatVersion: 1,
+    adapter: "libretro-psx",
+    buildId,
+    core: "Synthetic PSX",
+    coreVersion: "1",
+    coreCommit: "b".repeat(40),
+    emsdkVersion: "6.0.2",
+    artifacts: ["psx-core.js", "psx-core.wasm", "core.worker.js"],
+    supportedContent: ["cue", "m3u", "sbi"],
+    controllerTypes: ["none", "digital", "dualshock"],
+    firmware: {
+        required: true,
+        byteLengths: [1],
+        systemFilenames: { "ntsc-u": "u.bin", "ntsc-j": "j.bin", pal: "p.bin" },
+    },
+    memory: { initialPages: 1, maximumPages: 2 },
+    pthreads: false,
+    licenses: [{ id: "test", notice: "notice.txt" }],
+};
 const machine: PsxMachineInfo = {
     core: "Synthetic PSX",
     coreVersion: "1",
@@ -37,6 +58,16 @@ const machine: PsxMachineInfo = {
 
 const startPayload: WorkerStartPayload = {
     contentPath: "/content/index/game.cue",
+    moduleUrl: "/build/psx-core.js",
+    build: workerBuild,
+    mountPlan: {
+        entryPath: "/content/index/game.cue",
+        tracks: [{ name: "track-000.bin", blob: workerBlob }],
+        descriptors: [{ path: "/content/index/game.cue", bytes: new TextEncoder().encode("FILE x BINARY\n") }],
+        sidecars: [],
+    },
+    bios: { path: "/system/u.bin", blob: workerBlob },
+    memoryCards: { 1: new Uint8Array(128 * 1024), 2: new Uint8Array(128 * 1024) },
     gameId: "fixture",
     region: "ntsc-u",
     controllers: { 1: "dualshock", 2: "digital" },

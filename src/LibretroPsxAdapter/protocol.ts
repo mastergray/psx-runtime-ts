@@ -2,19 +2,23 @@ import {
     isControllerPort,
     isPsxAxis,
     isPsxButton,
+    isPsxBuildInfo,
     isPsxControllerType,
     isPsxMachineInfo,
     isPsxRegion,
 } from "../shared.types.js";
+import { isMountPlan } from "../worker/MountPlan.js";
 
 import type {
     ControllerPort,
     PsxAxis,
     PsxButton,
+    PsxBuildInfo,
     PsxControllerType,
     PsxMachineInfo,
     PsxRegion,
 } from "../shared.types.js";
+import type { MountPlan } from "../worker/MountPlan.js";
 
 interface WorkerEnvelope {
     readonly requestId: number;
@@ -23,6 +27,11 @@ interface WorkerEnvelope {
 
 export interface WorkerStartPayload {
     readonly contentPath: string;
+    readonly moduleUrl: string;
+    readonly build: PsxBuildInfo;
+    readonly mountPlan: MountPlan;
+    readonly bios: { readonly path: string; readonly blob: Blob };
+    readonly memoryCards: Readonly<Record<ControllerPort, Uint8Array>>;
     readonly gameId: string;
     readonly region: PsxRegion;
     readonly controllers: Readonly<Record<ControllerPort, PsxControllerType>>;
@@ -117,12 +126,22 @@ const isArrayBuffer = (value: unknown): value is ArrayBuffer =>
 const isUint8Array = (value: unknown): value is Uint8Array =>
     value instanceof Uint8Array || Object.prototype.toString.call(value) === "[object Uint8Array]";
 
+const isBlobLike = (value: unknown): value is Blob => isObject(value)
+    && isNonNegativeInteger(value.size) && typeof value.arrayBuffer === "function"
+    && typeof value.slice === "function" && typeof value.stream === "function"
+    && typeof value.text === "function";
+
 const isEnvelope = (value: Record<string, unknown>): boolean =>
     isPositiveInteger(value.requestId) && isPositiveInteger(value.generation);
 
 const isControllerRecord = (value: unknown): boolean => isObject(value)
     && Reflect.ownKeys(value).length === 2
     && isPsxControllerType(value["1"]) && isPsxControllerType(value["2"]);
+
+const isMemoryCards = (value: unknown): boolean => isObject(value)
+    && Reflect.ownKeys(value).length === 2
+    && isUint8Array(value["1"]) && value["1"].byteLength === 128 * 1024
+    && isUint8Array(value["2"]) && value["2"].byteLength === 128 * 1024;
 
 const isOptions = (value: unknown): boolean => isObject(value) && !Array.isArray(value)
     && Reflect.ownKeys(value).every((key) => typeof key === "string" && isNonEmptyString(key)
@@ -134,6 +153,10 @@ export function isWorkerStartPayload(value: unknown): value is WorkerStartPayloa
         || /[\u0000-\u001f\u007f]/u.test(value.contentPath)) return false;
     const segments = value.contentPath.split("/");
     return segments.every((segment, index) => index === 0 || (segment.length > 0 && segment !== "." && segment !== ".."))
+        && isNonEmptyString(value.moduleUrl) && isPsxBuildInfo(value.build)
+        && isMountPlan(value.mountPlan) && isObject(value.bios)
+        && typeof value.bios.path === "string" && /^\/system\/[^/]+\.bin$/u.test(value.bios.path)
+        && isBlobLike(value.bios.blob) && isMemoryCards(value.memoryCards)
         && isNonEmptyString(value.gameId) && isPsxRegion(value.region)
         && isControllerRecord(value.controllers) && isOptions(value.options);
 }
