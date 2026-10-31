@@ -12,6 +12,12 @@
 #define TONE_BLOCKS 32
 #define TONE_BYTES (TONE_BLOCKS * 16)
 
+#ifdef PSX_FIXTURE_PAL
+#define FIXTURE_REGION "PAL"
+#else
+#define FIXTURE_REGION "NTSC"
+#endif
+
 static DISPENV display_environment[2];
 static DRAWENV draw_environment[2];
 static uint8_t pad_buffer[2][34];
@@ -20,6 +26,9 @@ static int active_buffer;
 
 static void initialize_video(void) {
     ResetGraph(0);
+#ifdef PSX_FIXTURE_PAL
+    SetVideoMode(MODE_PAL);
+#endif
 
     SetDefDispEnv(&display_environment[0], 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
     SetDefDispEnv(&display_environment[1], 0, SCREEN_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -90,7 +99,7 @@ static void present_frame(uint32_t frame, uint16_t buttons) {
     FntPrint(-1, "PSX RUNTIME M0 FIXTURE\n\n");
     FntPrint(-1, "FRAME %08u\n", frame);
     FntPrint(-1, "BUTTONS %04x\n", buttons);
-    FntPrint(-1, "VIDEO 320X240 NTSC\n");
+    FntPrint(-1, "VIDEO 320X240 " FIXTURE_REGION "\n");
     FntPrint(-1, "AUDIO 22050HZ LOOP\n");
     FntFlush(-1);
 

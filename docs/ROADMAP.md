@@ -12,7 +12,8 @@ are in [the implementation spec](psx-runtime-spec.md).
   - [x] Build a reproducible redistributable fixture.
   - [x] Prove large-Blob WORKERFS reads in a dedicated Worker.
   - [x] Boot both real cores with video, audio and input evidence.
-  - [ ] Close PAL/long-run, XA/CD audio, card/state/disc and peak-memory probes.
+  - [x] Close PAL/NTSC 60-second timing and determinism at 60/120 Hz host cadence.
+  - [ ] Close geometry, XA/CD audio, card/state/disc and near-maximum-disc memory probes.
 - [ ] M1: implement public contracts, errors and deterministic build metadata.
 - [ ] M2–M9: bridge, Worker, content, adapter, browser surfaces and storage.
 - [ ] M10: pass all `v1.0.0` release gates.

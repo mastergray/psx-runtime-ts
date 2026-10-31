@@ -9,7 +9,9 @@ handling, controller ports, memory cards and save states.
 The project is currently at the scaffold/M0 feasibility stage. The completed
 baseline comparison provisionally favors PCSX-ReARMed with Emscripten 6.0.2,
 but production source metadata remains intentionally uncommitted until the
-remaining M0 long-run and lifecycle probes pass.
+remaining M0 media, persistence, geometry and lifecycle probes pass. Repeated
+60-second NTSC/PAL endurance runs already pass at both 60 and 120 Hz host
+cadence.
 
 See the [implementation spec](docs/psx-runtime-spec.md) for the architecture,
 public contracts, probe plan, milestones and release gates. Current progress

@@ -4,9 +4,9 @@ Status: **in progress; PCSX-ReARMed is the provisional winner.**
 
 This record deliberately does not create `core/SOURCE.json` or
 `core/EMSDK_VERSION`. The baseline comparison is complete, but the M0 hard gate
-also requires PAL, long-run timing, XA/CD audio, memory-card, state, disc-change
-and peak-memory evidence. The production pin becomes final only after those
-checks pass.
+also requires dynamic geometry, XA/CD audio, memory-card, state, disc-change,
+controlled firmware-path and near-maximum-disc memory evidence. The production
+pin becomes final only after those checks pass.
 
 Machine-readable measurements are in [m0-results.json](m0-results.json). Exact
 candidate identities are in
@@ -38,6 +38,30 @@ PCSX-ReARMed is provisionally selected because the spec says the smallest
 candidate that passes the required probes wins unless accuracy evidence
 overrides size. No contrary accuracy evidence exists yet, and PCSX also leads
 this baseline on startup, scripted throughput and initial memory.
+
+## Endurance outcome
+
+PCSX-ReARMed completed two independent 60-second runs for each NTSC/PAL and
+60/120 Hz host-cadence combination after a two-second warmup. Every run ended
+with the exact expected video and audio counts, zero missing or null video
+callbacks, zero simulated audio underruns and identical region-specific hashes
+across both cadences and repeats.
+
+| Region | Host cadence | Frames/run | Audio frames/run | Max transient backlog events | Max host-tick overruns | Max core utilization |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| NTSC, 60 fps | 60 Hz | 3,600 | 2,646,000 | 23 | 23 | 48.1% |
+| NTSC, 60 fps | 120 Hz | 3,600 | 2,646,000 | 0 | 741 | 41.6% |
+| PAL, 50 fps | 60 Hz | 3,000 | 2,646,000 | 0 | 0 | 36.8% |
+| PAL, 50 fps | 120 Hz | 3,000 | 2,646,000 | 0 | 936 | 38.1% |
+
+A host-tick overrun means core work completed after one 8.33 or 16.67 ms host
+interval; it is not a dropped emulated frame. Transient emulation backlog was
+bounded and recovered before the end of every run. The Wasm heap remained at
+64 MiB in all one-second samples. Dedicated headless-Chrome process-tree RSS
+rose from 407,826,432 B before navigation to a 706,310,144 B peak; this
+browser-wide measurement includes Chrome overhead, the page, Worker and Wasm.
+The matrix ran without COOP/COEP headers and reported
+`crossOriginIsolated === false`, matching the v1 deployment constraint.
 
 ## Build findings
 
@@ -72,12 +96,12 @@ buffer selected by generated filesystem glue.
 | P4 WORKERFS | Pass | Three synchronous reads across a logical 256 MiB Blob matched expected FNV checksums; the read window completed in 4.4 ms without copying the full Blob into Wasm memory. |
 | P5 environment API | Baseline complete | Startup first-occurrence order and runtime counts are recorded in JSON. Supported commands are bounded by the probe callback; VFS, rumble, memory maps, software-framebuffer access and optional performance/LED surfaces are explicitly rejected when not implemented. |
 | P6 video formats | Partial pass | RGB565 and XRGB8888, nontrivial pitch and zero null frames are proven. Runtime geometry switches and explicit null-frame tests remain. |
-| P7 timing | Partial | NTSC-like rates are recorded. PAL and paced 60-second 60/120 Hz host-cadence runs remain. |
+| P7 timing | Pass | PCSX reported 60 fps NTSC and 50 fps PAL. Two paced 60-second runs at both 60 and 120 Hz host cadence produced exact frame/audio counts; backlog and host-tick overruns are recorded. |
 | P8 audio | Partial pass | Non-silent looping SPU tone, callback counts and hashes are proven. XA and CD-DA remain. |
 | P9 memory cards | Pending | Both slots, restore order, dirty detection and reload proof remain. |
 | P10 state/disc control | Pending | State round trip and multi-disc open/change/close remain. |
-| P11 memory | Partial | Initial heaps and large-Blob access are recorded. Browser and Wasm steady/peak traces remain. |
-| P12 long-run determinism | Partial | Both complete the short deterministic run faster than real time. Repeated 60-second NTSC/PAL hashes and underrun/drop counts remain. |
+| P11 memory | Partial | Initial heaps, large-Blob access, one-second steady/peak Wasm samples and dedicated-browser process-tree RSS are recorded. A mounted near-maximum disc trace remains. |
+| P12 long-run determinism | Pass for provisional core | Repeated 60-second NTSC/PAL runs at both host cadences produced exact counters, zero missing/null video callbacks, zero simulated audio underruns and repeatable region-specific hashes. |
 
 ## Environment commands observed
 

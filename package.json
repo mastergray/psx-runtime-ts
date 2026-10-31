@@ -39,6 +39,7 @@
     "probe:workerfs": "node core/probes/run-browser-probe.mjs workerfs",
     "probe:pcsx": "node core/probes/run-browser-probe.mjs pcsx",
     "probe:beetle": "node core/probes/run-browser-probe.mjs beetle",
+    "probe:endurance": "node core/probes/run-browser-probe.mjs endurance",
     "test": "node --import tsx tests/run.ts spec",
     "test:spec": "node --import tsx tests/run.ts spec",
     "test:browser": "node --import tsx tests/run.ts browser",

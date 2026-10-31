@@ -21,7 +21,15 @@ After the ignored modules and generated fixture exist, run:
 npm run probe:workerfs
 npm run probe:pcsx
 npm run probe:beetle
+npm run probe:endurance
 ```
 
 The browser runner serves only the explicit probe files and generated fixture,
 launches Chrome, and prints one JSON result.
+
+`probe:endurance` runs two 60-second PCSX-ReARMed measurements for every
+NTSC/PAL and 60/120 Hz host-cadence combination. Use `PROBE_SECONDS` and
+`PROBE_REPEATS` only for local smoke runs; committed acceptance evidence uses
+the 60-second/two-repeat defaults. The runner records one-second Wasm heap and
+dedicated Chrome process-tree RSS samples. It deliberately sends no COOP/COEP
+headers so the endurance result also proves the non-isolated deployment mode.

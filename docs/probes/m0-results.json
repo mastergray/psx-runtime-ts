@@ -20,7 +20,14 @@
     "binSha256": "c010e025bcd91fbde766f3f6ee52a248c2e7e6d567ebc9d572b5a873a4d6af85",
     "binBytes": 1288896,
     "cleanBuildsCompared": 2,
-    "byteIdentical": true
+    "byteIdentical": true,
+    "palVariant": {
+      "cueSha256": "4f9fc035621fc4f09b7051b3d98839668b3516939b5008fff005a06a479423a7",
+      "binSha256": "5f37f98283892b8251ed08b9fcc9d54c3e3c3fe3bdbc81a28628aacc00e9e90a",
+      "binBytes": 1288896,
+      "cleanBuildsCompared": 2,
+      "byteIdentical": true
+    }
   },
   "workerfs": {
     "logicalBlobBytes": 268435456,
@@ -103,10 +110,84 @@
       "runtimeEnvironmentCommandCounts": { "17": 424 }
     }
   },
+  "endurance": {
+    "core": "pcsx-rearmed",
+    "probeArtifact": {
+      "javaScriptBytes": 63641,
+      "wasmBytes": 716454,
+      "wasmSha256": "5818a493d4f1b6e3cebfaf442a0464867350a4f6aaf32e20d8f6a257c95e59f2"
+    },
+    "durationSecondsPerCase": 60,
+    "warmupSecondsPerCase": 2,
+    "repeats": 2,
+    "hostCadencesHz": [60, 120],
+    "crossOriginIsolated": false,
+    "ratesCorrect": true,
+    "deterministic": {
+      "ntsc": {
+        "fps": 60,
+        "framesPerCase": 3600,
+        "videoHash": 1724055120,
+        "audioHash": 1447489993,
+        "repeatableAcrossCadencesAndRuns": true
+      },
+      "pal": {
+        "fps": 50,
+        "framesPerCase": 3000,
+        "videoHash": 3767998581,
+        "audioHash": 408556001,
+        "repeatableAcrossCadencesAndRuns": true
+      }
+    },
+    "cases": [
+      { "region": "ntsc", "hostCadenceHz": 60, "repeat": 1, "elapsedMs": 60006.0, "videoFrames": 3600, "audioFrames": 2646000, "emulationBacklogEvents": 23, "hostTickOverruns": 23, "coreUtilization": 0.4745 },
+      { "region": "ntsc", "hostCadenceHz": 60, "repeat": 2, "elapsedMs": 60007.9, "videoFrames": 3600, "audioFrames": 2646000, "emulationBacklogEvents": 12, "hostTickOverruns": 12, "coreUtilization": 0.4807 },
+      { "region": "ntsc", "hostCadenceHz": 120, "repeat": 1, "elapsedMs": 60000.4, "videoFrames": 3600, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 741, "coreUtilization": 0.3948 },
+      { "region": "ntsc", "hostCadenceHz": 120, "repeat": 2, "elapsedMs": 60000.5, "videoFrames": 3600, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 730, "coreUtilization": 0.4161 },
+      { "region": "pal", "hostCadenceHz": 60, "repeat": 1, "elapsedMs": 60000.0, "videoFrames": 3000, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 0, "coreUtilization": 0.3679 },
+      { "region": "pal", "hostCadenceHz": 60, "repeat": 2, "elapsedMs": 59999.3, "videoFrames": 3000, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 0, "coreUtilization": 0.3583 },
+      { "region": "pal", "hostCadenceHz": 120, "repeat": 1, "elapsedMs": 59999.7, "videoFrames": 3000, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 936, "coreUtilization": 0.3808 },
+      { "region": "pal", "hostCadenceHz": 120, "repeat": 2, "elapsedMs": 59999.8, "videoFrames": 3000, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 450, "coreUtilization": 0.3436 }
+    ],
+    "aggregate": {
+      "missingVideoCallbacks": 0,
+      "nullVideoFrames": 0,
+      "audioDriftFrames": 0,
+      "simulatedAudioUnderrunFrames": 0,
+      "keptRealtime": true,
+      "maximumEmulationBacklogEventsPerCase": 23,
+      "maximumCoreRunMs": 27.9,
+      "maximumCoreUtilization": 0.4807
+    },
+    "memory": {
+      "wasm": {
+        "initialBytes": 67108864,
+        "peakBytes": 67108864,
+        "finalBytes": 67108864,
+        "configuredMaximumBytes": 536870912,
+        "sampleIntervalSeconds": 1
+      },
+      "browserProcessTree": {
+        "method": "linux-process-tree-vmrss",
+        "initialBytes": 407826432,
+        "peakBytes": 706310144,
+        "finalBytes": 694677504,
+        "baselineToPeakBytes": 298483712,
+        "samples": 488
+      }
+    },
+    "pass": true,
+    "notes": [
+      "Host-tick overruns count completion past an 8.33 or 16.67 ms host interval; they are not dropped emulated frames.",
+      "Transient emulation backlog was bounded and recovered within each run; every case ended with exact frame and audio counts, zero missing or null video callbacks, and zero simulated audio underruns.",
+      "The browser measurement sums Linux VmRSS for the dedicated headless Chrome process tree; it includes browser overhead as well as the page, Worker and Wasm allocation.",
+      "The acceptance matrix ran without COOP/COEP headers and reported crossOriginIsolated=false."
+    ]
+  },
   "provisionalDecision": {
     "winner": "pcsx-rearmed",
     "reason": "Both candidates pass the same fixture/shim probe; PCSX-ReARMed is smaller, starts faster, completes the scripted run faster, and needs half the initial Wasm memory.",
     "final": false,
-    "remainingProbeIds": ["P3-retail-bios", "P6-dynamic-geometry", "P7-pal-and-60-second", "P8-xa-and-cdda", "P9", "P10", "P11-peak", "P12"]
+    "remainingProbeIds": ["P3-retail-bios", "P6-dynamic-geometry", "P8-xa-and-cdda", "P9", "P10", "P11-near-maximum-disc"]
   }
 }

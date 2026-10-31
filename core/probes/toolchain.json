@@ -17,7 +17,8 @@
     "-sALLOW_MEMORY_GROWTH=1",
     "-sGROWABLE_ARRAYBUFFERS=0",
     "-Wno-experimental",
-    "-sNO_EXIT_RUNTIME=1"
+    "-sNO_EXIT_RUNTIME=1",
+    "-sEXPORTED_RUNTIME_METHODS=FS,WORKERFS,HEAPU8"
   ],
   "notes": [
     "GROWABLE_ARRAYBUFFERS=0 is required because Chrome 150 rejects TextDecoder input backed by a resizable ArrayBuffer in the generated filesystem glue.",

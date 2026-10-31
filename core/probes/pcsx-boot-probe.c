@@ -23,6 +23,7 @@ static uint32_t last_pixel;
 static unsigned last_width;
 static unsigned last_height;
 static size_t last_pitch;
+static bool force_pal;
 static struct retro_system_av_info av_info;
 
 static uint32_t hash_bytes(uint32_t hash, const uint8_t *data, size_t size) {
@@ -45,7 +46,7 @@ static const char *variable_value(const char *key) {
     if (strcmp(key, "pcsx_rearmed_bios") == 0) return "HLE";
     if (strcmp(key, "pcsx_rearmed_memcard1") == 0) return "libretro";
     if (strcmp(key, "pcsx_rearmed_memcard2") == 0) return "libretro";
-    if (strcmp(key, "pcsx_rearmed_region") == 0) return "auto";
+    if (strcmp(key, "pcsx_rearmed_region") == 0) return force_pal ? "PAL" : "NTSC";
     if (strcmp(key, "pcsx_rearmed_rgb32_output") == 0) return "disabled";
     if (strcmp(key, "pcsx_rearmed_frameskip_type") == 0) return "disabled";
     if (strcmp(key, "pcsx_rearmed_drc") == 0) return "disabled";
@@ -158,6 +159,10 @@ static int16_t input_state_callback(unsigned port, unsigned device, unsigned ind
     if (port != 0 || device != RETRO_DEVICE_JOYPAD || index != 0) return 0;
     if (id == RETRO_DEVICE_ID_JOYPAD_MASK) return (int16_t) input_buttons;
     return (input_buttons & (1u << id)) != 0 ? 1 : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE void psx_probe_set_pal(unsigned enabled) {
+    force_pal = enabled != 0;
 }
 
 EMSCRIPTEN_KEEPALIVE int psx_probe_boot(void) {

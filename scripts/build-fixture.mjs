@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const fixtureRoot = resolve(repositoryRoot, "fixtures/homebrew");
-const outputRoot = resolve(repositoryRoot, "fixtures/generated/m0");
+const generatedRoot = resolve(repositoryRoot, "fixtures/generated/m0");
 const manifest = JSON.parse(await readFile(resolve(fixtureRoot, "TOOLCHAIN.json"), "utf8"));
 const sdkRoot = process.env.PSN00BSDK_ROOT;
 
@@ -49,41 +49,58 @@ if (compilerVersion !== manifest.compiler) {
     throw new Error(`Unexpected fixture compiler: ${compilerVersion}`);
 }
 
-run("cmake", [
-    "-S", fixtureRoot,
-    "-B", outputRoot,
-    "-G", "Unix Makefiles",
-    "-DCMAKE_BUILD_TYPE=Release",
-    `-DCMAKE_TOOLCHAIN_FILE=${toolchain}`,
-    `-DPSN00BSDK_TC=${sdk}`,
-]);
-run("cmake", ["--build", outputRoot, "--parallel"]);
-
 const fixedTimestamp = new Date("2000-01-01T00:00:00.000Z");
-const stagedSystem = resolve(outputRoot, "system.cnf");
-const stagedLicense = resolve(outputRoot, "LICENSE");
-const stagedProject = resolve(outputRoot, "iso.xml");
-const executable = resolve(outputRoot, "m0-fixture.exe");
-await Promise.all([
-    copyFile(resolve(fixtureRoot, "system.cnf"), stagedSystem),
-    copyFile(resolve(fixtureRoot, "LICENSE"), stagedLicense),
-    copyFile(resolve(fixtureRoot, "iso.xml"), stagedProject),
-]);
-await Promise.all([
-    utimes(stagedSystem, fixedTimestamp, fixedTimestamp),
-    utimes(stagedLicense, fixedTimestamp, fixedTimestamp),
-    utimes(stagedProject, fixedTimestamp, fixedTimestamp),
-    utimes(executable, fixedTimestamp, fixedTimestamp),
-]);
-run(imageBuilder, ["-y", stagedProject], outputRoot);
 
-const cuePath = resolve(outputRoot, "m0-fixture.cue");
-const binPath = resolve(outputRoot, "m0-fixture.bin");
-const [cue, image] = await Promise.all([readFile(cuePath), readFile(binPath)]);
+const buildFixture = async ({ outputRoot, pal, region }) => {
+    run("cmake", [
+        "-S", fixtureRoot,
+        "-B", outputRoot,
+        "-G", "Unix Makefiles",
+        "-DCMAKE_BUILD_TYPE=Release",
+        `-DCMAKE_TOOLCHAIN_FILE=${toolchain}`,
+        `-DPSN00BSDK_TC=${sdk}`,
+        `-DPSX_FIXTURE_PAL=${pal ? "ON" : "OFF"}`,
+    ]);
+    run("cmake", ["--build", outputRoot, "--parallel", "--clean-first"]);
+
+    const stagedSystem = resolve(outputRoot, "system.cnf");
+    const stagedLicense = resolve(outputRoot, "LICENSE");
+    const stagedProject = resolve(outputRoot, "iso.xml");
+    const executable = resolve(outputRoot, "m0-fixture.exe");
+    await Promise.all([
+        copyFile(resolve(fixtureRoot, "system.cnf"), stagedSystem),
+        copyFile(resolve(fixtureRoot, "LICENSE"), stagedLicense),
+        copyFile(resolve(fixtureRoot, "iso.xml"), stagedProject),
+    ]);
+    await Promise.all([
+        utimes(stagedSystem, fixedTimestamp, fixedTimestamp),
+        utimes(stagedLicense, fixedTimestamp, fixedTimestamp),
+        utimes(stagedProject, fixedTimestamp, fixedTimestamp),
+        utimes(executable, fixedTimestamp, fixedTimestamp),
+    ]);
+    run(imageBuilder, ["-y", stagedProject], outputRoot);
+
+    const cuePath = resolve(outputRoot, "m0-fixture.cue");
+    const binPath = resolve(outputRoot, "m0-fixture.bin");
+    const [cue, image] = await Promise.all([readFile(cuePath), readFile(binPath)]);
+    return {
+        region,
+        cueSha256: createHash("sha256").update(cue).digest("hex"),
+        binSha256: createHash("sha256").update(image).digest("hex"),
+        binBytes: image.byteLength,
+    };
+};
+
+const fixtures = [];
+for (const configuration of [
+    { outputRoot: generatedRoot, pal: false, region: "ntsc" },
+    { outputRoot: resolve(generatedRoot, "pal"), pal: true, region: "pal" },
+]) {
+    fixtures.push(await buildFixture(configuration));
+}
+
 console.log(JSON.stringify({
     toolchain: manifest.version,
     compiler: compilerVersion,
-    cueSha256: createHash("sha256").update(cue).digest("hex"),
-    binSha256: createHash("sha256").update(image).digest("hex"),
-    binBytes: image.byteLength,
+    fixtures,
 }));

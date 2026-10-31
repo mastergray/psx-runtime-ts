@@ -1,0 +1,164 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>PCSX endurance probe</title>
+<body>running<img hidden src="/wait"></body>
+<script>
+(async () => {
+    const reportProgress = (progress) => fetch("/progress", {
+        method: "POST",
+        body: JSON.stringify(progress),
+    }).catch(() => undefined);
+
+    const measurePageJsHeap = async () => {
+        try {
+            if (performance.memory !== undefined) {
+                return { method: "performance.memory", bytes: performance.memory.usedJSHeapSize };
+            }
+            return { method: "unavailable", bytes: null };
+        } catch (error) {
+            return {
+                method: "unavailable",
+                bytes: null,
+                error: error instanceof Error ? error.message : String(error),
+            };
+        }
+    };
+
+    const runCase = async ({ blobs, durationSeconds, hostCadenceHz, region, repeat }) => {
+        const pageJsHeapTrace = [{ elapsedSeconds: 0, ...await measurePageJsHeap() }];
+        return new Promise((resolve, reject) => {
+            const worker = new Worker("./pcsx-endurance-probe.worker.mjs", { type: "module" });
+            let memoryMeasurements = Promise.resolve();
+            const sampleMemory = (elapsedSeconds) => {
+                memoryMeasurements = memoryMeasurements.then(async () => {
+                    const measurement = await measurePageJsHeap();
+                    pageJsHeapTrace.push({ elapsedSeconds, ...measurement });
+                });
+                return memoryMeasurements;
+            };
+
+            worker.onmessage = async ({ data }) => {
+                if (data.type === "progress") {
+                    void sampleMemory(data.elapsedSeconds);
+                    await reportProgress(data);
+                    return;
+                }
+                if (data.type === "error") {
+                    worker.terminate();
+                    reject(new Error(data.message));
+                    return;
+                }
+                if (data.type !== "result") return;
+
+                await sampleMemory(durationSeconds);
+                const measuredBytes = pageJsHeapTrace
+                    .map((sample) => sample.bytes)
+                    .filter((bytes) => Number.isFinite(bytes));
+                const pageJsHeap = {
+                    method: pageJsHeapTrace.find((sample) => sample.method !== "unavailable")?.method
+                        ?? "unavailable",
+                    initialBytes: measuredBytes[0] ?? null,
+                    peakBytes: measuredBytes.length > 0 ? Math.max(...measuredBytes) : null,
+                    finalBytes: measuredBytes.at(-1) ?? null,
+                    trace: pageJsHeapTrace,
+                };
+                worker.postMessage({ type: "shutdown" });
+                worker.terminate();
+                resolve({ ...data.result, pageJsHeap });
+            };
+            worker.onerror = (event) => {
+                worker.terminate();
+                reject(new Error(event.message));
+            };
+            worker.postMessage({
+                cue: blobs.cue,
+                bin: blobs.bin,
+                durationSeconds,
+                hostCadenceHz,
+                region,
+                repeat,
+            });
+        });
+    };
+
+    try {
+        const parameters = new URL(location.href).searchParams;
+        const durationSeconds = Number(parameters.get("seconds") ?? 60);
+        const repeats = Number(parameters.get("repeats") ?? 2);
+        if (!Number.isInteger(durationSeconds) || durationSeconds < 1 || durationSeconds > 300) {
+            throw new Error("seconds must be an integer from 1 through 300");
+        }
+        if (!Number.isInteger(repeats) || repeats < 1 || repeats > 5) {
+            throw new Error("repeats must be an integer from 1 through 5");
+        }
+
+        const fixtureUrls = {
+            ntsc: {
+                cue: "/fixtures/generated/m0/m0-fixture.cue",
+                bin: "/fixtures/generated/m0/m0-fixture.bin",
+            },
+            pal: {
+                cue: "/fixtures/generated/m0/pal/m0-fixture.cue",
+                bin: "/fixtures/generated/m0/pal/m0-fixture.bin",
+            },
+        };
+        const fixtures = {};
+        for (const [region, urls] of Object.entries(fixtureUrls)) {
+            const [cueResponse, binResponse] = await Promise.all([fetch(urls.cue), fetch(urls.bin)]);
+            if (!cueResponse.ok || !binResponse.ok) throw new Error(`${region} fixture fetch failed`);
+            fixtures[region] = {
+                cue: await cueResponse.blob(),
+                bin: await binResponse.blob(),
+            };
+        }
+
+        const cases = [];
+        for (const region of ["ntsc", "pal"]) {
+            for (const hostCadenceHz of [60, 120]) {
+                for (let repeat = 1; repeat <= repeats; repeat++) {
+                    await reportProgress({ type: "case-start", region, hostCadenceHz, repeat });
+                    cases.push(await runCase({
+                        blobs: fixtures[region],
+                        durationSeconds,
+                        hostCadenceHz,
+                        region,
+                        repeat,
+                    }));
+                }
+            }
+        }
+
+        const deterministic = Object.fromEntries(["ntsc", "pal"].map((region) => {
+            const regionCases = cases.filter((result) => result.region === region);
+            const videoHashes = [...new Set(regionCases.map((result) => result.videoHash))];
+            const audioHashes = [...new Set(regionCases.map((result) => result.audioHash))];
+            return [region, {
+                videoHashes,
+                audioHashes,
+                repeatable: videoHashes.length === 1 && audioHashes.length === 1,
+            }];
+        }));
+        const ratesCorrect = cases.every((result) => result.region === "pal"
+            ? result.framesPerSecond >= 49 && result.framesPerSecond <= 51
+            : result.framesPerSecond >= 59 && result.framesPerSecond <= 61);
+        const result = {
+            ok: cases.every((entry) => entry.ok) && ratesCorrect
+                && Object.values(deterministic).every((entry) => entry.repeatable),
+            durationSeconds,
+            repeats,
+            crossOriginIsolated,
+            ratesCorrect,
+            deterministic,
+            cases,
+        };
+        await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+        document.body.textContent = JSON.stringify(result);
+        document.title = result.ok ? "PASS" : "FAIL";
+    } catch (error) {
+        const result = { ok: false, message: error instanceof Error ? error.stack ?? error.message : String(error) };
+        await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+        document.body.textContent = JSON.stringify(result);
+        document.title = "ERROR";
+    }
+})();
+</script>
