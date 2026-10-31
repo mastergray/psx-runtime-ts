@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { copyFile, readFile, utimes } from "node:fs/promises";
+import { copyFile, readFile, utimes, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -51,7 +51,80 @@ if (compilerVersion !== manifest.compiler) {
 
 const fixedTimestamp = new Date("2000-01-01T00:00:00.000Z");
 
-const buildFixture = async ({ dynamicGeometry, outputRoot, pal, variant }) => {
+const createCddaTone = () => {
+    const sampleRate = 44_100;
+    const channels = 2;
+    const durationSeconds = 6;
+    const frames = sampleRate * durationSeconds;
+    const dataBytes = frames * channels * 2;
+    const wave = Buffer.alloc(44 + dataBytes);
+    wave.write("RIFF", 0, "ascii");
+    wave.writeUInt32LE(36 + dataBytes, 4);
+    wave.write("WAVEfmt ", 8, "ascii");
+    wave.writeUInt32LE(16, 16);
+    wave.writeUInt16LE(1, 20);
+    wave.writeUInt16LE(channels, 22);
+    wave.writeUInt32LE(sampleRate, 24);
+    wave.writeUInt32LE(sampleRate * channels * 2, 28);
+    wave.writeUInt16LE(channels * 2, 32);
+    wave.writeUInt16LE(16, 34);
+    wave.write("data", 36, "ascii");
+    wave.writeUInt32LE(dataBytes, 40);
+
+    for (let frame = 0; frame < frames; frame++) {
+        const sample = (frame * 880) % sampleRate < sampleRate / 2 ? 12_000 : -12_000;
+        wave.writeInt16LE(sample, 44 + frame * 4);
+        wave.writeInt16LE(sample, 46 + frame * 4);
+    }
+    return wave;
+};
+
+const createXaTone = () => {
+    const sectorBytes = 2336;
+    const sectorCount = 900;
+    const sampleRate = 37_800;
+    const xa = Buffer.alloc(sectorBytes * sectorCount);
+
+    for (let sector = 0; sector < sectorCount; sector++) {
+        const sectorOffset = sector * sectorBytes;
+        const channel = sector % 8;
+        const submode = sector === sectorCount - 1 ? 0xe5 : 0x64;
+        for (const offset of [0, 4]) {
+            xa[sectorOffset + offset] = 1;
+            xa[sectorOffset + offset + 1] = channel;
+            xa[sectorOffset + offset + 2] = submode;
+            xa[sectorOffset + offset + 3] = 1;
+        }
+
+        if (channel !== 0) continue;
+        const channelSector = Math.floor(sector / 8);
+        for (let group = 0; group < 18; group++) {
+            const groupOffset = sectorOffset + 8 + group * 128;
+            for (let unit = 0; unit < 4; unit++) {
+                for (let sample = 0; sample < 28; sample++) {
+                    const sampleIndex = channelSector * 2016 + group * 112 + unit * 28 + sample;
+                    const nibble = (sampleIndex * 440) % sampleRate < sampleRate / 2 ? 5 : 11;
+                    const word = Math.floor(sample / 4);
+                    const position = sample % 4;
+                    const dataOffset = groupOffset + 16 + unit + word * 16 + position * 4;
+                    xa[dataOffset] = nibble | (nibble << 4);
+                }
+            }
+        }
+    }
+    return xa;
+};
+
+const buildFixture = async ({
+    cards = false,
+    dynamicGeometry = false,
+    media = false,
+    multiDisc = false,
+    outputRoot,
+    pal = false,
+    projectFile = "iso.xml",
+    variant,
+}) => {
     run("cmake", [
         "-S", fixtureRoot,
         "-B", outputRoot,
@@ -61,6 +134,9 @@ const buildFixture = async ({ dynamicGeometry, outputRoot, pal, variant }) => {
         `-DPSN00BSDK_TC=${sdk}`,
         `-DPSX_FIXTURE_PAL=${pal ? "ON" : "OFF"}`,
         `-DPSX_FIXTURE_DYNAMIC_GEOMETRY=${dynamicGeometry ? "ON" : "OFF"}`,
+        `-DPSX_FIXTURE_MEDIA=${media ? "ON" : "OFF"}`,
+        `-DPSX_FIXTURE_CARDS=${cards ? "ON" : "OFF"}`,
+        `-DPSX_FIXTURE_MULTIDISC=${multiDisc ? "ON" : "OFF"}`,
     ]);
     run("cmake", ["--build", outputRoot, "--parallel", "--clean-first"]);
 
@@ -71,13 +147,26 @@ const buildFixture = async ({ dynamicGeometry, outputRoot, pal, variant }) => {
     await Promise.all([
         copyFile(resolve(fixtureRoot, "system.cnf"), stagedSystem),
         copyFile(resolve(fixtureRoot, "LICENSE"), stagedLicense),
-        copyFile(resolve(fixtureRoot, "iso.xml"), stagedProject),
+        copyFile(resolve(fixtureRoot, projectFile), stagedProject),
     ]);
+    const generatedMedia = media
+        ? [
+            writeFile(resolve(outputRoot, "cdda-tone.wav"), createCddaTone()),
+            writeFile(resolve(outputRoot, "xa-tone.xa"), createXaTone()),
+        ]
+        : [];
+    await Promise.all(generatedMedia);
     await Promise.all([
         utimes(stagedSystem, fixedTimestamp, fixedTimestamp),
         utimes(stagedLicense, fixedTimestamp, fixedTimestamp),
         utimes(stagedProject, fixedTimestamp, fixedTimestamp),
         utimes(executable, fixedTimestamp, fixedTimestamp),
+        ...(media
+            ? [
+                utimes(resolve(outputRoot, "cdda-tone.wav"), fixedTimestamp, fixedTimestamp),
+                utimes(resolve(outputRoot, "xa-tone.xa"), fixedTimestamp, fixedTimestamp),
+            ]
+            : []),
     ]);
     run(imageBuilder, ["-y", stagedProject], outputRoot);
 
@@ -101,6 +190,29 @@ for (const configuration of [
         outputRoot: resolve(generatedRoot, "geometry"),
         pal: false,
         variant: "dynamic-geometry",
+    },
+    {
+        media: true,
+        outputRoot: resolve(generatedRoot, "media"),
+        projectFile: "iso-media.xml",
+        variant: "xa-cdda",
+    },
+    {
+        cards: true,
+        outputRoot: resolve(generatedRoot, "cards"),
+        variant: "memory-cards",
+    },
+    {
+        multiDisc: true,
+        outputRoot: resolve(generatedRoot, "multidisc/disc1"),
+        projectFile: "iso-multidisc-one.xml",
+        variant: "multidisc-one",
+    },
+    {
+        multiDisc: true,
+        outputRoot: resolve(generatedRoot, "multidisc/disc2"),
+        projectFile: "iso-multidisc-two.xml",
+        variant: "multidisc-two",
     },
 ]) {
     fixtures.push(await buildFixture(configuration));

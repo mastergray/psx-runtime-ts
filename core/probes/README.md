@@ -6,9 +6,9 @@ generated source trees and binaries are ignored.
 `candidates.json` and `toolchain.json` are probe pins, not production pins.
 Build both candidates at those exact commits with the commands recorded in the
 candidate manifest. Link the probe shim with the flags in the toolchain
-manifest. The core-specific initial heaps used by the current comparison are
-64 MiB for PCSX-ReARMed and 128 MiB for Beetle PSX; both have a provisional
-512 MiB maximum pending P11.
+manifest. The comparison used a 64 MiB initial heap for PCSX-ReARMed and a
+128 MiB initial heap for Beetle PSX. P11 validated the selected core with a
+512 MiB configured maximum and no growth beyond its 64 MiB initial heap.
 
 Beetle's static archive also needs the libretro-common sources used by its
 dynamic target, including filesystem, string, compatibility, encoding,
@@ -23,6 +23,11 @@ npm run probe:pcsx
 npm run probe:beetle
 npm run probe:endurance
 npm run probe:geometry
+npm run probe:media
+npm run probe:cards
+npm run probe:state-disc
+npm run probe:memory
+npm run probe:bios
 ```
 
 The browser runner serves only the explicit probe files and generated fixture,
@@ -39,3 +44,8 @@ headers so the endurance result also proves the non-isolated deployment mode.
 against the dynamic-width fixture. It verifies callback and environment
 geometry, byte pitch, deterministic frame hashes, explicit null callbacks and
 retention of the prior frame state.
+
+The BIOS probe requires `PSX_BIOS_PATH` to name a private user-supplied input.
+It records only a recognized region, a first-frame hash, timings and a
+sanitized boot log. The remaining focused probes cover XA/CD-DA transport, two
+memory-card slots, state/disc restoration and bounded near-maximum-disc memory.

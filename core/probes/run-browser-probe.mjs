@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { chromium } from "playwright";
@@ -16,14 +16,38 @@ const probes = {
     beetle: "/core/probes/pcsx-boot-probe.html?core=beetle",
     endurance: `/core/probes/pcsx-endurance-probe.html?seconds=${enduranceSeconds}&repeats=${enduranceRepeats}`,
     geometry: "/core/probes/pcsx-geometry-probe.html",
+    media: "/core/probes/pcsx-media-probe.html",
+    cards: "/core/probes/pcsx-cards-probe.html",
+    stateDisc: "/core/probes/pcsx-state-disc-probe.html",
+    memory: "/core/probes/pcsx-memory-probe.html",
+    bios: "/core/probes/pcsx-bios-probe.html",
 };
 
 if (probe === undefined || !(probe in probes)) {
-    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry>");
+    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry|media|cards|stateDisc|memory|bios>");
     process.exit(2);
 }
 
 const root = resolve(import.meta.dirname, "../..");
+let privateBiosPath;
+if (probe === "bios") {
+    if (process.env.PSX_BIOS_PATH === undefined || process.env.PSX_BIOS_PATH.length === 0) {
+        console.error("P3 requires PSX_BIOS_PATH to identify the private BIOS input");
+        process.exit(3);
+    }
+    privateBiosPath = resolve(process.env.PSX_BIOS_PATH);
+    let biosStat;
+    try {
+        biosStat = await stat(privateBiosPath);
+    } catch {
+        console.error("PSX_BIOS_PATH does not identify a readable file");
+        process.exit(3);
+    }
+    if (!biosStat.isFile()) {
+        console.error("PSX_BIOS_PATH does not identify a readable file");
+        process.exit(3);
+    }
+}
 
 const readProcessTreeRss = async (rootPid) => {
     const visited = new Set();
@@ -58,6 +82,16 @@ const routes = new Map([
     ["/core/probes/pcsx-endurance-probe.worker.mjs", ["core/probes/pcsx-endurance-probe.worker.mjs", "text/javascript; charset=utf-8"]],
     ["/core/probes/pcsx-geometry-probe.html", ["core/probes/pcsx-geometry-probe.html", "text/html; charset=utf-8"]],
     ["/core/probes/pcsx-geometry-probe.worker.mjs", ["core/probes/pcsx-geometry-probe.worker.mjs", "text/javascript; charset=utf-8"]],
+    ["/core/probes/pcsx-media-probe.html", ["core/probes/pcsx-media-probe.html", "text/html; charset=utf-8"]],
+    ["/core/probes/pcsx-media-probe.worker.mjs", ["core/probes/pcsx-media-probe.worker.mjs", "text/javascript; charset=utf-8"]],
+    ["/core/probes/pcsx-cards-probe.html", ["core/probes/pcsx-cards-probe.html", "text/html; charset=utf-8"]],
+    ["/core/probes/pcsx-cards-probe.worker.mjs", ["core/probes/pcsx-cards-probe.worker.mjs", "text/javascript; charset=utf-8"]],
+    ["/core/probes/pcsx-state-disc-probe.html", ["core/probes/pcsx-state-disc-probe.html", "text/html; charset=utf-8"]],
+    ["/core/probes/pcsx-state-disc-probe.worker.mjs", ["core/probes/pcsx-state-disc-probe.worker.mjs", "text/javascript; charset=utf-8"]],
+    ["/core/probes/pcsx-memory-probe.html", ["core/probes/pcsx-memory-probe.html", "text/html; charset=utf-8"]],
+    ["/core/probes/pcsx-memory-probe.worker.mjs", ["core/probes/pcsx-memory-probe.worker.mjs", "text/javascript; charset=utf-8"]],
+    ["/core/probes/pcsx-bios-probe.html", ["core/probes/pcsx-bios-probe.html", "text/html; charset=utf-8"]],
+    ["/core/probes/pcsx-bios-probe.worker.mjs", ["core/probes/pcsx-bios-probe.worker.mjs", "text/javascript; charset=utf-8"]],
     ["/dist/probes/workerfs-module.mjs", ["dist/probes/workerfs-module.mjs", "text/javascript; charset=utf-8"]],
     ["/dist/probes/workerfs-module.wasm", ["dist/probes/workerfs-module.wasm", "application/wasm"]],
     ["/dist/probes/pcsx-boot.mjs", ["dist/probes/pcsx-boot.mjs", "text/javascript; charset=utf-8"]],
@@ -70,6 +104,14 @@ const routes = new Map([
     ["/fixtures/generated/m0/pal/m0-fixture.bin", ["fixtures/generated/m0/pal/m0-fixture.bin", "application/octet-stream"]],
     ["/fixtures/generated/m0/geometry/m0-fixture.cue", ["fixtures/generated/m0/geometry/m0-fixture.cue", "application/octet-stream"]],
     ["/fixtures/generated/m0/geometry/m0-fixture.bin", ["fixtures/generated/m0/geometry/m0-fixture.bin", "application/octet-stream"]],
+    ["/fixtures/generated/m0/media/m0-fixture.cue", ["fixtures/generated/m0/media/m0-fixture.cue", "application/octet-stream"]],
+    ["/fixtures/generated/m0/media/m0-fixture.bin", ["fixtures/generated/m0/media/m0-fixture.bin", "application/octet-stream"]],
+    ["/fixtures/generated/m0/cards/m0-fixture.cue", ["fixtures/generated/m0/cards/m0-fixture.cue", "application/octet-stream"]],
+    ["/fixtures/generated/m0/cards/m0-fixture.bin", ["fixtures/generated/m0/cards/m0-fixture.bin", "application/octet-stream"]],
+    ["/fixtures/generated/m0/multidisc/disc1/m0-fixture.cue", ["fixtures/generated/m0/multidisc/disc1/m0-fixture.cue", "application/octet-stream"]],
+    ["/fixtures/generated/m0/multidisc/disc1/m0-fixture.bin", ["fixtures/generated/m0/multidisc/disc1/m0-fixture.bin", "application/octet-stream"]],
+    ["/fixtures/generated/m0/multidisc/disc2/m0-fixture.cue", ["fixtures/generated/m0/multidisc/disc2/m0-fixture.cue", "application/octet-stream"]],
+    ["/fixtures/generated/m0/multidisc/disc2/m0-fixture.bin", ["fixtures/generated/m0/multidisc/disc2/m0-fixture.bin", "application/octet-stream"]],
 ]);
 
 let resolveResult;
@@ -84,6 +126,19 @@ const server = createServer((request, response) => {
     if (url.pathname === "/wait") {
         response.writeHead(204);
         response.end();
+        return;
+    }
+    if (url.pathname === "/private/bios" && probe === "bios" && privateBiosPath !== undefined) {
+        response.writeHead(200, {
+            "content-type": "application/octet-stream",
+            "cache-control": "no-store",
+        });
+        const stream = createReadStream(privateBiosPath);
+        stream.on("error", () => {
+            if (!response.headersSent) response.writeHead(500);
+            response.end();
+        });
+        stream.pipe(response);
         return;
     }
     if (url.pathname === "/result" && request.method === "POST") {
@@ -105,8 +160,9 @@ const server = createServer((request, response) => {
     if (url.pathname === "/progress" && request.method === "POST") {
         const chunks = [];
         request.on("data", (chunk) => chunks.push(chunk));
-        request.on("end", () => {
+        request.on("end", async () => {
             console.error(`progress ${Buffer.concat(chunks).toString("utf8")}`);
+            if (probe === "memory") await sampleBrowserProcessMemory();
             response.writeHead(204);
             response.end();
         });
@@ -152,7 +208,7 @@ const sampleBrowserProcessMemory = () => {
     return memorySampling;
 };
 await sampleBrowserProcessMemory();
-const memoryTimer = probe === "endurance"
+const memoryTimer = probe === "endurance" || probe === "memory"
     ? setInterval(() => void sampleBrowserProcessMemory(), 1000)
     : undefined;
 let resultTimeout;
@@ -172,20 +228,30 @@ try {
     clearTimeout(resultTimeout);
     await sampleBrowserProcessMemory();
     const browserMemoryBytes = browserProcessMemoryTrace.map((sample) => sample.bytes);
-    const output = probe === "endurance"
+    const includeBrowserMemory = probe === "endurance" || probe === "memory";
+    const browserProcessMemory = {
+        method: "linux-process-tree-vmrss",
+        initialBytes: browserMemoryBytes[0],
+        peakBytes: Math.max(...browserMemoryBytes),
+        finalBytes: browserMemoryBytes.at(-1),
+        baselineToPeakBytes: Math.max(...browserMemoryBytes) - browserMemoryBytes[0],
+        trace: browserProcessMemoryTrace,
+    };
+    const browserMemoryPass = probe !== "memory"
+        || browserProcessMemory.baselineToPeakBytes < result.logicalDiscBytes / 2;
+    const output = includeBrowserMemory
         ? {
             ...result,
+            ok: result.ok === true && browserMemoryPass,
             browserProcessMemory: {
-                method: "linux-process-tree-vmrss",
-                initialBytes: browserMemoryBytes[0],
-                peakBytes: Math.max(...browserMemoryBytes),
-                finalBytes: browserMemoryBytes.at(-1),
-                trace: browserProcessMemoryTrace,
+                ...browserProcessMemory,
+                maximumBaselineToPeakBytes: probe === "memory" ? result.logicalDiscBytes / 2 : undefined,
+                pass: browserMemoryPass,
             },
         }
         : result;
     console.log(JSON.stringify(output));
-    if (result.ok !== true) process.exitCode = 1;
+    if (output.ok !== true) process.exitCode = 1;
 } finally {
     clearTimeout(resultTimeout);
     clearInterval(memoryTimer);

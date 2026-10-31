@@ -1,0 +1,91 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>PCSX near-maximum-disc memory probe</title>
+<body>running<img hidden src="/wait"></body>
+<script>
+(async () => {
+    const sectorBytes = 2352;
+    const sectorCount = 360000;
+    const logicalDiscBytes = sectorBytes * sectorCount;
+    const chunkBytes = 1024 * 1024;
+
+    const measurePageJsHeap = () => {
+        if (performance.memory === undefined) return null;
+        return performance.memory.usedJSHeapSize;
+    };
+    const pageJsHeapTrace = [];
+    const reportStage = async (stage) => {
+        pageJsHeapTrace.push({ stage, bytes: measurePageJsHeap() });
+        await fetch("/progress", {
+            method: "POST",
+            body: JSON.stringify({ stage }),
+        });
+    };
+
+    try {
+        await reportStage("before-fetch");
+        const [cueResponse, binResponse] = await Promise.all([
+            fetch("/fixtures/generated/m0/m0-fixture.cue"),
+            fetch("/fixtures/generated/m0/m0-fixture.bin"),
+        ]);
+        if (!cueResponse.ok || !binResponse.ok) throw new Error("Memory probe fixture fetch failed");
+        const [cue, fixtureBin] = await Promise.all([cueResponse.blob(), binResponse.blob()]);
+        if (fixtureBin.size >= logicalDiscBytes) throw new Error("Fixture exceeds target disc size");
+        await reportStage("after-fetch");
+
+        const zeroChunk = new Blob([new Uint8Array(chunkBytes)]);
+        const paddingBytes = logicalDiscBytes - fixtureBin.size;
+        const fullChunks = Math.floor(paddingBytes / chunkBytes);
+        const finalChunkBytes = paddingBytes % chunkBytes;
+        const parts = [fixtureBin, ...Array.from({ length: fullChunks }, () => zeroChunk)];
+        if (finalChunkBytes > 0) parts.push(zeroChunk.slice(0, finalChunkBytes));
+        const nearMaximumBin = new Blob(parts);
+        if (nearMaximumBin.size !== logicalDiscBytes) throw new Error("Synthetic disc size mismatch");
+        await reportStage("after-blob");
+
+        const workerResult = await new Promise((resolve, reject) => {
+            const worker = new Worker("./pcsx-memory-probe.worker.mjs", { type: "module" });
+            worker.onmessage = ({ data }) => {
+                if (data.type === "stage") {
+                    void reportStage(data.stage);
+                    return;
+                }
+                worker.terminate();
+                if (data.type === "error") reject(new Error(data.message));
+                else resolve(data.result);
+            };
+            worker.onerror = (event) => {
+                worker.terminate();
+                reject(new Error(event.message));
+            };
+            worker.postMessage({ cue, bin: nearMaximumBin, logicalDiscBytes, sectorBytes, sectorCount });
+        });
+        await reportStage("after-worker");
+
+        const measuredPageBytes = pageJsHeapTrace
+            .map((sample) => sample.bytes)
+            .filter((bytes) => Number.isFinite(bytes));
+        const result = {
+            ...workerResult,
+            pageJsHeap: {
+                method: measuredPageBytes.length > 0 ? "performance.memory" : "unavailable",
+                initialBytes: measuredPageBytes[0] ?? null,
+                peakBytes: measuredPageBytes.length > 0 ? Math.max(...measuredPageBytes) : null,
+                finalBytes: measuredPageBytes.at(-1) ?? null,
+                trace: pageJsHeapTrace,
+            },
+        };
+        await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+        document.body.textContent = JSON.stringify(result);
+        document.title = result.ok ? "PASS" : "FAIL";
+    } catch (error) {
+        const result = {
+            ok: false,
+            message: error instanceof Error ? error.stack ?? error.message : String(error),
+        };
+        await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+        document.body.textContent = JSON.stringify(result);
+        document.title = "ERROR";
+    }
+})();
+</script>

@@ -21,11 +21,10 @@ product requirement, not an optimization: it permits synchronous, random
 access to user-supplied `Blob`s through Emscripten `WORKERFS` without copying
 an entire CD image into the Wasm heap or blocking the page's main thread.
 
-The exact emulator source commit and Emscripten version are intentionally not
-invented in this document. Milestone M0 must build and measure the candidates,
-then commit the winning identities to `core/SOURCE.json` and
-`core/EMSDK_VERSION`. PCSX-ReARMed is the primary candidate; Beetle PSX is the
-accuracy fallback. No production work may silently track either upstream.
+Milestone M0 selected PCSX-ReARMed and Emscripten 6.0.2 after completing the
+P1–P12 comparison. Their exact production identities are committed in
+`core/SOURCE.json` and `core/EMSDK_VERSION`; the full measurements remain in
+`docs/probes/m0-results.json`. No production work may silently track upstream.
 
 ---
 

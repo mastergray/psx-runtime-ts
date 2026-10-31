@@ -1,0 +1,45 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>PCSX real-BIOS probe</title>
+<body>running<img hidden src="/wait"></body>
+<script>
+(async () => {
+    try {
+        const [biosResponse, cueResponse, binResponse] = await Promise.all([
+            fetch("/private/bios"),
+            fetch("/fixtures/generated/m0/m0-fixture.cue"),
+            fetch("/fixtures/generated/m0/m0-fixture.bin"),
+        ]);
+        if (!biosResponse.ok) throw new Error("Private BIOS input is unavailable");
+        if (!cueResponse.ok || !binResponse.ok) throw new Error("BIOS probe fixture fetch failed");
+        const [bios, cue, bin] = await Promise.all([
+            biosResponse.blob(),
+            cueResponse.blob(),
+            binResponse.blob(),
+        ]);
+        const result = await new Promise((resolve, reject) => {
+            const worker = new Worker("./pcsx-bios-probe.worker.mjs", { type: "module" });
+            worker.onmessage = ({ data }) => {
+                worker.terminate();
+                resolve(data);
+            };
+            worker.onerror = (event) => {
+                worker.terminate();
+                reject(new Error(event.message));
+            };
+            worker.postMessage({ bios, cue, bin });
+        });
+        await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+        document.body.textContent = JSON.stringify(result);
+        document.title = result.ok ? "PASS" : "FAIL";
+    } catch (error) {
+        const result = {
+            ok: false,
+            message: error instanceof Error ? error.stack ?? error.message : String(error),
+        };
+        await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+        document.body.textContent = JSON.stringify(result);
+        document.title = "ERROR";
+    }
+})();
+</script>

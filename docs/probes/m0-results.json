@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "recordedAt": "2026-10-30",
-  "status": "in-progress",
+  "status": "complete",
   "referenceMachine": {
     "os": "Linux 5.17.5-76051705-generic x86_64",
     "cpu": "11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz",
@@ -11,52 +11,84 @@
   },
   "toolchain": {
     "emsdkVersion": "6.0.2",
+    "emsdkCommit": "d7b4130688bfa348392b921ab04015aa15c4f154",
     "emccCommit": "7a2d97d627ff4945eae28847ce0387ac52b92c09",
     "nodeVersion": "22.22.2"
   },
+  "sourceVerification": {
+    "candidateCommitsAndTreesMatch": true,
+    "recursiveSubmodulesMatch": true,
+    "trackedCandidateWorktreesClean": true,
+    "requiredLicenseFilesPresent": true,
+    "pass": true
+  },
   "fixture": {
     "toolchain": "PSn00bSDK 0.19 / mipsel-none-elf-gcc 11.1.0",
-    "cueSha256": "4f9fc035621fc4f09b7051b3d98839668b3516939b5008fff005a06a479423a7",
-    "binSha256": "c010e025bcd91fbde766f3f6ee52a248c2e7e6d567ebc9d572b5a873a4d6af85",
-    "binBytes": 1288896,
     "cleanBuildsCompared": 2,
     "byteIdentical": true,
-    "palVariant": {
-      "cueSha256": "4f9fc035621fc4f09b7051b3d98839668b3516939b5008fff005a06a479423a7",
-      "binSha256": "5f37f98283892b8251ed08b9fcc9d54c3e3c3fe3bdbc81a28628aacc00e9e90a",
-      "binBytes": 1288896,
-      "cleanBuildsCompared": 2,
-      "byteIdentical": true
-    },
-    "dynamicGeometryVariant": {
-      "cueSha256": "4f9fc035621fc4f09b7051b3d98839668b3516939b5008fff005a06a479423a7",
-      "binSha256": "10f600873136ce33793b7742de7d3dc680a02d8794913624698a5c01437bb25c",
-      "binBytes": 1288896,
-      "cleanBuildsCompared": 2,
-      "byteIdentical": true
+    "variants": {
+      "ntsc": {
+        "cueSha256": "4f9fc035621fc4f09b7051b3d98839668b3516939b5008fff005a06a479423a7",
+        "binSha256": "c010e025bcd91fbde766f3f6ee52a248c2e7e6d567ebc9d572b5a873a4d6af85",
+        "binBytes": 1288896
+      },
+      "pal": {
+        "cueSha256": "4f9fc035621fc4f09b7051b3d98839668b3516939b5008fff005a06a479423a7",
+        "binSha256": "5f37f98283892b8251ed08b9fcc9d54c3e3c3fe3bdbc81a28628aacc00e9e90a",
+        "binBytes": 1288896
+      },
+      "dynamicGeometry": {
+        "cueSha256": "4f9fc035621fc4f09b7051b3d98839668b3516939b5008fff005a06a479423a7",
+        "binSha256": "10f600873136ce33793b7742de7d3dc680a02d8794913624698a5c01437bb25c",
+        "binBytes": 1288896
+      },
+      "xaCdda": {
+        "cueSha256": "b87135a0db7c42c261131e37b20b8fd99ba1da641be2dcf9f7803e1b5d320ed5",
+        "binSha256": "625a068855bec8902ffb98ef85f52d591ec1d67d65f4f1a499eb19ed1d762181",
+        "binBytes": 4826304
+      },
+      "memoryCards": {
+        "cueSha256": "4f9fc035621fc4f09b7051b3d98839668b3516939b5008fff005a06a479423a7",
+        "binSha256": "361491a46a87eb665ff17099ab36ace68521f1225c3026dca00d5c404d2f0fde",
+        "binBytes": 1291248
+      },
+      "multidiscOne": {
+        "cueSha256": "4f9fc035621fc4f09b7051b3d98839668b3516939b5008fff005a06a479423a7",
+        "binSha256": "b128264690eb4f27d70014c857d369aa9a7c7ef11861e210729a57ff33bdecf2",
+        "binBytes": 1295952
+      },
+      "multidiscTwo": {
+        "cueSha256": "4f9fc035621fc4f09b7051b3d98839668b3516939b5008fff005a06a479423a7",
+        "binSha256": "56c201c09d19b71fd91c3602d74703e54835c414a379b57eb3ac76e7ad641d00",
+        "binBytes": 1295952
+      }
     }
   },
-  "workerfs": {
-    "logicalBlobBytes": 268435456,
-    "readOffsets": [0, 134217851, 268431360],
-    "readLengths": [4096, 8192, 4096],
-    "checksums": [1751014853, 35880389, 1751014853],
-    "elapsedMs": 4.4,
-    "correct": true,
-    "wasmSha256": "601781acf58d7584556ee0cc7cb7878aee6804496aabdcd854d59b64924f5009"
+  "builds": {
+    "forbiddenRuntimeFeaturesAbsent": ["dynarec", "native-assembly", "pthreads", "Asyncify", "hardware-rendering"],
+    "pcsx-rearmed": {
+      "staticArchiveBytes": 5977552,
+      "probeJavaScriptBytes": 68321,
+      "probeWasmBytes": 726849,
+      "probeWasmSha256": "5bb9a5494f0a21b2509b41f74031d87f5e9680aec9ad31aa66cfaf8dbb259482"
+    },
+    "beetle-psx": {
+      "staticArchiveBytes": 23456710,
+      "probeJavaScriptBytes": 69036,
+      "probeWasmBytes": 3818603,
+      "probeWasmSha256": "3bb68131a7b7a95e3ffcb2961e33acdebbbcbc49b80552d7fcac97a1f19b9a19",
+      "linkRecipeRepairs": ["libretro-common-frontend-objects", "mc-async-thread-support"]
+    },
+    "pass": true
   },
   "candidates": {
     "pcsx-rearmed": {
       "commit": "9f8b028cd66200bb9a18a878a5e73925a629b0a7",
-      "staticArchiveBytes": 5977552,
-      "probeJavaScriptBytes": 64446,
-      "probeWasmBytes": 711115,
-      "probeWasmSha256": "4ac973c95ad3c2133ea39586bca10eeaf590e4b4c29845bb4e1cf5f94f22f7de",
-      "initialWasmMemoryBytes": 67108864,
-      "loadGameMs": 22.8,
-      "firstVideoMs": 35.5,
+      "tree": "142b22ef9183be3a0ee515b6a202013aa7a4eab4",
+      "loadGameMs": 30.8,
+      "firstVideoMs": 45.8,
       "framesToFirstVideo": 1,
-      "scriptedRunMs": 2064.8,
+      "scriptedRunMs": 2739.6,
       "videoFrames": 424,
       "video": {
         "width": 320,
@@ -72,26 +104,20 @@
         "hash": 2454470225,
         "peak": 12096
       },
-      "input": {
-        "neutralCenterPixel": 8456,
-        "pressedCenterPixel": 9096,
-        "changedAtSameAnimationPhase": true
-      },
+      "inputChangedAtSameAnimationPhase": true,
       "reportedFps": 60,
-      "startupEnvironmentCommandsFirstOccurrence": [27, 35, 52, 16, 69, 59, 15, 9, 6, 3, 57, 58, 23, 65587, 8, 11, 10, 31, 65572, 62],
-      "runtimeEnvironmentCommandCounts": { "17": 424, "37": 1, "63": 1, "65576": 425 }
+      "initialWasmMemoryBytes": 67108864,
+      "startupEnvironmentCommandsFirstOccurrence": [27, 35, 52, 16, 69, 59, 15, 9, 6, 3, 57, 58, 23, 65587, 8, 11, 31, 65572, 62],
+      "runtimeEnvironmentCommandCounts": { "17": 424, "37": 1, "63": 1, "65576": 425 },
+      "pass": true
     },
     "beetle-psx": {
       "commit": "53246dc2d00f3c00cc56baa1061902da7a6651e4",
-      "staticArchiveBytes": 23456710,
-      "probeJavaScriptBytes": 66579,
-      "probeWasmBytes": 3771994,
-      "probeWasmSha256": "fded874415a984c08f68e00af38740191a434faa67920a5149370c107422ccb3",
-      "initialWasmMemoryBytes": 134217728,
-      "loadGameMs": 30.9,
-      "firstVideoMs": 48.6,
+      "tree": "9640c11779431f21d5153d2b3a042cf9aaf4a9e5",
+      "loadGameMs": 46.9,
+      "firstVideoMs": 71.3,
       "framesToFirstVideo": 1,
-      "scriptedRunMs": 2460.6,
+      "scriptedRunMs": 3513,
       "videoFrames": 424,
       "video": {
         "width": 700,
@@ -107,23 +133,73 @@
         "hash": 3076475766,
         "peak": 9702
       },
-      "input": {
-        "neutralCenterPixel": 9490632,
-        "pressedCenterPixel": 10016976,
-        "changedAtSameAnimationPhase": true
-      },
+      "inputChangedAtSameAnimationPhase": true,
       "reportedFps": 59.94,
+      "initialWasmMemoryBytes": 134217728,
       "startupEnvironmentCommandsFirstOccurrence": [52, 16, 65581, 65582, 35, 27, 9, 31, 57, 58, 28, 44, 59, 65587, 8, 11, 23, 10, 15, 55, 65572],
-      "runtimeEnvironmentCommandCounts": { "17": 424 }
+      "runtimeEnvironmentCommandCounts": { "17": 424 },
+      "pass": true
     }
+  },
+  "realBiosBoot": {
+    "input": "private-user-supplied",
+    "recognizedRegion": "EU",
+    "realBiosLoaded": true,
+    "loadGameMs": 93.3,
+    "firstVideoMs": 103.3,
+    "framesToFirstVideo": 1,
+    "firstFrameHash": 3135512005,
+    "videoFrames": 282,
+    "audioFrames": 270416,
+    "sanitizedBootLog": ["recognized EU BIOS", "real BIOS loaded"],
+    "pass": true
+  },
+  "workerfs": {
+    "logicalBlobBytes": 268435456,
+    "readOffsets": [0, 134217851, 268431360],
+    "readLengths": [4096, 8192, 4096],
+    "checksums": [1751014853, 35880389, 1751014853],
+    "elapsedMs": 4.6,
+    "correct": true,
+    "wasmSha256": "601781acf58d7584556ee0cc7cb7878aee6804496aabdcd854d59b64924f5009"
+  },
+  "geometry": {
+    "core": "pcsx-rearmed",
+    "framesPerCase": 600,
+    "formats": {
+      "rgb565": {
+        "libretroValue": 2,
+        "widths": [320, 256],
+        "height": 240,
+        "pitches": { "320": 640, "256": 512 },
+        "videoHash": 2727152085
+      },
+      "xrgb8888": {
+        "libretroValue": 1,
+        "widths": [320, 256],
+        "height": 240,
+        "pitches": { "320": 1280, "256": 1024 },
+        "videoHash": 88889545
+      }
+    },
+    "runtimeGeometry": {
+      "environmentCommand": 37,
+      "baseWidthSequence": [320, 256, 320, 256, 320],
+      "baseHeight": 240,
+      "maxWidth": 1024,
+      "maxHeight": 512
+    },
+    "nullFrames": {
+      "callbacks": 600,
+      "videoFrames": 300,
+      "nullVideoFrames": 300,
+      "retainedFrameState": true,
+      "videoHash": 4043555357
+    },
+    "pass": true
   },
   "endurance": {
     "core": "pcsx-rearmed",
-    "probeArtifact": {
-      "javaScriptBytes": 63641,
-      "wasmBytes": 716454,
-      "wasmSha256": "5818a493d4f1b6e3cebfaf442a0464867350a4f6aaf32e20d8f6a257c95e59f2"
-    },
     "durationSecondsPerCase": 60,
     "warmupSecondsPerCase": 2,
     "repeats": 2,
@@ -147,14 +223,14 @@
       }
     },
     "cases": [
-      { "region": "ntsc", "hostCadenceHz": 60, "repeat": 1, "elapsedMs": 60006.0, "videoFrames": 3600, "audioFrames": 2646000, "emulationBacklogEvents": 23, "hostTickOverruns": 23, "coreUtilization": 0.4745 },
-      { "region": "ntsc", "hostCadenceHz": 60, "repeat": 2, "elapsedMs": 60007.9, "videoFrames": 3600, "audioFrames": 2646000, "emulationBacklogEvents": 12, "hostTickOverruns": 12, "coreUtilization": 0.4807 },
-      { "region": "ntsc", "hostCadenceHz": 120, "repeat": 1, "elapsedMs": 60000.4, "videoFrames": 3600, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 741, "coreUtilization": 0.3948 },
-      { "region": "ntsc", "hostCadenceHz": 120, "repeat": 2, "elapsedMs": 60000.5, "videoFrames": 3600, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 730, "coreUtilization": 0.4161 },
-      { "region": "pal", "hostCadenceHz": 60, "repeat": 1, "elapsedMs": 60000.0, "videoFrames": 3000, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 0, "coreUtilization": 0.3679 },
-      { "region": "pal", "hostCadenceHz": 60, "repeat": 2, "elapsedMs": 59999.3, "videoFrames": 3000, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 0, "coreUtilization": 0.3583 },
-      { "region": "pal", "hostCadenceHz": 120, "repeat": 1, "elapsedMs": 59999.7, "videoFrames": 3000, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 936, "coreUtilization": 0.3808 },
-      { "region": "pal", "hostCadenceHz": 120, "repeat": 2, "elapsedMs": 59999.8, "videoFrames": 3000, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 450, "coreUtilization": 0.3436 }
+      { "region": "ntsc", "hostCadenceHz": 60, "repeat": 1, "elapsedMs": 60006.9, "videoFrames": 3600, "audioFrames": 2646000, "emulationBacklogEvents": 6, "hostTickOverruns": 6, "coreUtilization": 0.5261 },
+      { "region": "ntsc", "hostCadenceHz": 60, "repeat": 2, "elapsedMs": 60007.5, "videoFrames": 3600, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 0, "coreUtilization": 0.4405 },
+      { "region": "ntsc", "hostCadenceHz": 120, "repeat": 1, "elapsedMs": 60001.8, "videoFrames": 3600, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 554, "coreUtilization": 0.4037 },
+      { "region": "ntsc", "hostCadenceHz": 120, "repeat": 2, "elapsedMs": 60001.6, "videoFrames": 3600, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 215, "coreUtilization": 0.3765 },
+      { "region": "pal", "hostCadenceHz": 60, "repeat": 1, "elapsedMs": 59999.4, "videoFrames": 3000, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 2, "coreUtilization": 0.3671 },
+      { "region": "pal", "hostCadenceHz": 60, "repeat": 2, "elapsedMs": 59999.5, "videoFrames": 3000, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 0, "coreUtilization": 0.3606 },
+      { "region": "pal", "hostCadenceHz": 120, "repeat": 1, "elapsedMs": 59999.8, "videoFrames": 3000, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 356, "coreUtilization": 0.364 },
+      { "region": "pal", "hostCadenceHz": 120, "repeat": 2, "elapsedMs": 59999.3, "videoFrames": 3000, "audioFrames": 2646000, "emulationBacklogEvents": 0, "hostTickOverruns": 413, "coreUtilization": 0.365 }
     ],
     "aggregate": {
       "missingVideoCallbacks": 0,
@@ -162,9 +238,9 @@
       "audioDriftFrames": 0,
       "simulatedAudioUnderrunFrames": 0,
       "keptRealtime": true,
-      "maximumEmulationBacklogEventsPerCase": 23,
-      "maximumCoreRunMs": 27.9,
-      "maximumCoreUtilization": 0.4807
+      "maximumEmulationBacklogEventsPerCase": 6,
+      "maximumCoreRunMs": 17.6,
+      "maximumCoreUtilization": 0.5261
     },
     "memory": {
       "wasm": {
@@ -176,69 +252,111 @@
       },
       "browserProcessTree": {
         "method": "linux-process-tree-vmrss",
-        "initialBytes": 407826432,
-        "peakBytes": 706310144,
-        "finalBytes": 694677504,
-        "baselineToPeakBytes": 298483712,
-        "samples": 488
+        "initialBytes": 406540288,
+        "peakBytes": 705617920,
+        "finalBytes": 691146752,
+        "baselineToPeakBytes": 299077632,
+        "samples": 487
       }
-    },
-    "pass": true,
-    "notes": [
-      "Host-tick overruns count completion past an 8.33 or 16.67 ms host interval; they are not dropped emulated frames.",
-      "Transient emulation backlog was bounded and recovered within each run; every case ended with exact frame and audio counts, zero missing or null video callbacks, and zero simulated audio underruns.",
-      "The browser measurement sums Linux VmRSS for the dedicated headless Chrome process tree; it includes browser overhead as well as the page, Worker and Wasm allocation.",
-      "The acceptance matrix ran without COOP/COEP headers and reported crossOriginIsolated=false."
-    ]
-  },
-  "geometry": {
-    "core": "pcsx-rearmed",
-    "probeArtifact": {
-      "javaScriptBytes": 65480,
-      "wasmBytes": 717313,
-      "wasmSha256": "57e77b9769ebc091bb5c574c4232e4a66d043aff9225d48953d041c20182431b"
-    },
-    "framesPerCase": 600,
-    "runsCompared": 2,
-    "repeatableAcrossRuns": true,
-    "formats": {
-      "rgb565": {
-        "libretroValue": 2,
-        "widths": [320, 256],
-        "height": 240,
-        "pitches": { "320": 640, "256": 512 },
-        "videoHash": 2727152085
-      },
-      "xrgb8888": {
-        "libretroValue": 1,
-        "widths": [320, 256],
-        "height": 240,
-        "pitches": { "320": 1280, "256": 1024 },
-        "videoHash": 88889545
-      }
-    },
-    "runtimeGeometry": {
-      "environmentCommand": 37,
-      "baseWidthSequence": [320, 256, 320, 256, 320],
-      "baseHeight": 240,
-      "maxWidth": 1024,
-      "maxHeight": 512,
-      "unskippedVideoCallbackSequence": [1, 122, 242, 362, 482]
-    },
-    "nullFrames": {
-      "configuration": "fixed_interval/1",
-      "callbacks": 600,
-      "videoFrames": 300,
-      "nullVideoFrames": 300,
-      "retainedFrameState": true,
-      "videoHash": 4043555357
     },
     "pass": true
   },
-  "provisionalDecision": {
+  "media": {
+    "sampleRate": 44100,
+    "runsCompared": 2,
+    "deterministic": true,
+    "xa": {
+      "frames": 180,
+      "audioFrames": 132300,
+      "audioHash": 2169306773,
+      "audioPeak": 7680,
+      "callbackFramesRange": [734, 736],
+      "estimatedFrequencyHz": 440.0094,
+      "peakQueueFrames": 2205,
+      "underrunFrames": 0
+    },
+    "cdda": {
+      "frames": 180,
+      "audioFrames": 132300,
+      "audioHash": 3622455445,
+      "audioPeak": 4500,
+      "callbackFramesRange": [734, 736],
+      "estimatedFrequencyHz": 880.0189,
+      "peakQueueFrames": 2205,
+      "underrunFrames": 0
+    },
+    "pass": true
+  },
+  "memoryCards": {
+    "slotBytes": 131072,
+    "changeCallbacks": [62, 122],
+    "initialHashes": [2202962361, 2202962361],
+    "persistedHashes": [4248145977, 399842745],
+    "persistedFilesMatchCoreMemory": true,
+    "restoredBeforeFirstFrame": true,
+    "restoredFilesExact": true,
+    "pass": true
+  },
+  "stateAndDisc": {
+    "stateBytes": 4456448,
+    "deterministicReplay": true,
+    "replayVideoHash": 3772597829,
+    "diskCount": 2,
+    "operationSequence": ["open", "change", "close", "open", "change", "close"],
+    "operationResults": [true, true, true, true, true, true],
+    "discOneStatus": 1295008769,
+    "discTwoStatus": 1295008770,
+    "restoredDiscTwo": true,
+    "pass": true
+  },
+  "nearMaximumDisc": {
+    "logicalDiscBytes": 846720000,
+    "sectorBytes": 2352,
+    "sectorCount": 360000,
+    "mountedBytes": 846720000,
+    "booted": true,
+    "bootMs": 28.9,
+    "readOffsets": [0, 423360000, 846715904],
+    "readBytes": 4096,
+    "wasmMemory": {
+      "initialBytes": 67108864,
+      "peakBytes": 67108864,
+      "finalBytes": 67108864,
+      "configuredMaximumBytes": 536870912
+    },
+    "pageJsHeap": {
+      "initialBytes": 1141553,
+      "peakBytes": 2298063,
+      "finalBytes": 2298063
+    },
+    "browserProcessTree": {
+      "initialBytes": 406196224,
+      "peakBytes": 682303488,
+      "finalBytes": 676696064,
+      "baselineToPeakBytes": 276107264,
+      "maximumBaselineToPeakBytes": 423360000
+    },
+    "noFullDiscCopy": true,
+    "pass": true
+  },
+  "probeStatus": {
+    "P1": "pass",
+    "P2": "pass",
+    "P3": "pass",
+    "P4": "pass",
+    "P5": "pass",
+    "P6": "pass",
+    "P7": "pass",
+    "P8": "pass",
+    "P9": "pass",
+    "P10": "pass",
+    "P11": "pass",
+    "P12": "pass"
+  },
+  "decision": {
     "winner": "pcsx-rearmed",
-    "reason": "Both candidates pass the same fixture/shim probe; PCSX-ReARMed is smaller, starts faster, completes the scripted run faster, and needs half the initial Wasm memory.",
-    "final": false,
-    "remainingProbeIds": ["P3-retail-bios", "P8-xa-and-cdda", "P9", "P10", "P11-near-maximum-disc"]
+    "reason": "Both candidates pass the common boot and environment probes; PCSX-ReARMed is smaller, starts faster, needs half the initial Wasm memory, and passes every selected-core feasibility probe.",
+    "final": true,
+    "remainingProbeIds": []
   }
 }

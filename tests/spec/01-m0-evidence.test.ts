@@ -9,10 +9,21 @@ const readJson = async (path: URL): Promise<unknown> =>
 
 const evidence = await readJson(new URL("../../docs/probes/m0-results.json", import.meta.url));
 const candidates = await readJson(new URL("../../core/probes/candidates.json", import.meta.url));
+const productionSource = await readJson(new URL("../../core/SOURCE.json", import.meta.url));
 const fixtureToolchain = await readJson(new URL("../../fixtures/homebrew/TOOLCHAIN.json", import.meta.url));
+const emsdkVersion = (await readFile(
+    new URL("../../core/EMSDK_VERSION", import.meta.url),
+    "utf8",
+)).trim();
 
 interface EvidenceSummary {
+    allFixtureVariantsPinned: boolean;
+    allProbesPass: boolean;
+    biosPass: boolean;
+    buildsPass: boolean;
     candidatePinsAgree: boolean;
+    cardsPass: boolean;
+    decisionFinal: boolean;
     enduranceCases: number;
     enduranceDeterministic: boolean;
     enduranceNoDropsOrUnderruns: boolean;
@@ -23,15 +34,14 @@ interface EvidenceSummary {
     fixtureCompiler: string;
     fixtureSdkVersion: string;
     fixtureSourcePinned: boolean;
-    final: boolean;
-    geometryFixturePinned: boolean;
-    geometryFormatsCorrect: boolean;
-    geometryNullFramesCorrect: boolean;
     geometryPass: boolean;
-    geometryRepeatable: boolean;
-    palFixturePinned: boolean;
-    remainingGeometryProbe: boolean;
-    remainingLongRunProbe: boolean;
+    mediaPass: boolean;
+    nearMaximumDiscPass: boolean;
+    productionEmsdkPinned: boolean;
+    productionSourcePinned: boolean;
+    remainingProbes: number;
+    sourceVerificationPass: boolean;
+    stateAndDiscPass: boolean;
     status: string;
     winner: string;
     workerfsCorrect: boolean;
@@ -41,24 +51,24 @@ const testFile: TestFile = {
     label: "M0 feasibility evidence",
     cases: [
         {
-            label: "records a provisional candidate decision backed by reproducible inputs",
+            label: "records a final candidate decision backed by all twelve probes",
             run: () => CTGTest.init("M0 evidence")
                 .assert(
-                    "decision and source pins",
+                    "decision, evidence, and production pins",
                     () => {
                         const result = evidence as {
-                            status: string;
-                            fixture: {
-                                byteIdentical: boolean;
-                                cleanBuildsCompared: number;
-                                dynamicGeometryVariant: { binSha256: string; byteIdentical: boolean };
-                                palVariant: { binSha256: string; byteIdentical: boolean };
+                            builds: { pass: boolean };
+                            candidates: Record<string, { commit: string; tree: string }>;
+                            decision: {
+                                final: boolean;
+                                remainingProbeIds: string[];
+                                winner: string;
                             };
                             endurance: {
                                 aggregate: {
+                                    keptRealtime: boolean;
                                     missingVideoCallbacks: number;
                                     nullVideoFrames: number;
-                                    keptRealtime: boolean;
                                     simulatedAudioUnderrunFrames: number;
                                 };
                                 cases: unknown[];
@@ -66,37 +76,51 @@ const testFile: TestFile = {
                                 deterministic: Record<string, { repeatableAcrossCadencesAndRuns: boolean }>;
                                 pass: boolean;
                             };
-                            geometry: {
-                                formats: {
-                                    rgb565: { libretroValue: number; pitches: Record<string, number> };
-                                    xrgb8888: { libretroValue: number; pitches: Record<string, number> };
-                                };
-                                nullFrames: {
-                                    callbacks: number;
-                                    nullVideoFrames: number;
-                                    retainedFrameState: boolean;
-                                    videoFrames: number;
-                                };
-                                pass: boolean;
-                                repeatableAcrossRuns: boolean;
+                            fixture: {
+                                byteIdentical: boolean;
+                                cleanBuildsCompared: number;
+                                variants: Record<string, { binSha256: string; cueSha256: string }>;
                             };
-                            candidates: Record<string, { commit: string }>;
-                            provisionalDecision: { final: boolean; remainingProbeIds: string[]; winner: string };
+                            geometry: { pass: boolean };
+                            media: { pass: boolean };
+                            memoryCards: { pass: boolean };
+                            nearMaximumDisc: { noFullDiscCopy: boolean; pass: boolean };
+                            probeStatus: Record<string, string>;
+                            realBiosBoot: { pass: boolean; realBiosLoaded: boolean };
+                            sourceVerification: { pass: boolean };
+                            stateAndDisc: { pass: boolean };
+                            status: string;
                             workerfs: { correct: boolean };
                         };
                         const manifest = candidates as {
-                            candidates: Array<{ commit: string; id: string }>;
+                            candidates: Array<{ commit: string; id: string; tree: string }>;
+                        };
+                        const selectedSource = productionSource as {
+                            commit: string;
+                            repository: string;
+                            tree: string;
                         };
                         const toolchain = fixtureToolchain as {
                             archiveSha256: string;
                             compiler: string;
                             version: string;
                         };
+                        const fixtureVariants = Object.values(result.fixture.variants);
 
                         return {
-                            candidatePinsAgree: manifest.candidates.every(
-                                ({ commit, id }) => result.candidates[id]?.commit === commit,
-                            ),
+                            allFixtureVariantsPinned: fixtureVariants.length === 7
+                                && fixtureVariants.every(({ binSha256, cueSha256 }) =>
+                                    /^[a-f0-9]{64}$/u.test(binSha256)
+                                    && /^[a-f0-9]{64}$/u.test(cueSha256)),
+                            allProbesPass: Object.keys(result.probeStatus).length === 12
+                                && Object.values(result.probeStatus).every((status) => status === "pass"),
+                            biosPass: result.realBiosBoot.pass && result.realBiosBoot.realBiosLoaded,
+                            buildsPass: result.builds.pass,
+                            candidatePinsAgree: manifest.candidates.every(({ commit, id, tree }) =>
+                                result.candidates[id]?.commit === commit
+                                && result.candidates[id]?.tree === tree),
+                            cardsPass: result.memoryCards.pass,
+                            decisionFinal: result.decision.final,
                             enduranceCases: result.endurance.cases.length,
                             enduranceDeterministic: Object.values(result.endurance.deterministic)
                                 .every(({ repeatableAcrossCadencesAndRuns }) => repeatableAcrossCadencesAndRuns),
@@ -111,34 +135,31 @@ const testFile: TestFile = {
                             fixtureCompiler: toolchain.compiler,
                             fixtureSdkVersion: toolchain.version,
                             fixtureSourcePinned: /^[a-f0-9]{64}$/u.test(toolchain.archiveSha256),
-                            final: result.provisionalDecision.final,
-                            geometryFixturePinned: result.fixture.dynamicGeometryVariant.byteIdentical
-                                && /^[a-f0-9]{64}$/u.test(result.fixture.dynamicGeometryVariant.binSha256),
-                            geometryFormatsCorrect: result.geometry.formats.rgb565.libretroValue === 2
-                                && result.geometry.formats.rgb565.pitches["320"] === 640
-                                && result.geometry.formats.rgb565.pitches["256"] === 512
-                                && result.geometry.formats.xrgb8888.libretroValue === 1
-                                && result.geometry.formats.xrgb8888.pitches["320"] === 1280
-                                && result.geometry.formats.xrgb8888.pitches["256"] === 1024,
-                            geometryNullFramesCorrect: result.geometry.nullFrames.callbacks === 600
-                                && result.geometry.nullFrames.videoFrames === 300
-                                && result.geometry.nullFrames.nullVideoFrames === 300
-                                && result.geometry.nullFrames.retainedFrameState,
                             geometryPass: result.geometry.pass,
-                            geometryRepeatable: result.geometry.repeatableAcrossRuns,
-                            palFixturePinned: result.fixture.palVariant.byteIdentical
-                                && /^[a-f0-9]{64}$/u.test(result.fixture.palVariant.binSha256),
-                            remainingGeometryProbe: result.provisionalDecision.remainingProbeIds
-                                .some((id) => id.startsWith("P6")),
-                            remainingLongRunProbe: result.provisionalDecision.remainingProbeIds
-                                .some((id) => id.startsWith("P7") || id.startsWith("P12")),
+                            mediaPass: result.media.pass,
+                            nearMaximumDiscPass: result.nearMaximumDisc.pass
+                                && result.nearMaximumDisc.noFullDiscCopy,
+                            productionEmsdkPinned: emsdkVersion === "6.0.2",
+                            productionSourcePinned: selectedSource.repository
+                                === "https://github.com/notaz/pcsx_rearmed.git"
+                                && selectedSource.commit === result.candidates["pcsx-rearmed"]?.commit
+                                && selectedSource.tree === result.candidates["pcsx-rearmed"]?.tree,
+                            remainingProbes: result.decision.remainingProbeIds.length,
+                            sourceVerificationPass: result.sourceVerification.pass,
+                            stateAndDiscPass: result.stateAndDisc.pass,
                             status: result.status,
-                            winner: result.provisionalDecision.winner,
+                            winner: result.decision.winner,
                             workerfsCorrect: result.workerfs.correct,
                         };
                     },
                     P.equals<EvidenceSummary>({
+                        allFixtureVariantsPinned: true,
+                        allProbesPass: true,
+                        biosPass: true,
+                        buildsPass: true,
                         candidatePinsAgree: true,
+                        cardsPass: true,
+                        decisionFinal: true,
                         enduranceCases: 8,
                         enduranceDeterministic: true,
                         enduranceNoDropsOrUnderruns: true,
@@ -149,16 +170,15 @@ const testFile: TestFile = {
                         fixtureCompiler: "mipsel-none-elf-gcc (GCC) 11.1.0",
                         fixtureSdkVersion: "0.19",
                         fixtureSourcePinned: true,
-                        final: false,
-                        geometryFixturePinned: true,
-                        geometryFormatsCorrect: true,
-                        geometryNullFramesCorrect: true,
                         geometryPass: true,
-                        geometryRepeatable: true,
-                        palFixturePinned: true,
-                        remainingGeometryProbe: false,
-                        remainingLongRunProbe: false,
-                        status: "in-progress",
+                        mediaPass: true,
+                        nearMaximumDiscPass: true,
+                        productionEmsdkPinned: true,
+                        productionSourcePinned: true,
+                        remainingProbes: 0,
+                        sourceVerificationPass: true,
+                        stateAndDiscPass: true,
+                        status: "complete",
                         winner: "pcsx-rearmed",
                         workerfsCorrect: true,
                     }),

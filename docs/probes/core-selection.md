@@ -1,138 +1,127 @@
 # M0 core selection record
 
-Status: **in progress; PCSX-ReARMed is the provisional winner.**
+Status: **complete; PCSX-ReARMed selected.**
 
-This record deliberately does not create `core/SOURCE.json` or
-`core/EMSDK_VERSION`. The baseline comparison is complete, but the M0 hard gate
-also requires XA/CD audio, memory-card, state, disc-change, controlled
-firmware-path and near-maximum-disc memory evidence. The production pin becomes
-final only after those checks pass.
+All P1–P12 feasibility probes pass. The production identities are now recorded
+in [`core/SOURCE.json`](../../core/SOURCE.json) and
+[`core/EMSDK_VERSION`](../../core/EMSDK_VERSION). Machine-readable measurements
+are in [m0-results.json](m0-results.json); the comparison inputs remain in
+[`candidates.json`](../../core/probes/candidates.json) and
+[`toolchain.json`](../../core/probes/toolchain.json).
 
-Machine-readable measurements are in [m0-results.json](m0-results.json). Exact
-candidate identities are in
-[candidates.json](../../core/probes/candidates.json), and the probe toolchain is
-in [toolchain.json](../../core/probes/toolchain.json).
+## Final decision
 
-## Baseline outcome
-
-Both pinned candidates compile as single-threaded software-rendered Wasm and
-boot the same reproducible MIT-licensed CUE/BIN fixture in a dedicated Chromium
-Worker. Both produce video and non-silent audio, and both reflect a controller
-button in the center pixel while sampled at the same animation phase.
+PCSX-ReARMed is selected at commit
+`9f8b028cd66200bb9a18a878a5e73925a629b0a7` with Emscripten 6.0.2. Both
+candidates pass the same Worker-hosted boot, video, audio, input and environment
+probe. PCSX-ReARMed is the smaller module, starts faster in the final comparison
+run and uses half the initial Wasm memory. It also passes every selected-core
+media, persistence, state, disc, timing and memory probe.
 
 | Measurement | PCSX-ReARMed | Beetle PSX |
 | --- | ---: | ---: |
 | Static core archive | 5,977,552 B | 23,456,710 B |
-| Linked probe Wasm | 711,115 B | 3,771,994 B |
+| Linked probe Wasm | 726,849 B | 3,818,603 B |
 | Initial Wasm memory | 64 MiB | 128 MiB |
-| `retro_load_game` | 22.8 ms | 30.9 ms |
-| First video callback | 35.5 ms | 48.6 ms |
-| 424-frame scripted run | 2,064.8 ms | 2,460.6 ms |
+| `retro_load_game` | 30.8 ms | 46.9 ms |
+| First video callback | 45.8 ms | 71.3 ms |
+| 424-frame scripted run | 2,739.6 ms | 3,513.0 ms |
 | Reported rate | 60.00 fps | 59.94 fps |
 | Output | 320×240 RGB565 | 700×480 XRGB8888 |
 
-These are probe comparisons, not user-facing latency promises. Browser timing
-was recorded on Chrome 150 on an Intel i7-1165G7.
+These measurements compare the pinned candidates on the reference machine;
+they are not user-facing latency promises.
 
-PCSX-ReARMed is provisionally selected because the spec says the smallest
-candidate that passes the required probes wins unless accuracy evidence
-overrides size. No contrary accuracy evidence exists yet, and PCSX also leads
-this baseline on startup, scripted throughput and initial memory.
+## Source and build findings
 
-## Endurance outcome
-
-PCSX-ReARMed completed two independent 60-second runs for each NTSC/PAL and
-60/120 Hz host-cadence combination after a two-second warmup. Every run ended
-with the exact expected video and audio counts, zero missing or null video
-callbacks, zero simulated audio underruns and identical region-specific hashes
-across both cadences and repeats.
-
-| Region | Host cadence | Frames/run | Audio frames/run | Max transient backlog events | Max host-tick overruns | Max core utilization |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| NTSC, 60 fps | 60 Hz | 3,600 | 2,646,000 | 23 | 23 | 48.1% |
-| NTSC, 60 fps | 120 Hz | 3,600 | 2,646,000 | 0 | 741 | 41.6% |
-| PAL, 50 fps | 60 Hz | 3,000 | 2,646,000 | 0 | 0 | 36.8% |
-| PAL, 50 fps | 120 Hz | 3,000 | 2,646,000 | 0 | 936 | 38.1% |
-
-A host-tick overrun means core work completed after one 8.33 or 16.67 ms host
-interval; it is not a dropped emulated frame. Transient emulation backlog was
-bounded and recovered before the end of every run. The Wasm heap remained at
-64 MiB in all one-second samples. Dedicated headless-Chrome process-tree RSS
-rose from 407,826,432 B before navigation to a 706,310,144 B peak; this
-browser-wide measurement includes Chrome overhead, the page, Worker and Wasm.
-The matrix ran without COOP/COEP headers and reported
-`crossOriginIsolated === false`, matching the v1 deployment constraint.
-
-## Geometry outcome
-
-PCSX-ReARMed completed two identical 600-callback runs for each video case.
-The fixture changed its active width between 320 and 256 pixels at runtime;
-the core reported every switch through environment command 37 and emitted
-matching callback dimensions. RGB565 used pitches of 640 and 512 bytes, while
-XRGB8888 used 1,280 and 1,024 bytes. Both formats produced repeatable hashes.
-
-With fixed-interval frameskip enabled, the core produced 300 video frames and
-300 explicit null callbacks. The probe retained the prior frame hash,
-dimensions, pitch and sampled pixel across every null callback, proving the
-frontend can reuse the last frame without treating a duplicate as new pixel
-data.
-
-## Build findings
+Both commits, top-level trees, licenses and all recursive PCSX-ReARMed
+submodule identities were verified against clean tracked worktrees. Both
+candidates compile as single-threaded, software-rendered Wasm without dynarec,
+native assembly, pthreads or Asyncify.
 
 PCSX-ReARMed's Emscripten target is self-contained when CHD is disabled. Its
-target disables dynarec, asynchronous CD/GPU/SPU work, native assembly,
-physical CD access, pthread linkage and libretro VFS use. The output is an `ar`
-archive named with a `.bc` suffix; Emscripten 6.0.2 requires copying it to an
-`.a` name before final linking.
+archive uses a `.bc` suffix even though it is an `ar` archive, so the probe
+copies it to `.a` before final linking.
 
-Beetle's Emscripten static target needs two recipe repairs before it links:
+Beetle's static target needs two documented link-recipe repairs: the
+libretro-common frontend objects omitted from the static target, and the
+rthreads/eventcount support referenced by `mc_async.c`. Those sources are
+supplied at final link without modifying the pinned candidate tree. Beetle's
+embedded PCSX-Redux OpenBIOS remains MIT licensed.
 
-- the static target omits libretro-common filesystem/string/platform objects
-  expected from a frontend; and
-- `mc_async.c` remains in the source list after `NEED_THREADING=0`, while the
-  rthreads/eventcount implementations it references are omitted.
+Emscripten 6.0.2 requires `-sGROWABLE_ARRAYBUFFERS=0` for these builds because
+Chrome 150 rejects `TextDecoder` input backed by the resizable buffer otherwise
+selected by generated filesystem glue.
 
-With the missing frontend objects supplied, Beetle boots using its embedded
-MIT-licensed PCSX-Redux OpenBIOS. CHD, Lightrec, pthreads and hardware rendering
-remain disabled.
+## Selected-core evidence
 
-Emscripten 6.0.2 also requires `-sGROWABLE_ARRAYBUFFERS=0` for this build.
-Without it, Chrome 150 rejects `TextDecoder.decode()` on the resizable backing
-buffer selected by generated filesystem glue.
+The controlled firmware-path probe loaded a private user-supplied BIOS, reached
+video on the first emulated frame and produced first-frame hash `3135512005`.
+The committed record retains only the recognized region, timings, frame hash
+and sanitized boot events.
+
+The geometry fixture switches between 320×240 and 256×240. RGB565 uses pitches
+of 640 and 512 bytes; XRGB8888 uses 1,280 and 1,024 bytes. Fixed-interval
+frameskip yields 300 video frames and 300 explicit null callbacks while
+retaining prior frame state.
+
+XA and CD-DA probes measure 440.01 Hz and 880.02 Hz respectively. Each
+180-frame segment produces exactly 132,300 audio frames, bounded 734–736-frame
+callbacks, a 2,205-frame maximum queue and zero underruns. Both independent
+runs produce identical hashes.
+
+Both 128 KiB memory-card slots write in the expected order. Persisted bytes
+match core memory exactly and restore before the first frame of a fresh module.
+State replay is frame-exact; the complete open/change/close disc trace reaches
+the second-disc fixture, returns to the first and restores the second disc from
+the saved state.
+
+The 846,720,000-byte synthetic disc mounts and boots through WORKERFS. Beginning,
+middle and end reads are correct, the Wasm heap remains at 64 MiB, and dedicated
+browser-process growth remains below half the logical disc size. This rules out
+a full track-sized copy during mount or startup.
+
+## Timing and endurance
+
+PCSX-ReARMed completed two independent 60-second runs for NTSC and PAL at both
+60 Hz and 120 Hz host cadence after a two-second warmup. Every run ended with
+the exact expected video and audio counts, zero missing or null callbacks, zero
+audio drift, zero simulated underruns and identical region-specific hashes.
+
+| Region | Host cadence | Frames/run | Audio frames/run | Max backlog events | Max host-tick overruns |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| NTSC | 60 Hz | 3,600 | 2,646,000 | 6 | 6 |
+| NTSC | 120 Hz | 3,600 | 2,646,000 | 0 | 554 |
+| PAL | 60 Hz | 3,000 | 2,646,000 | 0 | 2 |
+| PAL | 120 Hz | 3,000 | 2,646,000 | 0 | 413 |
+
+A host-tick overrun is completion after one host interval, not a dropped
+emulated frame. The maximum core utilization was 52.61%; every transient
+backlog recovered. The matrix ran without COOP/COEP headers and kept the Wasm
+heap fixed at 64 MiB.
 
 ## Probe status
 
-| Probe | Status | Evidence / remaining work |
+| Probe | Status | Evidence |
 | --- | --- | --- |
-| P1 source and licenses | Baseline complete | Immutable commits, trees, recursive PCSX submodule identities, GPL-2.0-or-later core licenses and permissive embedded-firmware license recorded. Final distribution must ship notices, corresponding source and build/patch material for the linked GPL core. |
-| P2 Wasm builds | Pass | Both archives and Worker modules built without dynarec, native assembly, pthreads, Asyncify or hardware rendering. Beetle recipe gaps are recorded above. |
-| P3 real boot | Partial pass | Both boot the public fixture with open firmware and produce a first frame. The controlled retail-BIOS run remains. |
-| P4 WORKERFS | Pass | Three synchronous reads across a logical 256 MiB Blob matched expected FNV checksums; the read window completed in 4.4 ms without copying the full Blob into Wasm memory. |
-| P5 environment API | Baseline complete | Startup first-occurrence order and runtime counts are recorded in JSON. Supported commands are bounded by the probe callback; VFS, rumble, memory maps, software-framebuffer access and optional performance/LED surfaces are explicitly rejected when not implemented. |
-| P6 video formats | Pass | Two repeat runs proved RGB565 and XRGB8888 at 320×240 and 256×240 with format-correct pitches and hashes. Environment command 37 tracked every runtime width switch. A fixed-interval case produced 300 real and 300 null callbacks while retaining prior frame state. |
-| P7 timing | Pass | PCSX reported 60 fps NTSC and 50 fps PAL. Two paced 60-second runs at both 60 and 120 Hz host cadence produced exact frame/audio counts; backlog and host-tick overruns are recorded. |
-| P8 audio | Partial pass | Non-silent looping SPU tone, callback counts and hashes are proven. XA and CD-DA remain. |
-| P9 memory cards | Pending | Both slots, restore order, dirty detection and reload proof remain. |
-| P10 state/disc control | Pending | State round trip and multi-disc open/change/close remain. |
-| P11 memory | Partial | Initial heaps, large-Blob access, one-second steady/peak Wasm samples and dedicated-browser process-tree RSS are recorded. A mounted near-maximum disc trace remains. |
-| P12 long-run determinism | Pass for provisional core | Repeated 60-second NTSC/PAL runs at both host cadences produced exact counters, zero missing/null video callbacks, zero simulated audio underruns and repeatable region-specific hashes. |
-
-## Environment commands observed
-
-The startup traces include logging, controller metadata, core-option version
-and variables, system/save directories, disk-control version and interface,
-input bitmasks, performance level, input descriptions, pixel format and memory
-maps. PCSX additionally requests message, geometry, audio-buffer-status,
-minimum-latency and current-software-framebuffer services. Beetle additionally
-probes VFS, LED, performance and shared-hardware-context services. Numeric
-order and runtime counts are retained in the JSON record so repeated option
-queries are not hidden.
+| P1 source and licenses | Pass | Commits, trees, recursive submodules and required license files verified. |
+| P2 Wasm builds | Pass | Both candidates rebuilt and linked with the pinned toolchain and forbidden runtime features absent. |
+| P3 real boot | Pass | Real BIOS load, sanitized boot trace, first-frame timing and hash recorded. |
+| P4 WORKERFS | Pass | Beginning/middle/end reads across a logical 256 MiB Blob match expected hashes. |
+| P5 environment API | Pass | Both candidates return bounded startup and runtime command traces. |
+| P6 video formats | Pass | RGB565, XRGB8888, runtime geometry and explicit null callbacks verified. |
+| P7 timing | Pass | NTSC/PAL rates and both host cadences complete with exact counters. |
+| P8 audio | Pass | Deterministic XA/CD-DA frequency, callback and bounded-queue evidence recorded. |
+| P9 memory cards | Pass | Both slots persist exact bytes and restore before first frame. |
+| P10 state/disc control | Pass | Frame-exact state replay and game-observed two-disc restoration verified. |
+| P11 memory | Pass | Near-maximum disc boots without a track-sized Wasm or browser allocation. |
+| P12 long-run determinism | Pass | Eight full-duration cases complete with repeatable hashes and zero underruns. |
 
 ## Licensing consequence
 
-Either linked core makes the core/shim Wasm distribution GPL-2.0-or-later. A
-release must provide the exact corresponding core and shim source, applied
-patches, reproducible build instructions, copyright notices and GPL text. The
-separately communicating TypeScript package remains MIT in this design, but
-release packaging should be reviewed before publication; this record is an
+The selected linked core makes the core/shim Wasm distribution
+GPL-2.0-or-later. A release must provide the exact corresponding core and shim
+source, applied patches, reproducible build instructions, copyright notices and
+GPL text. The separately communicating TypeScript package remains MIT in this
+design, but release packaging should be reviewed before publication; this is an
 engineering inventory, not legal advice.

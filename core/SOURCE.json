@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/notaz/pcsx_rearmed.git",
+  "commit": "9f8b028cd66200bb9a18a878a5e73925a629b0a7",
+  "tree": "142b22ef9183be3a0ee515b6a202013aa7a4eab4",
+  "license": "GPL-2.0-or-later",
+  "submodules": {
+    "deps/libchdr": "9ccd3a78e239246ee6e1166e1be82ab0ff0dcddb",
+    "deps/libretro-common": "f0173cc9c0d354c0a97ab4c4d075dc560ccc5988",
+    "deps/lightning": "a6bb2b5a7cf36e074e12ccaed32990b437deb784",
+    "deps/lightning/gnulib": "e54b645fc6b8422562327443bda575c65d931fbd",
+    "deps/lightrec": "4885d601ff4c0b78c63fe80a83df85da657fb21c",
+    "deps/mman": "2d1c576e62b99e85d99407e1a88794c6e44c3310",
+    "frontend/libpicofe": "a2697389e76744cfa0c56c13a172845c45ede719",
+    "frontend/warm": "a6f015da3b10b82a476250793645c071340decbc"
+  },
+  "selectionEvidence": "docs/probes/m0-results.json"
+}
