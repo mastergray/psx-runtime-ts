@@ -6,7 +6,8 @@ the browser. It follows the lifecycle and package boundaries established by
 PlayStation-specific libretro bridge, Worker-hosted WebAssembly core, disc
 handling, controller ports, memory cards and save states.
 
-M0 feasibility and the M1 public-contract foundation are complete.
+M0 feasibility, the M1 public-contract foundation and the M2 bridge/Worker
+foundation are complete.
 PCSX-ReARMed at the commit recorded in
 `core/SOURCE.json` is the selected core, and Emscripten 6.0.2 is the pinned
 toolchain. The P1–P12 evidence covers real-BIOS boot, dedicated-Worker disc
@@ -18,6 +19,11 @@ The root package exports validated content, firmware, controller, session and
 build-metadata contracts together with `PsxRuntimeError`. The normalized core
 recipe in `core/build.json` feeds a deterministic SHA-256 build identity with
 no local path or timestamp input.
+
+M2 adds the narrow native libretro frontend, validated private Worker
+messages, PAL/NTSC pacing, pixel/audio conversion and a three-buffer
+transferable video pool. Both the TypeScript worker double and a compiled
+synthetic libretro core cover lifecycle and terminal cleanup.
 
 See the [implementation spec](docs/psx-runtime-spec.md) for the architecture,
 public contracts, probe plan, milestones and release gates. Current progress

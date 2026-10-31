@@ -9,6 +9,7 @@ import {
     isPsxBuildRecipe,
     isPsxSourceIdentity,
     isPsxToolchainIdentity,
+    sourceTreeHash,
 } from "../../scripts/core-build/buildInfo.ts";
 import { isPsxBuildInfo } from "../../src/index.ts";
 
@@ -39,7 +40,14 @@ const toolchain: PsxToolchainIdentity = {
     emscriptenReleaseCommit: (toolchainValue as { emscriptenReleaseCommit: string }).emscriptenReleaseCommit,
     emccCommit: (toolchainValue as { emccCommit: string }).emccCommit,
 };
-const shimHash = "a".repeat(64);
+const shimFiles = await Promise.all([
+    "libretro/include/libretro.h",
+    "libretro/shim/psx_frontend.h",
+    "libretro/shim/psx_frontend_internal.h",
+    "libretro/shim/psx_frontend.c",
+    "libretro/shim/psx_exports.c",
+].map(async (path) => ({ path, contents: await readFile(new URL(`../../${path}`, import.meta.url)) })));
+const shimHash = sourceTreeHash(shimFiles);
 const identity = buildIdentityFor(recipe, source, toolchain, [], shimHash);
 
 const testFile: TestFile = {
@@ -57,6 +65,11 @@ const testFile: TestFile = {
                     emsdkAgrees: toolchain.version === "6.0.2",
                     memory: recipe.memory,
                     noThreads: recipe.pthreads === false,
+                    shimHash: /^[a-f0-9]{64}$/u.test(shimHash),
+                    narrowExports: [
+                        "_psx_start", "_psx_run_frame", "_psx_set_button", "_psx_set_axis",
+                        "_psx_reset", "_psx_serialize", "_psx_unserialize", "_psx_set_disc", "_psx_stop",
+                    ].every((name) => recipe.linkFlags.some((flag) => flag.startsWith("-sEXPORTED_FUNCTIONS=") && flag.includes(name))),
                 }), P.equals<unknown>({
                     recipe: true,
                     source: true,
@@ -66,7 +79,20 @@ const testFile: TestFile = {
                     emsdkAgrees: true,
                     memory: { initialPages: 1024, maximumPages: 8192 },
                     noThreads: true,
+                    shimHash: true,
+                    narrowExports: true,
                 }))
+                .start(undefined),
+        },
+        {
+            label: "the shim tree hash is path-order independent and content sensitive",
+            run: () => CTGTest.init("shim hash")
+                .assert("tree fingerprint", () => ({
+                    stable: sourceTreeHash([...shimFiles].reverse()) === shimHash,
+                    contentSensitive: sourceTreeHash(shimFiles.map((file, index) => index === 0
+                        ? { ...file, contents: new Uint8Array([0]) }
+                        : file)) !== shimHash,
+                }), P.equals<unknown>({ stable: true, contentSensitive: true }))
                 .start(undefined),
         },
         {

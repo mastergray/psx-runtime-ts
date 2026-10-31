@@ -18,13 +18,15 @@ are in [the implementation spec](psx-runtime-spec.md).
   - [x] Close XA/CD audio, card/state/disc and near-maximum-disc memory probes.
   - [x] Select PCSX-ReARMed and commit the production source/toolchain pins.
 - [x] M1: implement public contracts, errors and deterministic build metadata.
-- [ ] M2–M9: bridge, Worker, content, adapter, browser surfaces and storage.
+- [x] M2: implement the libretro shim and deterministic Worker protocol.
+- [ ] M3–M9: content, adapter, browser surfaces and storage.
 - [ ] M10: pass all `v1.0.0` release gates.
 
-## Next work: M2
+## Next work: M3
 
-M0 and M1 are complete. The package now exposes the validated content, input,
-session and build contracts, the stable runtime error registry, and a
-path/timestamp-free SHA-256 build identity over every material core-build
-input. M2 implements the narrow libretro shim and private Worker protocol
-against a deterministic synthetic core double.
+M0–M2 are complete. The private Worker foundation now validates every command
+and output, executes mutating work FIFO, paces PAL and NTSC independently of
+host cadence, converts negotiated AV formats, enforces a three-buffer video
+pool and performs one-shot terminal cleanup. A native synthetic libretro core
+also verifies the narrow C shim lifecycle. M3 implements `DiscSetAudit` and
+safe WORKERFS mount-plan generation.

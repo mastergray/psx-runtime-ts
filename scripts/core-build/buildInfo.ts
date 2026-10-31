@@ -75,6 +75,22 @@ const normalizedStringRecord = (record: Readonly<Record<string, string>>): Recor
 export const sha256 = (input: Uint8Array | string): string =>
     createHash("sha256").update(input).digest("hex");
 
+export const sourceTreeHash = (
+    files: ReadonlyArray<{ readonly path: string; readonly contents: Uint8Array | string }>,
+): string => {
+    if (files.length === 0 || files.some(({ path }) => !isNonEmptyString(path)
+        || path.startsWith("/") || path.includes("\\") || path.split("/").includes(".."))) {
+        throw new TypeError("Source tree files must use normalized relative paths");
+    }
+    const normalized = files
+        .map(({ path, contents }) => ({ path, sha256: sha256(contents) }))
+        .sort((left, right) => left.path.localeCompare(right.path));
+    if (new Set(normalized.map(({ path }) => path)).size !== normalized.length) {
+        throw new TypeError("Source tree file paths must be unique");
+    }
+    return sha256(JSON.stringify(normalized));
+};
+
 export function isPsxSourceIdentity(value: unknown): value is PsxSourceIdentity {
     if (!isObject(value) || typeof value.repository !== "string"
         || !REPOSITORY_PATTERN.test(value.repository) || !isCommit(value.commit)
