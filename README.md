@@ -8,9 +8,10 @@ handling, controller ports, memory cards and save states.
 
 M0 feasibility, the M1 public-contract foundation, the M2 bridge/Worker
 foundation, the M3 content pipeline and the M4 adapter/session are complete.
-The M5 input layer and M6 browser surfaces are also complete, including
-independent input channels, keyboard/gamepad sources, dynamic Canvas 2D
-layout and bounded gesture-unlocked Web Audio playback.
+The M5 input layer, M6 browser surfaces and M7 persistence are also complete.
+Together they add independent input channels, keyboard/gamepad sources,
+dynamic Canvas 2D layout, bounded gesture-unlocked Web Audio playback,
+revisioned memory cards and build-compatible named states.
 PCSX-ReARMed at the commit recorded in
 `core/SOURCE.json` is the selected core, and Emscripten 6.0.2 is the pinned
 toolchain. The P1–P12 evidence covers real-BIOS boot, dedicated-Worker disc
@@ -43,6 +44,10 @@ restores analog ownership and releases held controls on focus or device loss.
 M6 adds aspect-correct `fit`, `integer`, `fill` and `stretch` display modes,
 dynamic canvas backing geometry, fullscreen and filtering controls, plus lazy
 stereo Web Audio playback with independent mute/volume and a bounded queue.
+
+M7 adds IndexedDB-backed memory cards with optimistic revisions and a
+recoverable prior version, normalized named-state envelopes with exact
+build/game compatibility, and coalescing periodic card auto-save support.
 
 See the [implementation spec](docs/psx-runtime-spec.md) for the architecture,
 public contracts, probe plan, milestones and release gates. Current progress

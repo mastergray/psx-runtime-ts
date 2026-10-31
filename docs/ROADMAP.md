@@ -23,14 +23,16 @@ are in [the implementation spec](psx-runtime-spec.md).
 - [x] M4: implement the libretro adapter and public session lifecycle.
 - [x] M5: implement multi-channel input plus keyboard and gamepad sources.
 - [x] M6: implement dynamic Canvas display and bounded Web Audio playback.
-- [ ] M7–M9: persistence, composition and packaging.
+- [x] M7: implement revisioned cards, compatible states and card auto-save.
+- [ ] M8–M9: composition, local game storage and packaging.
 - [ ] M10: pass all `v1.0.0` release gates.
 
-## Next work: M7
+## Next work: M8
 
-M0–M6 are complete. `PsxDisplay` tracks dynamic native geometry while laying
-out the core-reported aspect through four scaling modes. `PsxAudio` lazily
-unlocks Web Audio, preserves the core sample rate and trims overloads from 120
-ms to 60 ms. Deterministic tests cover 60 seconds of queue progress and a real
-Chromium probe covers Canvas 2D plus gesture-unlocked Web Audio. M7 implements
-card/state envelopes, revision-safe persistence and auto-save.
+M0–M7 are complete. `PsxStorage` persists independent raw card images with
+optimistic revisions, retains the immediately previous card revision, and
+stores binary state payloads beside exact build/game compatibility metadata.
+Named states normalize to NFC, card auto-save coalesces overlapping requests,
+and a Chromium probe proves card/state recovery through a fresh storage
+instance. M8 composes the adapter, input, display, audio and storage into the
+player, console and developer harness.

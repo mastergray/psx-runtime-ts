@@ -6,6 +6,7 @@ export { default as KeyboardSource, DEFAULT_KEYBOARD_MAP } from "./KeyboardSourc
 export { default as GamepadSource } from "./GamepadSource/GamepadSource.js";
 export { default as PsxDisplay } from "./PsxDisplay/PsxDisplay.js";
 export { default as PsxAudio } from "./PsxAudio/PsxAudio.js";
+export { default as PsxStorage } from "./PsxStorage/PsxStorage.js";
 export {
     isPsxRuntimeErrorConfig,
     type PsxRuntimeErrorConfig,
@@ -103,6 +104,31 @@ export {
     type PsxGainNodeLike,
     type PsxGestureSourceLike,
 } from "./PsxAudio/types.js";
+export {
+    isPsxIndexedDbFactoryLike,
+    isPsxMemoryCardRecord,
+    isPsxMemoryCardSaveConfig,
+    isPsxStateLoadConfig,
+    isPsxStateMetadata,
+    isPsxStateRecord,
+    isPsxStateSaveConfig,
+    isPsxStorageConfig,
+    isPsxStorageDriverLike,
+    isPsxStorageInitConfig,
+    PSX_MEMORY_CARD_BYTES,
+    type PsxIndexedDbFactoryLike,
+    type PsxMemoryCardRecord,
+    type PsxMemoryCardSaveConfig,
+    type PsxStateLoadConfig,
+    type PsxStateMetadata,
+    type PsxStateRecord,
+    type PsxStateSaveConfig,
+    type PsxStorageConfig,
+    type PsxStorageDriverLike,
+    type PsxStorageInitConfig,
+    type PsxStorageMutation,
+    type PsxStorageStore,
+} from "./PsxStorage/types.js";
 
 export {
     isAuditedDisc,

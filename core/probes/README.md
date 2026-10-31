@@ -29,6 +29,7 @@ npm run probe:state-disc
 npm run probe:memory
 npm run probe:bios
 npm run probe:m6
+npm run probe:m7
 ```
 
 The browser runner serves only the explicit probe files and generated fixture,
@@ -54,3 +55,7 @@ memory-card slots, state/disc restoration and bounded near-maximum-disc memory.
 `probe:m6` needs no emulator content. It loads the compiled public display and
 audio classes in Chromium and verifies dynamic Canvas 2D geometry, a rendered
 pixel, gesture unlock and the bounded Web Audio queue.
+
+`probe:m7` uses a disposable IndexedDB database to verify card and state
+recovery through a fresh storage instance, optimistic write conflicts,
+recoverable card revisions and incompatible-state rejection.

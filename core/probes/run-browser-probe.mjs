@@ -23,10 +23,11 @@ const probes = {
     bios: "/core/probes/pcsx-bios-probe.html",
     m4: "/core/probes/m4-adapter-probe.html",
     m6: "/core/probes/m6-browser-probe.html",
+    m7: "/core/probes/m7-storage-probe.html",
 };
 
 if (probe === undefined || !(probe in probes)) {
-    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry|media|cards|stateDisc|memory|bios|m4|m6>");
+    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry|media|cards|stateDisc|memory|bios|m4|m6|m7>");
     process.exit(2);
 }
 
@@ -96,6 +97,7 @@ const routes = new Map([
     ["/core/probes/pcsx-bios-probe.worker.mjs", ["core/probes/pcsx-bios-probe.worker.mjs", "text/javascript; charset=utf-8"]],
     ["/core/probes/m4-adapter-probe.html", ["core/probes/m4-adapter-probe.html", "text/html; charset=utf-8"]],
     ["/core/probes/m6-browser-probe.html", ["core/probes/m6-browser-probe.html", "text/html; charset=utf-8"]],
+    ["/core/probes/m7-storage-probe.html", ["core/probes/m7-storage-probe.html", "text/html; charset=utf-8"]],
     ["/dist/probes/workerfs-module.mjs", ["dist/probes/workerfs-module.mjs", "text/javascript; charset=utf-8"]],
     ["/dist/probes/workerfs-module.wasm", ["dist/probes/workerfs-module.wasm", "application/wasm"]],
     ["/dist/probes/pcsx-boot.mjs", ["dist/probes/pcsx-boot.mjs", "text/javascript; charset=utf-8"]],

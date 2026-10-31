@@ -1,0 +1,125 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>M7 IndexedDB storage probe</title>
+<script type="module">
+import PsxRuntimeError from "../../dist/PsxRuntimeError/PsxRuntimeError.js";
+import PsxStorage from "../../dist/PsxStorage/PsxStorage.js";
+
+const databaseName = "psx-runtime-m7-probe";
+const machine = {
+    core: "Storage probe",
+    coreVersion: "1",
+    buildId: "f".repeat(64),
+    gameId: "m7-browser-probe",
+    region: "ntsc-u",
+    framesPerSecond: 60,
+    sampleRate: 44100,
+    geometry: { width: 320, height: 240, aspectRatio: 4 / 3 },
+    maxWidth: 1024,
+    maxHeight: 512,
+    firmware: "bios",
+    controllers: { 1: "digital", 2: "digital" },
+    discCount: 1,
+};
+
+const deleteDatabase = () => new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(databaseName);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("probe database deletion blocked"));
+});
+
+const codeOf = async (operation) => {
+    try {
+        await operation();
+        return null;
+    } catch (error) {
+        return PsxRuntimeError.is(error) ? error.code : -1;
+    }
+};
+
+const run = async () => {
+    try {
+        await deleteDatabase();
+        let now = Date.UTC(2026, 6, 1);
+        const first = PsxStorage.init({ indexedDB, databaseName, now: () => now++ });
+        const bytes = new Uint8Array(PsxStorage.MEMORY_CARD_BYTES);
+        bytes[0] = 23;
+        bytes[bytes.length - 1] = 91;
+        const revisionOne = await first.saveMemoryCard({
+            profileId: "browser",
+            cardId: "card-one",
+            expectedRevision: null,
+            bytes,
+        });
+        await first.saveState({
+            profileId: "browser",
+            name: "Checkpoint",
+            machine,
+            discIndex: 0,
+            payload: new Uint8Array([7, 8, 9]),
+        });
+
+        const reloaded = PsxStorage.init({ indexedDB, databaseName, now: () => now++ });
+        const loadedCard = await reloaded.loadMemoryCard("browser", "card-one");
+        const loadedState = await reloaded.loadState({
+            profileId: "browser", name: "Checkpoint", machine,
+        });
+        const tabOne = await reloaded.loadMemoryCard("browser", "card-one");
+        const tabTwo = await reloaded.loadMemoryCard("browser", "card-one");
+        const nextBytes = bytes.slice();
+        nextBytes[0] = 44;
+        const revisionTwo = await reloaded.saveMemoryCard({
+            profileId: "browser",
+            cardId: "card-one",
+            expectedRevision: tabOne.revision,
+            bytes: nextBytes,
+        });
+        const conflict = await codeOf(() => reloaded.saveMemoryCard({
+            profileId: "browser",
+            cardId: "card-one",
+            expectedRevision: tabTwo.revision,
+            bytes,
+        }));
+        const incompatible = await codeOf(() => reloaded.loadState({
+            profileId: "browser",
+            name: "Checkpoint",
+            machine: { ...machine, buildId: "a".repeat(64) },
+        }));
+        const history = await reloaded.loadMemoryCardRevisions("browser", "card-one");
+        const result = {
+            ok: revisionOne.revision === 1
+                && loadedCard.revision === 1
+                && loadedCard.bytes[0] === 23
+                && loadedCard.bytes[loadedCard.bytes.length - 1] === 91
+                && loadedState.payload.join(",") === "7,8,9"
+                && revisionTwo.revision === 2 && revisionTwo.bytes[0] === 44
+                && conflict === PsxRuntimeError.CODE.STORAGE_FAILED
+                && incompatible === PsxRuntimeError.CODE.STATE_INCOMPATIBLE
+                && history.length === 2
+                && history[0].revision === 2 && history[1].revision === 1,
+            reload: {
+                cardRevision: loadedCard.revision,
+                edgeBytes: [loadedCard.bytes[0], loadedCard.bytes[loadedCard.bytes.length - 1]],
+                stateBytes: [...loadedState.payload],
+            },
+            revisions: history.map((record) => [record.revision, record.bytes[0]]),
+            conflict,
+            incompatible,
+        };
+        await deleteDatabase();
+        await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+    } catch (error) {
+        await fetch("/result", {
+            method: "POST",
+            body: JSON.stringify({
+                ok: false,
+                message: error instanceof Error ? error.message : String(error),
+                code: PsxRuntimeError.is(error) ? error.code : null,
+            }),
+        });
+    }
+};
+
+void run();
+</script>

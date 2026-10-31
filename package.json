@@ -41,6 +41,7 @@
     "probe:bios": "node core/probes/run-browser-probe.mjs bios",
     "probe:m4": "node core/probes/run-browser-probe.mjs m4",
     "probe:m6": "npm run build:package && node core/probes/run-browser-probe.mjs m6",
+    "probe:m7": "npm run build:package && node core/probes/run-browser-probe.mjs m7",
     "test": "node --import tsx tests/run.ts spec",
     "test:spec": "node --import tsx tests/run.ts spec",
     "test:shim": "node scripts/test-native-shim.mjs",
