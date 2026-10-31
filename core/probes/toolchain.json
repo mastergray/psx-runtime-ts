@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "status": "probe-pin",
+  "emsdkVersion": "6.0.2",
+  "emsdkCommit": "d7b4130688bfa348392b921ab04015aa15c4f154",
+  "emscriptenReleaseCommit": "004876f1984e18a9eb0736c5ca417ac86d386fb8",
+  "emccCommit": "7a2d97d627ff4945eae28847ce0387ac52b92c09",
+  "pythonMinimum": "3.10",
+  "nodeVersionObserved": "22.22.2",
+  "requiredLinkFlags": [
+    "-sMODULARIZE=1",
+    "-sEXPORT_ES6=1",
+    "-sENVIRONMENT=worker",
+    "-sFORCE_FILESYSTEM=1",
+    "-lworkerfs.js",
+    "-sUSE_ZLIB=1",
+    "-sALLOW_MEMORY_GROWTH=1",
+    "-sGROWABLE_ARRAYBUFFERS=0",
+    "-Wno-experimental",
+    "-sNO_EXIT_RUNTIME=1"
+  ],
+  "notes": [
+    "GROWABLE_ARRAYBUFFERS=0 is required because Chrome 150 rejects TextDecoder input backed by a resizable ArrayBuffer in the generated filesystem glue.",
+    "The final EMSDK_VERSION file remains intentionally absent until the remaining M0 probes close."
+  ]
+}

@@ -6,10 +6,10 @@ the browser. It follows the lifecycle and package boundaries established by
 PlayStation-specific libretro bridge, Worker-hosted WebAssembly core, disc
 handling, controller ports, memory cards and save states.
 
-The project is currently at the scaffold/M0 feasibility stage. No emulator
-core or toolchain has been selected yet. M0 will build and measure pinned
-PCSX-ReARMed and Beetle PSX candidates before production implementation
-begins.
+The project is currently at the scaffold/M0 feasibility stage. The completed
+baseline comparison provisionally favors PCSX-ReARMed with Emscripten 6.0.2,
+but production source metadata remains intentionally uncommitted until the
+remaining M0 long-run and lifecycle probes pass.
 
 See the [implementation spec](docs/psx-runtime-spec.md) for the architecture,
 public contracts, probe plan, milestones and release gates. Current progress

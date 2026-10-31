@@ -1,0 +1,60 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WORKERFS probe</title>
+<body>running<img hidden src="/wait"></body>
+<script>
+(async () => {
+try {
+const mebibyte = 1024 * 1024;
+const base = new Uint8Array(mebibyte);
+for (let index = 0; index < base.length; index++) base[index] = (index * 31 + 7) & 0xff;
+const chunk = new Blob([base]);
+const blob = new Blob(Array.from({ length: 256 }, () => chunk));
+const reads = [
+    { offset: 0, length: 4096 },
+    { offset: 128 * mebibyte + 123, length: 8192 },
+    { offset: blob.size - 4096, length: 4096 },
+];
+
+const expectedChecksum = ({ offset, length }) => {
+    let hash = 2166136261;
+    for (let index = 0; index < length; index++) {
+        const sourceIndex = (offset + index) % mebibyte;
+        hash ^= (sourceIndex * 31 + 7) & 0xff;
+        hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash;
+};
+
+const workerResult = await new Promise((resolve, reject) => {
+    const worker = new Worker("./workerfs-probe.worker.mjs", { type: "module" });
+    worker.onmessage = ({ data }) => {
+        worker.terminate();
+        resolve(data);
+    };
+    worker.onerror = (event) => {
+        worker.terminate();
+        reject(new Error(event.message));
+    };
+    worker.postMessage({ blob, reads });
+});
+
+const expected = reads.map(expectedChecksum);
+const result = {
+    ...workerResult,
+    expected,
+    expectedSize: blob.size,
+    checksumsMatch: workerResult.ok === true
+        && expected.every((hash, index) => workerResult.checksums[index] === hash),
+};
+await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+document.body.textContent = JSON.stringify(result);
+document.title = result.ok && result.size === result.expectedSize && result.checksumsMatch ? "PASS" : "FAIL";
+} catch (error) {
+    const result = { ok: false, message: error instanceof Error ? error.message : String(error) };
+    await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+    document.body.textContent = JSON.stringify(result);
+    document.title = "ERROR";
+}
+})();
+</script>

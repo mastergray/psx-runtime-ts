@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "PSn00bSDK",
+  "version": "0.19",
+  "releaseUrl": "https://github.com/Lameguy64/PSn00bSDK/releases/tag/v0.19",
+  "archiveUrl": "https://github.com/Lameguy64/PSn00bSDK/releases/download/v0.19/PSn00bSDK-0.19-Linux.zip",
+  "archiveSha256": "4e14542da194d744459bd1c8f2f0e715302e32bb3388cb9531639fb5696d6277",
+  "compiler": "mipsel-none-elf-gcc (GCC) 11.1.0",
+  "licenseUrl": "https://github.com/Lameguy64/PSn00bSDK/blob/v0.19/LICENSE.md"
+}

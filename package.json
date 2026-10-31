@@ -14,7 +14,14 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist",
+    "dist/index.d.ts",
+    "dist/index.d.ts.map",
+    "dist/index.js",
+    "dist/index.js.map",
+    "dist/shared.types.d.ts",
+    "dist/shared.types.d.ts.map",
+    "dist/shared.types.js",
+    "dist/shared.types.js.map",
     "src",
     "LICENSE",
     "README.md"
@@ -28,6 +35,10 @@
     "compile:package": "tsc -p tsconfig.package.json",
     "build": "run-s clean compile",
     "build:package": "run-s clean compile:package",
+    "build:fixture": "node scripts/build-fixture.mjs",
+    "probe:workerfs": "node core/probes/run-browser-probe.mjs workerfs",
+    "probe:pcsx": "node core/probes/run-browser-probe.mjs pcsx",
+    "probe:beetle": "node core/probes/run-browser-probe.mjs beetle",
     "test": "node --import tsx tests/run.ts spec",
     "test:spec": "node --import tsx tests/run.ts spec",
     "test:browser": "node --import tsx tests/run.ts browser",

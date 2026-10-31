@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-30",
+  "status": "in-progress",
+  "referenceMachine": {
+    "os": "Linux 5.17.5-76051705-generic x86_64",
+    "cpu": "11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz",
+    "logicalCpuCount": 8,
+    "memoryGiB": 62,
+    "browser": "Google Chrome 150.0.7871.46"
+  },
+  "toolchain": {
+    "emsdkVersion": "6.0.2",
+    "emccCommit": "7a2d97d627ff4945eae28847ce0387ac52b92c09",
+    "nodeVersion": "22.22.2"
+  },
+  "fixture": {
+    "toolchain": "PSn00bSDK 0.19 / mipsel-none-elf-gcc 11.1.0",
+    "cueSha256": "4f9fc035621fc4f09b7051b3d98839668b3516939b5008fff005a06a479423a7",
+    "binSha256": "c010e025bcd91fbde766f3f6ee52a248c2e7e6d567ebc9d572b5a873a4d6af85",
+    "binBytes": 1288896,
+    "cleanBuildsCompared": 2,
+    "byteIdentical": true
+  },
+  "workerfs": {
+    "logicalBlobBytes": 268435456,
+    "readOffsets": [0, 134217851, 268431360],
+    "readLengths": [4096, 8192, 4096],
+    "checksums": [1751014853, 35880389, 1751014853],
+    "elapsedMs": 4.4,
+    "correct": true,
+    "wasmSha256": "601781acf58d7584556ee0cc7cb7878aee6804496aabdcd854d59b64924f5009"
+  },
+  "candidates": {
+    "pcsx-rearmed": {
+      "commit": "9f8b028cd66200bb9a18a878a5e73925a629b0a7",
+      "staticArchiveBytes": 5977552,
+      "probeJavaScriptBytes": 64446,
+      "probeWasmBytes": 711115,
+      "probeWasmSha256": "4ac973c95ad3c2133ea39586bca10eeaf590e4b4c29845bb4e1cf5f94f22f7de",
+      "initialWasmMemoryBytes": 67108864,
+      "loadGameMs": 22.8,
+      "firstVideoMs": 35.5,
+      "framesToFirstVideo": 1,
+      "scriptedRunMs": 2064.8,
+      "videoFrames": 424,
+      "video": {
+        "width": 320,
+        "height": 240,
+        "pitch": 640,
+        "pixelFormat": "RGB565",
+        "hash": 1547062337,
+        "nullFrames": 0
+      },
+      "audio": {
+        "sampleRate": 44100,
+        "frames": 311576,
+        "hash": 2454470225,
+        "peak": 12096
+      },
+      "input": {
+        "neutralCenterPixel": 8456,
+        "pressedCenterPixel": 9096,
+        "changedAtSameAnimationPhase": true
+      },
+      "reportedFps": 60,
+      "startupEnvironmentCommandsFirstOccurrence": [27, 35, 52, 16, 69, 59, 15, 9, 6, 3, 57, 58, 23, 65587, 8, 11, 10, 31, 65572, 62],
+      "runtimeEnvironmentCommandCounts": { "17": 424, "37": 1, "63": 1, "65576": 425 }
+    },
+    "beetle-psx": {
+      "commit": "53246dc2d00f3c00cc56baa1061902da7a6651e4",
+      "staticArchiveBytes": 23456710,
+      "probeJavaScriptBytes": 66579,
+      "probeWasmBytes": 3771994,
+      "probeWasmSha256": "fded874415a984c08f68e00af38740191a434faa67920a5149370c107422ccb3",
+      "initialWasmMemoryBytes": 134217728,
+      "loadGameMs": 30.9,
+      "firstVideoMs": 48.6,
+      "framesToFirstVideo": 1,
+      "scriptedRunMs": 2460.6,
+      "videoFrames": 424,
+      "video": {
+        "width": 700,
+        "height": 480,
+        "pitch": 2800,
+        "pixelFormat": "XRGB8888",
+        "hash": 4151307437,
+        "nullFrames": 0
+      },
+      "audio": {
+        "sampleRate": 44100,
+        "frames": 312680,
+        "hash": 3076475766,
+        "peak": 9702
+      },
+      "input": {
+        "neutralCenterPixel": 9490632,
+        "pressedCenterPixel": 10016976,
+        "changedAtSameAnimationPhase": true
+      },
+      "reportedFps": 59.94,
+      "startupEnvironmentCommandsFirstOccurrence": [52, 16, 65581, 65582, 35, 27, 9, 31, 57, 58, 28, 44, 59, 65587, 8, 11, 23, 10, 15, 55, 65572],
+      "runtimeEnvironmentCommandCounts": { "17": 424 }
+    }
+  },
+  "provisionalDecision": {
+    "winner": "pcsx-rearmed",
+    "reason": "Both candidates pass the same fixture/shim probe; PCSX-ReARMed is smaller, starts faster, completes the scripted run faster, and needs half the initial Wasm memory.",
+    "final": false,
+    "remainingProbeIds": ["P3-retail-bios", "P6-dynamic-geometry", "P7-pal-and-60-second", "P8-xa-and-cdda", "P9", "P10", "P11-peak", "P12"]
+  }
+}
