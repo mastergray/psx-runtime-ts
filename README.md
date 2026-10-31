@@ -8,9 +8,9 @@ handling, controller ports, memory cards and save states.
 
 M0 feasibility, the M1 public-contract foundation, the M2 bridge/Worker
 foundation, the M3 content pipeline and the M4 adapter/session are complete.
-The M5 input layer is also complete, including independent input channels,
-keyboard mapping, analog keyboard ramping, explicit gamepad-to-port assignment,
-dead-zone handling and rumble forwarding.
+The M5 input layer and M6 browser surfaces are also complete, including
+independent input channels, keyboard/gamepad sources, dynamic Canvas 2D
+layout and bounded gesture-unlocked Web Audio playback.
 PCSX-ReARMed at the commit recorded in
 `core/SOURCE.json` is the selected core, and Emscripten 6.0.2 is the pinned
 toolchain. The P1–P12 evidence covers real-BIOS boot, dedicated-Worker disc
@@ -39,6 +39,10 @@ input, reset, disc, state and terminal-cleanup lifecycle.
 M5 adds the multi-source input coordinator plus keyboard and standard-gamepad
 sources. It reference-counts shared controls, resolves opposing directions,
 restores analog ownership and releases held controls on focus or device loss.
+
+M6 adds aspect-correct `fit`, `integer`, `fill` and `stretch` display modes,
+dynamic canvas backing geometry, fullscreen and filtering controls, plus lazy
+stereo Web Audio playback with independent mute/volume and a bounded queue.
 
 See the [implementation spec](docs/psx-runtime-spec.md) for the architecture,
 public contracts, probe plan, milestones and release gates. Current progress

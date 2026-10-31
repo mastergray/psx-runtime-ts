@@ -4,6 +4,8 @@ export { default as LibretroPsxAdapter } from "./LibretroPsxAdapter/LibretroPsxA
 export { default as PsxInput } from "./PsxInput/PsxInput.js";
 export { default as KeyboardSource, DEFAULT_KEYBOARD_MAP } from "./KeyboardSource/KeyboardSource.js";
 export { default as GamepadSource } from "./GamepadSource/GamepadSource.js";
+export { default as PsxDisplay } from "./PsxDisplay/PsxDisplay.js";
+export { default as PsxAudio } from "./PsxAudio/PsxAudio.js";
 export {
     isPsxRuntimeErrorConfig,
     type PsxRuntimeErrorConfig,
@@ -56,6 +58,51 @@ export {
     type GamepadProviderLike,
     type GamepadSourceConfig,
 } from "./GamepadSource/types.js";
+export {
+    isPsxCanvasContextLike,
+    isPsxCanvasLike,
+    isPsxContainerLike,
+    isPsxDisplayAttachConfig,
+    isPsxDisplayConfig,
+    isPsxDisplayDocumentLike,
+    isPsxDisplayLayout,
+    isPsxRect,
+    isPsxScalingMode,
+    type PsxCanvasContextLike,
+    type PsxCanvasLike,
+    type PsxCanvasStyleLike,
+    type PsxContainerLike,
+    type PsxDisplayAttachConfig,
+    type PsxDisplayConfig,
+    type PsxDisplayDocumentLike,
+    type PsxDisplayLayout,
+    type PsxExitFullscreen,
+    type PsxImageDataLike,
+    type PsxImageRendering,
+    type PsxPlaceholderLike,
+    type PsxRect,
+    type PsxRequestFullscreen,
+    type PsxResizeObserverConstructorLike,
+    type PsxResizeObserverLike,
+    type PsxScalingMode,
+} from "./PsxDisplay/types.js";
+export {
+    deinterleavePsxStereo,
+    isPsxAudioConfig,
+    isPsxAudioContextLike,
+    isPsxGestureSourceLike,
+    psxAudioQueueCapDecision,
+    type PsxAudioBufferLike,
+    type PsxAudioBufferSourceLike,
+    type PsxAudioConfig,
+    type PsxAudioContextFactory,
+    type PsxAudioContextLike,
+    type PsxAudioNodeLike,
+    type PsxAudioParamLike,
+    type PsxAudioQueueCapDecision,
+    type PsxGainNodeLike,
+    type PsxGestureSourceLike,
+} from "./PsxAudio/types.js";
 
 export {
     isAuditedDisc,

@@ -1,0 +1,114 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>M6 browser surfaces probe</title>
+<style>
+#stage { width: 800px; height: 600px; }
+</style>
+<button id="unlock" type="button">Unlock audio</button>
+<div id="stage"><canvas id="screen"></canvas></div>
+<script type="module">
+import PsxAudio from "../../dist/PsxAudio/PsxAudio.js";
+import PsxDisplay from "../../dist/PsxDisplay/PsxDisplay.js";
+
+const machine = {
+    core: "Browser probe",
+    coreVersion: "1",
+    buildId: "c".repeat(64),
+    gameId: "m6-browser-probe",
+    region: "ntsc-u",
+    framesPerSecond: 60,
+    sampleRate: 44100,
+    geometry: { width: 320, height: 240, aspectRatio: 4 / 3 },
+    maxWidth: 1024,
+    maxHeight: 512,
+    firmware: "bios",
+    controllers: { 1: "digital", 2: "digital" },
+    discCount: 1,
+};
+
+const frameListeners = new Set();
+const soundListeners = new Set();
+const session = {
+    machine,
+    discIndex: 0,
+    trayOpen: false,
+    setButton() {}, setAxis() {}, pause() {}, resume() {},
+    async reset() {}, async setDisc() {},
+    async readMemoryCard() { return new Uint8Array(128 * 1024); },
+    async serializeState() { return new Uint8Array(); },
+    async unserializeState() {}, async exit() {},
+    onTick() { return () => {}; },
+    onFrame(listener) { frameListeners.add(listener); return () => frameListeners.delete(listener); },
+    onSound(listener) { soundListeners.add(listener); return () => soundListeners.delete(listener); },
+    onRumble() { return () => {}; }, onExit() { return () => {}; },
+};
+
+const waitUntil = async (predicate, timeoutMs) => {
+    const started = performance.now();
+    while (!predicate()) {
+        if (performance.now() - started > timeoutMs) throw new Error("browser surface probe timed out");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+};
+
+const run = async () => {
+try {
+    const canvas = document.querySelector("#screen");
+    const container = document.querySelector("#stage");
+    const display = PsxDisplay.init({ canvas, container });
+    display.attach(session);
+    const rgba = new Uint8ClampedArray(640 * 240 * 4);
+    rgba[0] = 19;
+    rgba[3] = 255;
+    frameListeners.forEach((listener) => listener({
+        width: 640,
+        height: 240,
+        aspectRatio: 4 / 3,
+        rgba,
+    }));
+
+    const audio = PsxAudio.init({ session, gestureSource: document.querySelector("#unlock") });
+    audio.armGestureUnlock();
+    await waitUntil(() => audio.isUnlocked, 5000);
+    const samples = new Float32Array(735 * 2);
+    for (let index = 0; index < 10; index++) soundListeners.forEach((listener) => listener({
+        samples,
+        frames: 735,
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const context = canvas.getContext("2d");
+    const pixel = [...context.getImageData(0, 0, 1, 1).data];
+    const result = {
+        ok: canvas.width === 640 && canvas.height === 240
+            && display.aspectRatio === 4 / 3
+            && Math.round(display.layout.width) === 800
+            && Math.round(display.layout.height) === 600
+            && pixel[0] === 19 && pixel[3] === 255
+            && audio.isUnlocked && audio.deviceSampleRate > 0
+            && audio.queuedMs <= PsxAudio.MAX_QUEUE_MS,
+        backing: [canvas.width, canvas.height],
+        layout: [display.layout.width, display.layout.height],
+        pixel,
+        audio: {
+            unlocked: audio.isUnlocked,
+            deviceSampleRate: audio.deviceSampleRate,
+            queuedMs: audio.queuedMs,
+            droppedSamples: audio.droppedSamples,
+        },
+    };
+    audio.destroy();
+    display.destroy();
+    await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+} catch (error) {
+    await fetch("/result", {
+        method: "POST",
+        body: JSON.stringify({
+            ok: false,
+            message: error instanceof Error ? error.message : String(error),
+        }),
+    });
+}
+};
+
+void run();
+</script>

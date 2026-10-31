@@ -28,6 +28,7 @@ npm run probe:cards
 npm run probe:state-disc
 npm run probe:memory
 npm run probe:bios
+npm run probe:m6
 ```
 
 The browser runner serves only the explicit probe files and generated fixture,
@@ -49,3 +50,7 @@ The BIOS probe requires `PSX_BIOS_PATH` to name a private user-supplied input.
 It records only a recognized region, a first-frame hash, timings and a
 sanitized boot log. The remaining focused probes cover XA/CD-DA transport, two
 memory-card slots, state/disc restoration and bounded near-maximum-disc memory.
+
+`probe:m6` needs no emulator content. It loads the compiled public display and
+audio classes in Chromium and verifies dynamic Canvas 2D geometry, a rendered
+pixel, gesture unlock and the bounded Web Audio queue.
