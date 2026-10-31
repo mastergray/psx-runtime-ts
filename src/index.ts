@@ -7,6 +7,7 @@ export { default as GamepadSource } from "./GamepadSource/GamepadSource.js";
 export { default as PsxDisplay } from "./PsxDisplay/PsxDisplay.js";
 export { default as PsxAudio } from "./PsxAudio/PsxAudio.js";
 export { default as PsxStorage } from "./PsxStorage/PsxStorage.js";
+export { default as PsxGameStore } from "./PsxGameStore/PsxGameStore.js";
 export { default as PsxPlayer } from "./PsxPlayer/PsxPlayer.js";
 export { default as PsxConsole } from "./PsxConsole/PsxConsole.js";
 export {
@@ -131,6 +132,22 @@ export {
     type PsxStorageMutation,
     type PsxStorageStore,
 } from "./PsxStorage/types.js";
+export {
+    isPsxBlobHasherLike,
+    isPsxGameStoreConfig,
+    isPsxGameStoreDriverLike,
+    isPsxGameStoreInitConfig,
+    isPsxStorageManagerLike,
+    isPsxStoredGame,
+    type PsxBlobHasherLike,
+    type PsxGameImportOptions,
+    type PsxGameStoreConfig,
+    type PsxGameStoreDriverLike,
+    type PsxGameStoreInitConfig,
+    type PsxStorageEstimate,
+    type PsxStorageManagerLike,
+    type PsxStoredGame,
+} from "./PsxGameStore/types.js";
 export {
     isPsxPlayerAudioLike,
     isPsxPlayerConfig,

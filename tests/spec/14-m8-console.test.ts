@@ -108,7 +108,11 @@ class ManualFrames implements FrameScheduler {
 class FakeGameStore {
     readonly games = new Map<string, DiscSet>();
     imports = 0;
-    async import(game: DiscSet): Promise<void> { this.games.set(game.gameId, game); this.imports++; }
+    async import(game: DiscSet): Promise<{ readonly gameId: string }> {
+        this.games.set(game.gameId, game);
+        this.imports++;
+        return { gameId: game.gameId };
+    }
     async get(gameId: string): Promise<DiscSet | null> { return this.games.get(gameId) ?? null; }
 }
 

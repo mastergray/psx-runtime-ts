@@ -47,7 +47,7 @@ export interface PsxConsolePlayerLike {
 }
 
 export interface PsxConsoleGameStoreLike {
-    import(game: DiscSet): Promise<unknown>;
+    import(game: DiscSet, options?: { readonly displayTitle?: string }): Promise<{ readonly gameId: string }>;
     get(gameId: string): Promise<DiscSet | null>;
 }
 

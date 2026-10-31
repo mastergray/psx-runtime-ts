@@ -1,6 +1,7 @@
 import {
     LibretroPsxAdapter,
     PsxConsole,
+    PsxGameStore,
     PsxRuntimeError,
     PsxStorage,
 } from "../src/index.js";
@@ -41,6 +42,7 @@ let droppedFiles: File[] | null = null;
 let runtime: PsxConsole | null = null;
 let player: PsxPlayer | null = null;
 let activeBuildUrl = "";
+const gameStore = PsxGameStore.init();
 
 const write = (message: string): void => {
     logElement.textContent = `${new Date().toISOString()} ${message}\n${logElement.textContent ?? ""}`.slice(0, 12_000);
@@ -89,6 +91,7 @@ const ensureRuntime = async (): Promise<PsxConsole> => {
             },
             target: document,
         },
+        gameStore,
     });
     player = runtime.player as PsxPlayer;
     player.on("status", (status) => { statusElement.textContent = status; });
@@ -108,6 +111,14 @@ const run = (action: () => Promise<unknown> | unknown): void => {
     void Promise.resolve().then(action).catch(report);
 };
 
+const startConfig = () => ({
+    bios: selectedBios(),
+    controllers: {
+        1: element<HTMLSelectElement>("controller-1").value as PsxControllerType,
+        2: element<HTMLSelectElement>("controller-2").value as PsxControllerType,
+    },
+});
+
 element("audit").addEventListener("click", () => run(async () => {
     const console = await ensureRuntime();
     const result = await console.auditFiles(selectedFiles(), localConfig());
@@ -116,14 +127,52 @@ element("audit").addEventListener("click", () => run(async () => {
 
 element("start").addEventListener("click", () => run(async () => {
     const console = await ensureRuntime();
-    await console.startFiles(selectedFiles(), localConfig(), {
-        bios: selectedBios(),
-        controllers: {
-            1: element<HTMLSelectElement>("controller-1").value as PsxControllerType,
-            2: element<HTMLSelectElement>("controller-2").value as PsxControllerType,
-        },
-    });
+    await console.startFiles(selectedFiles(), localConfig(), startConfig());
     write("Session started.");
+}));
+
+const selectedStoredGame = (): string => {
+    const gameId = element<HTMLSelectElement>("stored-game").value;
+    if (gameId.length === 0) throw new Error("Select a stored game first.");
+    return gameId;
+};
+
+const refreshGames = async (): Promise<void> => {
+    const select = element<HTMLSelectElement>("stored-game");
+    const previous = select.value;
+    const games = await gameStore.list();
+    select.replaceChildren(...games.map((game) => {
+        const option = document.createElement("option");
+        option.value = game.gameId;
+        option.textContent = `${game.displayTitle} (${game.discCount} disc${game.discCount === 1 ? "" : "s"})`;
+        return option;
+    }));
+    if (games.some(({ gameId }) => gameId === previous)) select.value = previous;
+};
+
+element("import-game").addEventListener("click", () => run(async () => {
+    const console = await ensureRuntime();
+    const imported = await console.importFiles(selectedFiles(), localConfig());
+    await refreshGames();
+    element<HTMLSelectElement>("stored-game").value = imported.gameId;
+    write(`Imported ${imported.gameId}.`);
+}));
+element("refresh-games").addEventListener("click", () => run(refreshGames));
+element("start-stored").addEventListener("click", () => run(async () => {
+    const console = await ensureRuntime();
+    await console.startStored(selectedStoredGame(), startConfig());
+    write("Stored session started.");
+}));
+element("rename-stored").addEventListener("click", () => run(async () => {
+    await gameStore.renameDisplayTitle(
+        selectedStoredGame(),
+        element<HTMLInputElement>("stored-title").value,
+    );
+    await refreshGames();
+}));
+element("delete-stored").addEventListener("click", () => run(async () => {
+    await gameStore.delete(selectedStoredGame());
+    await refreshGames();
 }));
 
 element("stop").addEventListener("click", () => run(async () => { await runtime?.stop(); }));
@@ -198,3 +247,4 @@ const loadPreload = async (): Promise<void> => {
 };
 
 void loadPreload().catch(report);
+void refreshGames().catch(report);

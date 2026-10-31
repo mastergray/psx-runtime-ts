@@ -1,0 +1,77 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>M9 game store probe</title>
+<script type="module">
+import PsxGameStore from "../../dist/PsxGameStore/PsxGameStore.js";
+
+const databaseName = "psx-runtime-m9-probe";
+
+const deleteDatabase = () => new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(databaseName);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("probe database deletion blocked"));
+});
+
+const makeGame = (directory, cueName, trackName, bytes) => ({
+    gameId: `${directory}-title`,
+    entry: `${directory}/${cueName}`,
+    files: [
+        {
+            path: `${directory}/${cueName}`,
+            blob: new Blob([`FILE "${trackName}" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\n`]),
+        },
+        { path: `${directory}/${trackName}`, blob: new Blob([bytes]) },
+    ],
+});
+
+const run = async () => {
+    try {
+        await deleteDatabase();
+        const bytes = new Uint8Array(8 * 1024 * 1024);
+        for (let index = 0; index < bytes.length; index += 4093) bytes[index] = index & 0xff;
+        const first = PsxGameStore.init({ indexedDB, databaseName, now: () => Date.UTC(2026, 9, 30) });
+        const imported = await first.import(makeGame("first", "alpha.cue", "alpha.bin", bytes), {
+            displayTitle: "Browser fixture",
+        });
+        const reloaded = PsxGameStore.init({ indexedDB, databaseName });
+        const game = await reloaded.get(imported.gameId);
+        const duplicate = await reloaded.import(makeGame("renamed", "other.cue", "other.bin", bytes));
+        const list = await reloaded.list();
+        const track = game.files.find(({ path }) => path.endsWith(".bin"));
+        const edges = new Uint8Array(await new Blob([
+            track.blob.slice(0, 1),
+            track.blob.slice(track.blob.size - 1),
+        ]).arrayBuffer());
+        const result = {
+            ok: imported.gameId === duplicate.gameId
+                && imported.gameId.startsWith("psx-v1-")
+                && list.length === 1
+                && game.entry === "disc-000.cue"
+                && game.files.map(({ path }) => path).join(",") === "disc-000.cue,track-000.bin"
+                && track.blob instanceof Blob
+                && track.blob.size === bytes.byteLength
+                && edges[0] === bytes[0]
+                && edges[1] === bytes[bytes.length - 1],
+            gameId: imported.gameId,
+            records: list.length,
+            files: game.files.map(({ path, blob }) => [path, blob.size]),
+            deduplicated: imported.gameId === duplicate.gameId,
+        };
+        await reloaded.delete(imported.gameId);
+        await deleteDatabase();
+        await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+    } catch (error) {
+        await fetch("/result", {
+            method: "POST",
+            body: JSON.stringify({
+                ok: false,
+                message: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : null,
+            }),
+        });
+    }
+};
+
+void run();
+</script>

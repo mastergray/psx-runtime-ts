@@ -92,8 +92,13 @@ export default class PsxConsole {
             message: "The selected files failed disc-set validation.",
             data: audit,
         });
-        await this.#gameStore.import(game);
-        return game;
+        const stored = await this.#gameStore.import(game, { displayTitle: local.gameId });
+        const normalized = await this.#gameStore.get(stored.gameId);
+        if (normalized === null) throw new PsxRuntimeError({
+            code: PsxRuntimeError.CODE.STORAGE_FAILED,
+            message: "Imported game content could not be reloaded.",
+        });
+        return normalized;
     }
 
     async startStored(gameId: string, config: Omit<PsxStartConfig, "game">): Promise<void> {

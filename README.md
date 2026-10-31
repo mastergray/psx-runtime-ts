@@ -8,8 +8,8 @@ handling, controller ports, memory cards and save states.
 
 M0 feasibility, the M1 public-contract foundation, the M2 bridge/Worker
 foundation, the M3 content pipeline and the M4 adapter/session are complete.
-The M5 input layer, M6 browser surfaces, M7 persistence and M8 composition are
-also complete.
+The M5 input layer, M6 browser surfaces, M7 persistence, M8 composition and M9
+local library are also complete.
 Together they add independent input channels, keyboard/gamepad sources,
 dynamic Canvas 2D layout, bounded gesture-unlocked Web Audio playback,
 revisioned memory cards and build-compatible named states.
@@ -55,6 +55,11 @@ and a developer harness. Local selections and stored content share the same
 adapter path, input sources follow session status, and shutdown flushes cards
 before releasing the core.
 
+M9 adds content-addressed IndexedDB storage with normalized descriptors,
+original track Blobs, incremental Worker hashing, filename-independent
+deduplication and quota-aware atomic imports. Its package gate allowlists the
+npm tarball and verifies the selected core/toolchain notices.
+
 See the [implementation spec](docs/psx-runtime-spec.md) for the architecture,
 public contracts, probe plan, milestones and release gates. Current progress
 is tracked in the [roadmap](docs/ROADMAP.md).
@@ -86,3 +91,5 @@ The TypeScript runtime uses the [MIT licence](LICENSE). Emulator cores and
 their generated artifacts retain their own licences and distribution
 requirements. A core build is not part of the npm package unless a later
 release explicitly documents and satisfies those requirements.
+See [core distribution](docs/core-distribution.md) for the separate artifact
+and corresponding-source policy.

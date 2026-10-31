@@ -31,6 +31,7 @@ npm run probe:bios
 npm run probe:m6
 npm run probe:m7
 npm run probe:m8
+npm run probe:m9
 ```
 
 The browser runner serves only the explicit probe files and generated fixture,
@@ -63,3 +64,7 @@ recoverable card revisions and incompatible-state rejection.
 
 `probe:m8` compiles the developer harness, opens it in Chromium and verifies
 that its controls, status surface and canvas load without page errors.
+
+`probe:m9` imports an 8 MiB Blob through the production hashing Worker and
+IndexedDB driver, reloads it through a fresh store, and verifies canonical
+paths plus filename-independent deduplication.

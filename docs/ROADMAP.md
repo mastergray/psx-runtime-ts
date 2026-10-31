@@ -25,14 +25,14 @@ are in [the implementation spec](psx-runtime-spec.md).
 - [x] M6: implement dynamic Canvas display and bounded Web Audio playback.
 - [x] M7: implement revisioned cards, compatible states and card auto-save.
 - [x] M8: compose the player, console and developer harness.
-- [ ] M9: implement local game storage, packaging and distribution gates.
+- [x] M9: implement local game storage, packaging and distribution gates.
 - [ ] M10: pass all `v1.0.0` release gates.
 
-## Next work: M9
+## Next work: M10
 
-M0–M8 are complete. `PsxPlayer` owns the reusable session lifecycle and
-coordinates display, audio, input, cards, states, disc changes and cleanup.
-`PsxConsole` provides one browser composition path for selected and stored
-content, while the developer harness exposes the complete lifecycle for real
-browser testing. M9 adds audited, deduplicated Blob storage, quota-aware
-imports, package auditing and distribution documentation.
+M0–M9 are complete. `PsxGameStore` audits before import, derives a versioned
+content identity with incremental Worker hashing, retains track Blobs in
+IndexedDB and deduplicates renamed copies. Quota and cancellation failures
+leave no partial record. The package audit rejects private inputs, generated
+media, caches and core binaries while checking the selected core notices. M10
+runs and records every clean-checkout `v1.0.0` gate.
