@@ -6,8 +6,8 @@ the implementation spec.
 
 There is deliberately no production `SOURCE.json` or `EMSDK_VERSION` yet. The
 baseline M0 comparison provisionally favors PCSX-ReARMed, but the remaining
-geometry, media, card, state, controlled firmware-path and near-maximum-disc
-memory probes must close before recording the production values. PAL/NTSC
-long-run timing and determinism are complete. Probe-only pins live under
-`core/probes/`. Source checkouts and compiled output belong under ignored
+media, card, state, controlled firmware-path and near-maximum-disc memory
+probes must close before recording the production values. PAL/NTSC long-run
+timing and determinism plus dynamic geometry are complete. Probe-only pins live
+under `core/probes/`. Source checkouts and compiled output belong under ignored
 caches and `dist/core/`, not here.

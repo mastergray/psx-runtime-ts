@@ -24,7 +24,13 @@ interface EvidenceSummary {
     fixtureSdkVersion: string;
     fixtureSourcePinned: boolean;
     final: boolean;
+    geometryFixturePinned: boolean;
+    geometryFormatsCorrect: boolean;
+    geometryNullFramesCorrect: boolean;
+    geometryPass: boolean;
+    geometryRepeatable: boolean;
     palFixturePinned: boolean;
+    remainingGeometryProbe: boolean;
     remainingLongRunProbe: boolean;
     status: string;
     winner: string;
@@ -45,6 +51,7 @@ const testFile: TestFile = {
                             fixture: {
                                 byteIdentical: boolean;
                                 cleanBuildsCompared: number;
+                                dynamicGeometryVariant: { binSha256: string; byteIdentical: boolean };
                                 palVariant: { binSha256: string; byteIdentical: boolean };
                             };
                             endurance: {
@@ -58,6 +65,20 @@ const testFile: TestFile = {
                                 crossOriginIsolated: boolean;
                                 deterministic: Record<string, { repeatableAcrossCadencesAndRuns: boolean }>;
                                 pass: boolean;
+                            };
+                            geometry: {
+                                formats: {
+                                    rgb565: { libretroValue: number; pitches: Record<string, number> };
+                                    xrgb8888: { libretroValue: number; pitches: Record<string, number> };
+                                };
+                                nullFrames: {
+                                    callbacks: number;
+                                    nullVideoFrames: number;
+                                    retainedFrameState: boolean;
+                                    videoFrames: number;
+                                };
+                                pass: boolean;
+                                repeatableAcrossRuns: boolean;
                             };
                             candidates: Record<string, { commit: string }>;
                             provisionalDecision: { final: boolean; remainingProbeIds: string[]; winner: string };
@@ -91,8 +112,24 @@ const testFile: TestFile = {
                             fixtureSdkVersion: toolchain.version,
                             fixtureSourcePinned: /^[a-f0-9]{64}$/u.test(toolchain.archiveSha256),
                             final: result.provisionalDecision.final,
+                            geometryFixturePinned: result.fixture.dynamicGeometryVariant.byteIdentical
+                                && /^[a-f0-9]{64}$/u.test(result.fixture.dynamicGeometryVariant.binSha256),
+                            geometryFormatsCorrect: result.geometry.formats.rgb565.libretroValue === 2
+                                && result.geometry.formats.rgb565.pitches["320"] === 640
+                                && result.geometry.formats.rgb565.pitches["256"] === 512
+                                && result.geometry.formats.xrgb8888.libretroValue === 1
+                                && result.geometry.formats.xrgb8888.pitches["320"] === 1280
+                                && result.geometry.formats.xrgb8888.pitches["256"] === 1024,
+                            geometryNullFramesCorrect: result.geometry.nullFrames.callbacks === 600
+                                && result.geometry.nullFrames.videoFrames === 300
+                                && result.geometry.nullFrames.nullVideoFrames === 300
+                                && result.geometry.nullFrames.retainedFrameState,
+                            geometryPass: result.geometry.pass,
+                            geometryRepeatable: result.geometry.repeatableAcrossRuns,
                             palFixturePinned: result.fixture.palVariant.byteIdentical
                                 && /^[a-f0-9]{64}$/u.test(result.fixture.palVariant.binSha256),
+                            remainingGeometryProbe: result.provisionalDecision.remainingProbeIds
+                                .some((id) => id.startsWith("P6")),
                             remainingLongRunProbe: result.provisionalDecision.remainingProbeIds
                                 .some((id) => id.startsWith("P7") || id.startsWith("P12")),
                             status: result.status,
@@ -113,7 +150,13 @@ const testFile: TestFile = {
                         fixtureSdkVersion: "0.19",
                         fixtureSourcePinned: true,
                         final: false,
+                        geometryFixturePinned: true,
+                        geometryFormatsCorrect: true,
+                        geometryNullFramesCorrect: true,
+                        geometryPass: true,
+                        geometryRepeatable: true,
                         palFixturePinned: true,
+                        remainingGeometryProbe: false,
                         remainingLongRunProbe: false,
                         status: "in-progress",
                         winner: "pcsx-rearmed",

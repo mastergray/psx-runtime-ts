@@ -51,7 +51,7 @@ if (compilerVersion !== manifest.compiler) {
 
 const fixedTimestamp = new Date("2000-01-01T00:00:00.000Z");
 
-const buildFixture = async ({ outputRoot, pal, region }) => {
+const buildFixture = async ({ dynamicGeometry, outputRoot, pal, variant }) => {
     run("cmake", [
         "-S", fixtureRoot,
         "-B", outputRoot,
@@ -60,6 +60,7 @@ const buildFixture = async ({ outputRoot, pal, region }) => {
         `-DCMAKE_TOOLCHAIN_FILE=${toolchain}`,
         `-DPSN00BSDK_TC=${sdk}`,
         `-DPSX_FIXTURE_PAL=${pal ? "ON" : "OFF"}`,
+        `-DPSX_FIXTURE_DYNAMIC_GEOMETRY=${dynamicGeometry ? "ON" : "OFF"}`,
     ]);
     run("cmake", ["--build", outputRoot, "--parallel", "--clean-first"]);
 
@@ -84,7 +85,7 @@ const buildFixture = async ({ outputRoot, pal, region }) => {
     const binPath = resolve(outputRoot, "m0-fixture.bin");
     const [cue, image] = await Promise.all([readFile(cuePath), readFile(binPath)]);
     return {
-        region,
+        variant,
         cueSha256: createHash("sha256").update(cue).digest("hex"),
         binSha256: createHash("sha256").update(image).digest("hex"),
         binBytes: image.byteLength,
@@ -93,8 +94,14 @@ const buildFixture = async ({ outputRoot, pal, region }) => {
 
 const fixtures = [];
 for (const configuration of [
-    { outputRoot: generatedRoot, pal: false, region: "ntsc" },
-    { outputRoot: resolve(generatedRoot, "pal"), pal: true, region: "pal" },
+    { dynamicGeometry: false, outputRoot: generatedRoot, pal: false, variant: "ntsc" },
+    { dynamicGeometry: false, outputRoot: resolve(generatedRoot, "pal"), pal: true, variant: "pal" },
+    {
+        dynamicGeometry: true,
+        outputRoot: resolve(generatedRoot, "geometry"),
+        pal: false,
+        variant: "dynamic-geometry",
+    },
 ]) {
     fixtures.push(await buildFixture(configuration));
 }

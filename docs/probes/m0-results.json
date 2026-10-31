@@ -27,6 +27,13 @@
       "binBytes": 1288896,
       "cleanBuildsCompared": 2,
       "byteIdentical": true
+    },
+    "dynamicGeometryVariant": {
+      "cueSha256": "4f9fc035621fc4f09b7051b3d98839668b3516939b5008fff005a06a479423a7",
+      "binSha256": "10f600873136ce33793b7742de7d3dc680a02d8794913624698a5c01437bb25c",
+      "binBytes": 1288896,
+      "cleanBuildsCompared": 2,
+      "byteIdentical": true
     }
   },
   "workerfs": {
@@ -184,10 +191,54 @@
       "The acceptance matrix ran without COOP/COEP headers and reported crossOriginIsolated=false."
     ]
   },
+  "geometry": {
+    "core": "pcsx-rearmed",
+    "probeArtifact": {
+      "javaScriptBytes": 65480,
+      "wasmBytes": 717313,
+      "wasmSha256": "57e77b9769ebc091bb5c574c4232e4a66d043aff9225d48953d041c20182431b"
+    },
+    "framesPerCase": 600,
+    "runsCompared": 2,
+    "repeatableAcrossRuns": true,
+    "formats": {
+      "rgb565": {
+        "libretroValue": 2,
+        "widths": [320, 256],
+        "height": 240,
+        "pitches": { "320": 640, "256": 512 },
+        "videoHash": 2727152085
+      },
+      "xrgb8888": {
+        "libretroValue": 1,
+        "widths": [320, 256],
+        "height": 240,
+        "pitches": { "320": 1280, "256": 1024 },
+        "videoHash": 88889545
+      }
+    },
+    "runtimeGeometry": {
+      "environmentCommand": 37,
+      "baseWidthSequence": [320, 256, 320, 256, 320],
+      "baseHeight": 240,
+      "maxWidth": 1024,
+      "maxHeight": 512,
+      "unskippedVideoCallbackSequence": [1, 122, 242, 362, 482]
+    },
+    "nullFrames": {
+      "configuration": "fixed_interval/1",
+      "callbacks": 600,
+      "videoFrames": 300,
+      "nullVideoFrames": 300,
+      "retainedFrameState": true,
+      "videoHash": 4043555357
+    },
+    "pass": true
+  },
   "provisionalDecision": {
     "winner": "pcsx-rearmed",
     "reason": "Both candidates pass the same fixture/shim probe; PCSX-ReARMed is smaller, starts faster, completes the scripted run faster, and needs half the initial Wasm memory.",
     "final": false,
-    "remainingProbeIds": ["P3-retail-bios", "P6-dynamic-geometry", "P8-xa-and-cdda", "P9", "P10", "P11-near-maximum-disc"]
+    "remainingProbeIds": ["P3-retail-bios", "P8-xa-and-cdda", "P9", "P10", "P11-near-maximum-disc"]
   }
 }

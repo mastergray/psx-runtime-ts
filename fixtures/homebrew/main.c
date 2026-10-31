@@ -24,12 +24,32 @@ static uint8_t pad_buffer[2][34];
 static uint8_t tone[TONE_BYTES] __attribute__((aligned(4)));
 static int active_buffer;
 
+#ifdef PSX_FIXTURE_DYNAMIC_GEOMETRY
+static int screen_width = SCREEN_WIDTH;
+
+static void configure_environments(int width) {
+    SetDefDispEnv(&display_environment[0], 0, 0, width, SCREEN_HEIGHT);
+    SetDefDispEnv(&display_environment[1], 0, SCREEN_HEIGHT, width, SCREEN_HEIGHT);
+    SetDefDrawEnv(&draw_environment[0], 0, SCREEN_HEIGHT, width, SCREEN_HEIGHT);
+    SetDefDrawEnv(&draw_environment[1], 0, 0, width, SCREEN_HEIGHT);
+
+    for (int index = 0; index < 2; index++) {
+        setRGB0(&draw_environment[index], 16, 32, 64);
+        draw_environment[index].isbg = 1;
+    }
+    screen_width = width;
+}
+#endif
+
 static void initialize_video(void) {
     ResetGraph(0);
 #ifdef PSX_FIXTURE_PAL
     SetVideoMode(MODE_PAL);
 #endif
 
+#ifdef PSX_FIXTURE_DYNAMIC_GEOMETRY
+    configure_environments(SCREEN_WIDTH);
+#else
     SetDefDispEnv(&display_environment[0], 0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
     SetDefDispEnv(&display_environment[1], 0, SCREEN_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT);
     SetDefDrawEnv(&draw_environment[0], 0, SCREEN_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT);
@@ -39,6 +59,7 @@ static void initialize_video(void) {
         setRGB0(&draw_environment[index], 16, 32, 64);
         draw_environment[index].isbg = 1;
     }
+#endif
 
     active_buffer = 0;
     PutDispEnv(&display_environment[active_buffer]);
@@ -89,6 +110,10 @@ static uint16_t read_buttons(void) {
 }
 
 static void present_frame(uint32_t frame, uint16_t buttons) {
+#ifdef PSX_FIXTURE_DYNAMIC_GEOMETRY
+    int next_width = ((frame / 120) & 1) == 0 ? 320 : 256;
+    if (next_width != screen_width) configure_environments(next_width);
+#endif
     uint8_t red = (uint8_t) (16 + ((frame >> 1) & 31));
     uint8_t green = (buttons & PAD_CROSS) ? 112 : 32;
     uint8_t blue = (buttons & PAD_CIRCLE) ? 16 : 64;
@@ -99,7 +124,11 @@ static void present_frame(uint32_t frame, uint16_t buttons) {
     FntPrint(-1, "PSX RUNTIME M0 FIXTURE\n\n");
     FntPrint(-1, "FRAME %08u\n", frame);
     FntPrint(-1, "BUTTONS %04x\n", buttons);
+#ifdef PSX_FIXTURE_DYNAMIC_GEOMETRY
+    FntPrint(-1, "VIDEO %dX240 " FIXTURE_REGION "\n", screen_width);
+#else
     FntPrint(-1, "VIDEO 320X240 " FIXTURE_REGION "\n");
+#endif
     FntPrint(-1, "AUDIO 22050HZ LOOP\n");
     FntFlush(-1);
 

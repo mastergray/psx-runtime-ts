@@ -15,10 +15,11 @@ const probes = {
     pcsx: "/core/probes/pcsx-boot-probe.html?core=pcsx",
     beetle: "/core/probes/pcsx-boot-probe.html?core=beetle",
     endurance: `/core/probes/pcsx-endurance-probe.html?seconds=${enduranceSeconds}&repeats=${enduranceRepeats}`,
+    geometry: "/core/probes/pcsx-geometry-probe.html",
 };
 
 if (probe === undefined || !(probe in probes)) {
-    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance>");
+    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry>");
     process.exit(2);
 }
 
@@ -55,6 +56,8 @@ const routes = new Map([
     ["/core/probes/pcsx-boot-probe.worker.mjs", ["core/probes/pcsx-boot-probe.worker.mjs", "text/javascript; charset=utf-8"]],
     ["/core/probes/pcsx-endurance-probe.html", ["core/probes/pcsx-endurance-probe.html", "text/html; charset=utf-8"]],
     ["/core/probes/pcsx-endurance-probe.worker.mjs", ["core/probes/pcsx-endurance-probe.worker.mjs", "text/javascript; charset=utf-8"]],
+    ["/core/probes/pcsx-geometry-probe.html", ["core/probes/pcsx-geometry-probe.html", "text/html; charset=utf-8"]],
+    ["/core/probes/pcsx-geometry-probe.worker.mjs", ["core/probes/pcsx-geometry-probe.worker.mjs", "text/javascript; charset=utf-8"]],
     ["/dist/probes/workerfs-module.mjs", ["dist/probes/workerfs-module.mjs", "text/javascript; charset=utf-8"]],
     ["/dist/probes/workerfs-module.wasm", ["dist/probes/workerfs-module.wasm", "application/wasm"]],
     ["/dist/probes/pcsx-boot.mjs", ["dist/probes/pcsx-boot.mjs", "text/javascript; charset=utf-8"]],
@@ -65,6 +68,8 @@ const routes = new Map([
     ["/fixtures/generated/m0/m0-fixture.bin", ["fixtures/generated/m0/m0-fixture.bin", "application/octet-stream"]],
     ["/fixtures/generated/m0/pal/m0-fixture.cue", ["fixtures/generated/m0/pal/m0-fixture.cue", "application/octet-stream"]],
     ["/fixtures/generated/m0/pal/m0-fixture.bin", ["fixtures/generated/m0/pal/m0-fixture.bin", "application/octet-stream"]],
+    ["/fixtures/generated/m0/geometry/m0-fixture.cue", ["fixtures/generated/m0/geometry/m0-fixture.cue", "application/octet-stream"]],
+    ["/fixtures/generated/m0/geometry/m0-fixture.bin", ["fixtures/generated/m0/geometry/m0-fixture.bin", "application/octet-stream"]],
 ]);
 
 let resolveResult;

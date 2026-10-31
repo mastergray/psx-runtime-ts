@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>PCSX geometry probe</title>
+<body>running<img hidden src="/wait"></body>
+<script>
+(async () => {
+    try {
+        const [cueResponse, binResponse] = await Promise.all([
+            fetch("/fixtures/generated/m0/geometry/m0-fixture.cue"),
+            fetch("/fixtures/generated/m0/geometry/m0-fixture.bin"),
+        ]);
+        if (!cueResponse.ok || !binResponse.ok) throw new Error("Geometry fixture fetch failed");
+        const [cue, bin] = await Promise.all([cueResponse.blob(), binResponse.blob()]);
+        const result = await new Promise((resolve, reject) => {
+            const worker = new Worker("./pcsx-geometry-probe.worker.mjs", { type: "module" });
+            worker.onmessage = ({ data }) => {
+                worker.terminate();
+                resolve(data);
+            };
+            worker.onerror = (event) => {
+                worker.terminate();
+                reject(new Error(event.message));
+            };
+            worker.postMessage({ cue, bin });
+        });
+        await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+        document.body.textContent = JSON.stringify(result);
+        document.title = result.ok ? "PASS" : "FAIL";
+    } catch (error) {
+        const result = { ok: false, message: error instanceof Error ? error.stack ?? error.message : String(error) };
+        await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+        document.body.textContent = JSON.stringify(result);
+        document.title = "ERROR";
+    }
+})();
+</script>

@@ -8,9 +8,30 @@
 #include "libretro.h"
 
 #define ENVIRONMENT_TRACE_CAPACITY 4096
+#define GEOMETRY_TRACE_CAPACITY 64
+
+struct geometry_trace_entry {
+    unsigned callback_index;
+    unsigned width;
+    unsigned height;
+    unsigned pitch;
+    unsigned pixel_format;
+};
+
+struct environment_geometry_entry {
+    unsigned command;
+    unsigned base_width;
+    unsigned base_height;
+    unsigned max_width;
+    unsigned max_height;
+};
 
 static unsigned environment_trace[ENVIRONMENT_TRACE_CAPACITY];
 static unsigned environment_trace_size;
+static struct geometry_trace_entry geometry_trace[GEOMETRY_TRACE_CAPACITY];
+static unsigned geometry_trace_size;
+static struct environment_geometry_entry environment_geometry_trace[GEOMETRY_TRACE_CAPACITY];
+static unsigned environment_geometry_trace_size;
 static enum retro_pixel_format pixel_format = RETRO_PIXEL_FORMAT_0RGB1555;
 static uint16_t input_buttons;
 static uint32_t video_hash = 2166136261u;
@@ -24,6 +45,9 @@ static unsigned last_width;
 static unsigned last_height;
 static size_t last_pitch;
 static bool force_pal;
+static bool force_rgb32;
+static bool force_frameskip;
+static unsigned video_callback_count;
 static struct retro_system_av_info av_info;
 
 static uint32_t hash_bytes(uint32_t hash, const uint8_t *data, size_t size) {
@@ -47,10 +71,24 @@ static const char *variable_value(const char *key) {
     if (strcmp(key, "pcsx_rearmed_memcard1") == 0) return "libretro";
     if (strcmp(key, "pcsx_rearmed_memcard2") == 0) return "libretro";
     if (strcmp(key, "pcsx_rearmed_region") == 0) return force_pal ? "PAL" : "NTSC";
-    if (strcmp(key, "pcsx_rearmed_rgb32_output") == 0) return "disabled";
-    if (strcmp(key, "pcsx_rearmed_frameskip_type") == 0) return "disabled";
+    if (strcmp(key, "pcsx_rearmed_rgb32_output") == 0) return force_rgb32 ? "enabled" : "disabled";
+    if (strcmp(key, "pcsx_rearmed_frameskip_type") == 0) {
+        return force_frameskip ? "fixed_interval" : "disabled";
+    }
+    if (strcmp(key, "pcsx_rearmed_frameskip_interval") == 0) return "1";
     if (strcmp(key, "pcsx_rearmed_drc") == 0) return "disabled";
     return NULL;
+}
+
+static void record_environment_geometry(unsigned command, const struct retro_game_geometry *geometry) {
+    if (environment_geometry_trace_size >= GEOMETRY_TRACE_CAPACITY) return;
+    struct environment_geometry_entry *entry =
+        &environment_geometry_trace[environment_geometry_trace_size++];
+    entry->command = command;
+    entry->base_width = geometry->base_width;
+    entry->base_height = geometry->base_height;
+    entry->max_width = geometry->max_width;
+    entry->max_height = geometry->max_height;
 }
 
 static bool environment_callback(unsigned command, void *data) {
@@ -103,8 +141,16 @@ static bool environment_callback(unsigned command, void *data) {
         case RETRO_ENVIRONMENT_SET_DISK_CONTROL_INTERFACE:
         case RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE:
         case RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL:
+            return true;
         case RETRO_ENVIRONMENT_SET_GEOMETRY:
+            record_environment_geometry(command, (const struct retro_game_geometry *) data);
+            return true;
         case RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO:
+            record_environment_geometry(
+                command,
+                &((const struct retro_system_av_info *) data)->geometry
+            );
+            return true;
         case RETRO_ENVIRONMENT_SET_MESSAGE:
         case RETRO_ENVIRONMENT_SET_MESSAGE_EXT:
         case RETRO_ENVIRONMENT_SET_MINIMUM_AUDIO_LATENCY:
@@ -116,9 +162,25 @@ static bool environment_callback(unsigned command, void *data) {
 }
 
 static void video_callback(const void *data, unsigned width, unsigned height, size_t pitch) {
+    video_callback_count++;
     if (data == NULL) {
         null_video_frames++;
         return;
+    }
+
+    if (geometry_trace_size == 0
+        || geometry_trace[geometry_trace_size - 1].width != width
+        || geometry_trace[geometry_trace_size - 1].height != height
+        || geometry_trace[geometry_trace_size - 1].pitch != pitch
+        || geometry_trace[geometry_trace_size - 1].pixel_format != (unsigned) pixel_format) {
+        if (geometry_trace_size < GEOMETRY_TRACE_CAPACITY) {
+            struct geometry_trace_entry *entry = &geometry_trace[geometry_trace_size++];
+            entry->callback_index = video_callback_count;
+            entry->width = width;
+            entry->height = height;
+            entry->pitch = (unsigned) pitch;
+            entry->pixel_format = (unsigned) pixel_format;
+        }
     }
 
     video_frames++;
@@ -163,6 +225,14 @@ static int16_t input_state_callback(unsigned port, unsigned device, unsigned ind
 
 EMSCRIPTEN_KEEPALIVE void psx_probe_set_pal(unsigned enabled) {
     force_pal = enabled != 0;
+}
+
+EMSCRIPTEN_KEEPALIVE void psx_probe_set_rgb32(unsigned enabled) {
+    force_rgb32 = enabled != 0;
+}
+
+EMSCRIPTEN_KEEPALIVE void psx_probe_set_frameskip(unsigned enabled) {
+    force_frameskip = enabled != 0;
 }
 
 EMSCRIPTEN_KEEPALIVE int psx_probe_boot(void) {
@@ -217,4 +287,48 @@ EMSCRIPTEN_KEEPALIVE unsigned psx_probe_fps_milli(void) {
 }
 EMSCRIPTEN_KEEPALIVE unsigned psx_probe_sample_rate(void) {
     return (unsigned) (av_info.timing.sample_rate + 0.5);
+}
+EMSCRIPTEN_KEEPALIVE unsigned psx_probe_geometry_count(void) { return geometry_trace_size; }
+EMSCRIPTEN_KEEPALIVE unsigned psx_probe_geometry_callback_at(unsigned index) {
+    return index < geometry_trace_size ? geometry_trace[index].callback_index : UINT32_MAX;
+}
+EMSCRIPTEN_KEEPALIVE unsigned psx_probe_geometry_width_at(unsigned index) {
+    return index < geometry_trace_size ? geometry_trace[index].width : 0;
+}
+EMSCRIPTEN_KEEPALIVE unsigned psx_probe_geometry_height_at(unsigned index) {
+    return index < geometry_trace_size ? geometry_trace[index].height : 0;
+}
+EMSCRIPTEN_KEEPALIVE unsigned psx_probe_geometry_pitch_at(unsigned index) {
+    return index < geometry_trace_size ? geometry_trace[index].pitch : 0;
+}
+EMSCRIPTEN_KEEPALIVE unsigned psx_probe_geometry_format_at(unsigned index) {
+    return index < geometry_trace_size ? geometry_trace[index].pixel_format : UINT32_MAX;
+}
+EMSCRIPTEN_KEEPALIVE unsigned psx_probe_environment_geometry_count(void) {
+    return environment_geometry_trace_size;
+}
+EMSCRIPTEN_KEEPALIVE unsigned psx_probe_environment_geometry_command_at(unsigned index) {
+    return index < environment_geometry_trace_size
+        ? environment_geometry_trace[index].command
+        : UINT32_MAX;
+}
+EMSCRIPTEN_KEEPALIVE unsigned psx_probe_environment_geometry_base_width_at(unsigned index) {
+    return index < environment_geometry_trace_size
+        ? environment_geometry_trace[index].base_width
+        : 0;
+}
+EMSCRIPTEN_KEEPALIVE unsigned psx_probe_environment_geometry_base_height_at(unsigned index) {
+    return index < environment_geometry_trace_size
+        ? environment_geometry_trace[index].base_height
+        : 0;
+}
+EMSCRIPTEN_KEEPALIVE unsigned psx_probe_environment_geometry_max_width_at(unsigned index) {
+    return index < environment_geometry_trace_size
+        ? environment_geometry_trace[index].max_width
+        : 0;
+}
+EMSCRIPTEN_KEEPALIVE unsigned psx_probe_environment_geometry_max_height_at(unsigned index) {
+    return index < environment_geometry_trace_size
+        ? environment_geometry_trace[index].max_height
+        : 0;
 }

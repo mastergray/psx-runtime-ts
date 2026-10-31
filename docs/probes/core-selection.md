@@ -4,9 +4,9 @@ Status: **in progress; PCSX-ReARMed is the provisional winner.**
 
 This record deliberately does not create `core/SOURCE.json` or
 `core/EMSDK_VERSION`. The baseline comparison is complete, but the M0 hard gate
-also requires dynamic geometry, XA/CD audio, memory-card, state, disc-change,
-controlled firmware-path and near-maximum-disc memory evidence. The production
-pin becomes final only after those checks pass.
+also requires XA/CD audio, memory-card, state, disc-change, controlled
+firmware-path and near-maximum-disc memory evidence. The production pin becomes
+final only after those checks pass.
 
 Machine-readable measurements are in [m0-results.json](m0-results.json). Exact
 candidate identities are in
@@ -63,6 +63,20 @@ browser-wide measurement includes Chrome overhead, the page, Worker and Wasm.
 The matrix ran without COOP/COEP headers and reported
 `crossOriginIsolated === false`, matching the v1 deployment constraint.
 
+## Geometry outcome
+
+PCSX-ReARMed completed two identical 600-callback runs for each video case.
+The fixture changed its active width between 320 and 256 pixels at runtime;
+the core reported every switch through environment command 37 and emitted
+matching callback dimensions. RGB565 used pitches of 640 and 512 bytes, while
+XRGB8888 used 1,280 and 1,024 bytes. Both formats produced repeatable hashes.
+
+With fixed-interval frameskip enabled, the core produced 300 video frames and
+300 explicit null callbacks. The probe retained the prior frame hash,
+dimensions, pitch and sampled pixel across every null callback, proving the
+frontend can reuse the last frame without treating a duplicate as new pixel
+data.
+
 ## Build findings
 
 PCSX-ReARMed's Emscripten target is self-contained when CHD is disabled. Its
@@ -95,7 +109,7 @@ buffer selected by generated filesystem glue.
 | P3 real boot | Partial pass | Both boot the public fixture with open firmware and produce a first frame. The controlled retail-BIOS run remains. |
 | P4 WORKERFS | Pass | Three synchronous reads across a logical 256 MiB Blob matched expected FNV checksums; the read window completed in 4.4 ms without copying the full Blob into Wasm memory. |
 | P5 environment API | Baseline complete | Startup first-occurrence order and runtime counts are recorded in JSON. Supported commands are bounded by the probe callback; VFS, rumble, memory maps, software-framebuffer access and optional performance/LED surfaces are explicitly rejected when not implemented. |
-| P6 video formats | Partial pass | RGB565 and XRGB8888, nontrivial pitch and zero null frames are proven. Runtime geometry switches and explicit null-frame tests remain. |
+| P6 video formats | Pass | Two repeat runs proved RGB565 and XRGB8888 at 320×240 and 256×240 with format-correct pitches and hashes. Environment command 37 tracked every runtime width switch. A fixed-interval case produced 300 real and 300 null callbacks while retaining prior frame state. |
 | P7 timing | Pass | PCSX reported 60 fps NTSC and 50 fps PAL. Two paced 60-second runs at both 60 and 120 Hz host cadence produced exact frame/audio counts; backlog and host-tick overruns are recorded. |
 | P8 audio | Partial pass | Non-silent looping SPU tone, callback counts and hashes are proven. XA and CD-DA remain. |
 | P9 memory cards | Pending | Both slots, restore order, dirty detection and reload proof remain. |

@@ -22,6 +22,7 @@ npm run probe:workerfs
 npm run probe:pcsx
 npm run probe:beetle
 npm run probe:endurance
+npm run probe:geometry
 ```
 
 The browser runner serves only the explicit probe files and generated fixture,
@@ -33,3 +34,8 @@ NTSC/PAL and 60/120 Hz host-cadence combination. Use `PROBE_SECONDS` and
 the 60-second/two-repeat defaults. The runner records one-second Wasm heap and
 dedicated Chrome process-tree RSS samples. It deliberately sends no COOP/COEP
 headers so the endurance result also proves the non-isolated deployment mode.
+
+`probe:geometry` runs RGB565, XRGB8888 and fixed-interval frameskip cases
+against the dynamic-width fixture. It verifies callback and environment
+geometry, byte pitch, deterministic frame hashes, explicit null callbacks and
+retention of the prior frame state.
