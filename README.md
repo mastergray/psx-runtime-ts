@@ -1,6 +1,6 @@
 # psx-runtime-ts
 
-A headless TypeScript runtime for playing user-supplied PlayStation games in
+A TypeScript runtime for playing user-supplied PlayStation games in
 the browser. It follows the lifecycle and package boundaries established by
 [`arcade-runtime-ts`](https://github.com/mastergray/arcade-runtime-ts), with a
 PlayStation-specific libretro bridge, Worker-hosted WebAssembly core, disc

@@ -1,7 +1,7 @@
 {
   "name": "psx-runtime-ts",
   "version": "0.0.0",
-  "description": "Headless TypeScript runtime for playing user-supplied PlayStation games in the browser",
+  "description": "TypeScript runtime for playing user-supplied PlayStation games in the browser",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",

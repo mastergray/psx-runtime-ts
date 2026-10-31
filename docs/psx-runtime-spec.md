@@ -1,4 +1,4 @@
-# Headless Browser PlayStation Runtime — Implementation Spec
+# Browser PlayStation Runtime — Implementation Spec
 
 **Status:** draft implementation contract for `psx-runtime-ts`
 
