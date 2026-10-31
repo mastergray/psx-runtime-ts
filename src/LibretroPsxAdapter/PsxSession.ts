@@ -52,6 +52,7 @@ export default class PsxSession implements PsxSessionContract {
     #trayOpen = false;
     #exitEmitted = false;
     #finalCards: Readonly<Record<ControllerPort, Uint8Array>> | null = null;
+    #startupFrame: PsxFrameEvent | null = null;
 
     constructor(worker: SessionWorker, restart: RestartSession) {
         this.#machine = worker.machine;
@@ -189,7 +190,9 @@ export default class PsxSession implements PsxSessionContract {
     }
 
     onFrame(listener: Listener<PsxFrameEvent>): Unsubscribe {
-        return this.#subscribe(this.#frameListeners, listener);
+        const unsubscribe = this.#subscribe(this.#frameListeners, listener);
+        if (this.#startupFrame !== null) listener(this.#startupFrame);
+        return unsubscribe;
     }
 
     onSound(listener: Listener<PsxSoundEvent>): Unsubscribe {
@@ -205,9 +208,11 @@ export default class PsxSession implements PsxSessionContract {
     }
 
     #attachClient(): void {
+        this.#startupFrame = this.#client.startupFrame;
         this.#clientUnsubscribes = [
             this.#client.on("tick", () => this.#emit(this.#tickListeners, undefined)),
             this.#client.on("frame", (frame) => {
+                this.#startupFrame = null;
                 if (frame.width !== this.#machine.geometry.width
                     || frame.height !== this.#machine.geometry.height
                     || frame.aspectRatio !== this.#machine.geometry.aspectRatio) {
@@ -235,6 +240,10 @@ export default class PsxSession implements PsxSessionContract {
                 }
             }),
         ];
+        if (this.#startupFrame !== null && this.#frameListeners.size > 0) {
+            this.#emit(this.#frameListeners, this.#startupFrame);
+            this.#startupFrame = null;
+        }
     }
 
     #detachClient(): void {

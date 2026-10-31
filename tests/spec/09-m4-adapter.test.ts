@@ -386,7 +386,7 @@ const testFile: TestFile = {
                         geometry: { width: 2, height: 1, aspectRatio: 2 },
                         discs: 2,
                     },
-                    events: { ticks: 2, frames: [2, 2], sounds: 2, rumble: 0, exits: 1 },
+                    events: { ticks: 2, frames: [1, 2, 1, 2], sounds: 2, rumble: 0, exits: 1 },
                     state: [7, 8, 9],
                     cards: [42, 42],
                     discAfterChange: 1,

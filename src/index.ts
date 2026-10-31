@@ -7,6 +7,8 @@ export { default as GamepadSource } from "./GamepadSource/GamepadSource.js";
 export { default as PsxDisplay } from "./PsxDisplay/PsxDisplay.js";
 export { default as PsxAudio } from "./PsxAudio/PsxAudio.js";
 export { default as PsxStorage } from "./PsxStorage/PsxStorage.js";
+export { default as PsxPlayer } from "./PsxPlayer/PsxPlayer.js";
+export { default as PsxConsole } from "./PsxConsole/PsxConsole.js";
 export {
     isPsxRuntimeErrorConfig,
     type PsxRuntimeErrorConfig,
@@ -129,6 +131,34 @@ export {
     type PsxStorageMutation,
     type PsxStorageStore,
 } from "./PsxStorage/types.js";
+export {
+    isPsxPlayerAudioLike,
+    isPsxPlayerConfig,
+    isPsxPlayerDisplayLike,
+    isPsxPlayerIntervalSchedulerLike,
+    isPsxPlayerStatus,
+    isPsxPlayerStorageLike,
+    type PsxPlayerAudioLike,
+    type PsxPlayerConfig,
+    type PsxPlayerDisplayLike,
+    type PsxPlayerEventMap,
+    type PsxPlayerIntervalSchedulerLike,
+    type PsxPlayerStatus,
+    type PsxPlayerStorageLike,
+} from "./PsxPlayer/types.js";
+export {
+    isPsxConsoleConfig,
+    isPsxConsoleInitConfig,
+    isPsxFileListLike,
+    isPsxLocalFilesConfig,
+    type PsxConsoleConfig,
+    type PsxConsoleGameStoreLike,
+    type PsxConsoleInitConfig,
+    type PsxConsolePlayerLike,
+    type PsxFileListLike,
+    type PsxLocalFileLike,
+    type PsxLocalFilesConfig,
+} from "./PsxConsole/types.js";
 
 export {
     isAuditedDisc,

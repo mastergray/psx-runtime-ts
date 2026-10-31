@@ -92,6 +92,7 @@ export default class WorkerClient {
     #schedulerHandle: number | null = null;
     #terminated = false;
     #firstFrameSeen = false;
+    #startupFrame: PsxFrameEvent | null = null;
     #resolveFirstFrame: (() => void) | null = null;
     #rejectFirstFrame: ((reason: unknown) => void) | null = null;
     readonly #firstFrame = new Promise<void>((resolve, reject) => {
@@ -106,6 +107,11 @@ export default class WorkerClient {
         this.#generation = generation;
         worker.addEventListener("message", this.#messageListener);
         worker.addEventListener("error", this.#errorListener);
+    }
+
+    get startupFrame(): PsxFrameEvent | null {
+        if (this.#startupFrame === null) return null;
+        return { ...this.#startupFrame, rgba: this.#startupFrame.rgba.slice() };
     }
 
     async start(payload: WorkerStartPayload): Promise<PsxMachineInfo> {
@@ -296,14 +302,16 @@ export default class WorkerClient {
                 aspectRatio: output.aspectRatio,
             }); break;
             case "frame": {
-                this.#firstFrameSeen = true;
-                this.#resolveFirstFrame?.();
-                this.#emit("frame", {
+                const frame: PsxFrameEvent = {
                     width: output.width,
                     height: output.height,
                     aspectRatio: output.aspectRatio,
                     rgba: new Uint8ClampedArray(output.rgba),
-                });
+                };
+                if (!this.#firstFrameSeen) this.#startupFrame = { ...frame, rgba: frame.rgba.slice() };
+                this.#firstFrameSeen = true;
+                this.#resolveFirstFrame?.();
+                this.#emit("frame", frame);
                 this.#post({ type: "return-video-buffer", bufferId: output.bufferId, buffer: output.rgba }, [output.rgba]);
                 break;
             }

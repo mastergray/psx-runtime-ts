@@ -24,15 +24,15 @@ are in [the implementation spec](psx-runtime-spec.md).
 - [x] M5: implement multi-channel input plus keyboard and gamepad sources.
 - [x] M6: implement dynamic Canvas display and bounded Web Audio playback.
 - [x] M7: implement revisioned cards, compatible states and card auto-save.
-- [ ] M8–M9: composition, local game storage and packaging.
+- [x] M8: compose the player, console and developer harness.
+- [ ] M9: implement local game storage, packaging and distribution gates.
 - [ ] M10: pass all `v1.0.0` release gates.
 
-## Next work: M8
+## Next work: M9
 
-M0–M7 are complete. `PsxStorage` persists independent raw card images with
-optimistic revisions, retains the immediately previous card revision, and
-stores binary state payloads beside exact build/game compatibility metadata.
-Named states normalize to NFC, card auto-save coalesces overlapping requests,
-and a Chromium probe proves card/state recovery through a fresh storage
-instance. M8 composes the adapter, input, display, audio and storage into the
-player, console and developer harness.
+M0–M8 are complete. `PsxPlayer` owns the reusable session lifecycle and
+coordinates display, audio, input, cards, states, disc changes and cleanup.
+`PsxConsole` provides one browser composition path for selected and stored
+content, while the developer harness exposes the complete lifecycle for real
+browser testing. M9 adds audited, deduplicated Blob storage, quota-aware
+imports, package auditing and distribution documentation.

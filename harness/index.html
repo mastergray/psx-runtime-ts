@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>psx-runtime-ts harness</title>
+  <style>
+    :root { color-scheme: dark; font: 14px system-ui, sans-serif; }
+    body { margin: 0; background: #101216; color: #e9edf2; }
+    main { display: grid; grid-template-columns: minmax(18rem, 24rem) 1fr; min-height: 100vh; }
+    aside { padding: 1rem; border-right: 1px solid #343943; overflow: auto; }
+    section { display: grid; place-items: center; min-width: 0; background: #050608; }
+    #screen-stage { width: min(100%, 1280px); aspect-ratio: 4 / 3; display: grid; place-items: center; overflow: hidden; }
+    canvas { max-width: 100%; max-height: 100%; }
+    fieldset { margin: 0 0 1rem; border: 1px solid #343943; }
+    label { display: grid; gap: .25rem; margin: .5rem 0; }
+    input, select, button { font: inherit; }
+    .buttons { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0; }
+    #status { color: #8ed0ff; }
+    #log { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 8rem; }
+    @media (max-width: 800px) { main { grid-template-columns: 1fr; } aside { border-right: 0; } }
+  </style>
+</head>
+<body>
+<main>
+  <aside>
+    <h1>PlayStation runtime harness</h1>
+    <p id="status">idle</p>
+    <fieldset>
+      <legend>Runtime</legend>
+      <label>Core build URL <input id="build-url" value="/dist/core"></label>
+      <label>Firmware <input id="bios" type="file"></label>
+      <label>Firmware region <select id="bios-region"><option value="ntsc-u">NTSC-U</option><option value="ntsc-j">NTSC-J</option><option value="pal">PAL</option></select></label>
+      <label>Disc directory <input id="game-files" type="file" multiple webkitdirectory></label>
+      <label>Game ID <input id="game-id" value="local-test"></label>
+      <label>Entry override <input id="entry" placeholder="Optional CUE or M3U path"></label>
+      <label>Port 1 controller <select id="controller-1"><option>dualshock</option><option>digital</option><option>none</option></select></label>
+      <label>Port 2 controller <select id="controller-2"><option>digital</option><option>dualshock</option><option>none</option></select></label>
+      <div class="buttons"><button id="audit">Audit</button><button id="start">Start</button><button id="stop">Stop</button></div>
+    </fieldset>
+    <fieldset>
+      <legend>Session</legend>
+      <div class="buttons">
+        <button id="unlock">Unlock audio</button><button id="pause">Pause</button><button id="resume">Resume</button>
+        <button id="soft-reset">Soft reset</button><button id="hard-reset">Hard reset</button><button id="fullscreen">Fullscreen</button>
+      </div>
+      <label>Disc index <input id="disc-index" type="number" min="0" value="0"><button id="set-disc">Set disc</button></label>
+      <label>State name <input id="state-name" value="quick"></label>
+      <div class="buttons"><button id="save-state">Save state</button><button id="load-state">Load state</button><button id="delete-state">Delete state</button></div>
+    </fieldset>
+    <fieldset>
+      <legend>Controllers and cards</legend>
+      <label>Gamepad index for port 1 <input id="pad-1" type="number" min="0" value="0"><button id="bind-1">Bind</button></label>
+      <label>Gamepad index for port 2 <input id="pad-2" type="number" min="0" value="1"><button id="bind-2">Bind</button></label>
+      <div class="buttons"><button id="download-card-1">Download card 1</button><button id="download-card-2">Download card 2</button></div>
+      <label>Replacement card <input id="replacement-card" type="file"></label>
+      <div class="buttons"><button id="replace-card-1">Replace card 1</button><button id="replace-card-2">Replace card 2</button></div>
+    </fieldset>
+    <pre id="log"></pre>
+  </aside>
+  <section><div id="screen-stage"><canvas id="screen"></canvas></div></section>
+</main>
+<script type="module" src="/harness-build/harness/main.js"></script>
+</body>
+</html>

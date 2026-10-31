@@ -24,10 +24,11 @@ const probes = {
     m4: "/core/probes/m4-adapter-probe.html",
     m6: "/core/probes/m6-browser-probe.html",
     m7: "/core/probes/m7-storage-probe.html",
+    m8: "/harness/index.html",
 };
 
 if (probe === undefined || !(probe in probes)) {
-    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry|media|cards|stateDisc|memory|bios|m4|m6|m7>");
+    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry|media|cards|stateDisc|memory|bios|m4|m6|m7|m8>");
     process.exit(2);
 }
 
@@ -98,6 +99,7 @@ const routes = new Map([
     ["/core/probes/m4-adapter-probe.html", ["core/probes/m4-adapter-probe.html", "text/html; charset=utf-8"]],
     ["/core/probes/m6-browser-probe.html", ["core/probes/m6-browser-probe.html", "text/html; charset=utf-8"]],
     ["/core/probes/m7-storage-probe.html", ["core/probes/m7-storage-probe.html", "text/html; charset=utf-8"]],
+    ["/harness/index.html", ["harness/index.html", "text/html; charset=utf-8"]],
     ["/dist/probes/workerfs-module.mjs", ["dist/probes/workerfs-module.mjs", "text/javascript; charset=utf-8"]],
     ["/dist/probes/workerfs-module.wasm", ["dist/probes/workerfs-module.wasm", "application/wasm"]],
     ["/dist/probes/pcsx-boot.mjs", ["dist/probes/pcsx-boot.mjs", "text/javascript; charset=utf-8"]],
@@ -182,6 +184,9 @@ const server = createServer((request, response) => {
             : "text/javascript; charset=utf-8";
         route = [url.pathname.slice(1), type];
     }
+    if (route === undefined && url.pathname.startsWith("/harness-build/") && !url.pathname.includes("..")) {
+        route = [`dist${url.pathname}`, "text/javascript; charset=utf-8"];
+    }
     if (route === undefined) {
         response.writeHead(404);
         response.end();
@@ -227,10 +232,27 @@ let resultTimeout;
 
 try {
     const page = await browser.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.goto(`http://127.0.0.1:${address.port}${probes[probe]}`, {
         waitUntil: "domcontentloaded",
     });
     if (probe === "m6") await page.click("#unlock");
+    if (probe === "m8") {
+        await page.waitForFunction(() => document.querySelector("#screen") !== null
+            && document.querySelectorAll("button").length >= 10);
+        const harness = await page.evaluate(() => ({
+            title: document.title,
+            buttons: document.querySelectorAll("button").length,
+            status: document.querySelector("#status")?.textContent,
+            canvas: document.querySelector("#screen") instanceof HTMLCanvasElement,
+        }));
+        resolveResult({
+            ok: harness.canvas && harness.buttons >= 10 && harness.status === "idle" && pageErrors.length === 0,
+            ...harness,
+            pageErrors,
+        });
+    }
     const timeoutPromise = new Promise((_, rejectPromise) => {
         resultTimeout = setTimeout(
             () => rejectPromise(new Error(`Timed out waiting for ${probe} probe`)),

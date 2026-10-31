@@ -53,6 +53,7 @@ export default class PsxDisplay {
     #image: PsxImageDataLike | null = null;
     #placeholder: PsxPlaceholderLike | null = null;
     #unsubscribeFrame: Unsubscribe | null = null;
+    #hasFrame = false;
     #destroyed = false;
 
     constructor(config: PsxDisplayConfig) {
@@ -86,6 +87,7 @@ export default class PsxDisplay {
     get imageRendering(): PsxImageRendering { return this.#imageRendering; }
     get layout(): PsxDisplayLayout { return this.#layout; }
     get isAttached(): boolean { return this.#unsubscribeFrame !== null; }
+    get hasFrame(): boolean { return this.#hasFrame; }
     get isFullscreen(): boolean {
         return this.#document !== null && this.#document.fullscreenElement === this.#fullscreenTarget;
     }
@@ -121,6 +123,7 @@ export default class PsxDisplay {
         this.#aspectRatio = session.machine.geometry.aspectRatio;
         this.#setBackingSize(this.#frameSize);
         this.#updateLayout();
+        this.#hasFrame = false;
         const unsubscribe = session.onFrame((frame) => this.draw(frame));
         this.#unsubscribeFrame = unsubscribe;
         return () => {
@@ -149,6 +152,7 @@ export default class PsxDisplay {
         }
         this.#image.data.set(frame.rgba);
         this.#context.putImageData(this.#image, 0, 0);
+        this.#hasFrame = true;
         if (this.#placeholder !== null) {
             this.#placeholder.hidden = true;
             this.#placeholder = null;

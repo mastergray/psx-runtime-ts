@@ -8,7 +8,8 @@ handling, controller ports, memory cards and save states.
 
 M0 feasibility, the M1 public-contract foundation, the M2 bridge/Worker
 foundation, the M3 content pipeline and the M4 adapter/session are complete.
-The M5 input layer, M6 browser surfaces and M7 persistence are also complete.
+The M5 input layer, M6 browser surfaces, M7 persistence and M8 composition are
+also complete.
 Together they add independent input channels, keyboard/gamepad sources,
 dynamic Canvas 2D layout, bounded gesture-unlocked Web Audio playback,
 revisioned memory cards and build-compatible named states.
@@ -48,6 +49,11 @@ stereo Web Audio playback with independent mute/volume and a bounded queue.
 M7 adds IndexedDB-backed memory cards with optimistic revisions and a
 recoverable prior version, normalized named-state envelopes with exact
 build/game compatibility, and coalescing periodic card auto-save support.
+
+M8 adds the reusable player lifecycle, the browser-facing console composition
+and a developer harness. Local selections and stored content share the same
+adapter path, input sources follow session status, and shutdown flushes cards
+before releasing the core.
 
 See the [implementation spec](docs/psx-runtime-spec.md) for the architecture,
 public contracts, probe plan, milestones and release gates. Current progress

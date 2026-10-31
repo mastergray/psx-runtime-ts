@@ -18,6 +18,7 @@ coverage/
 core/.cache/
 fixtures/generated/
 test-discs/
+harness/preload.local.json
 
 # Private PlayStation inputs
 *.mcd
