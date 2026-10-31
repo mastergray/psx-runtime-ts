@@ -21,14 +21,14 @@ are in [the implementation spec](psx-runtime-spec.md).
 - [x] M2: implement the libretro shim and deterministic Worker protocol.
 - [x] M3: implement disc-set auditing and zero-copy WORKERFS mount plans.
 - [x] M4: implement the libretro adapter and public session lifecycle.
-- [ ] M5–M9: input, browser surfaces and storage.
+- [x] M5: implement multi-channel input plus keyboard and gamepad sources.
+- [ ] M6–M9: browser surfaces, storage and composition.
 - [ ] M10: pass all `v1.0.0` release gates.
 
-## Next work: M5
+## Next work: M6
 
-M0–M4 are complete. `LibretroPsxAdapter` now validates content and firmware,
-starts a fresh module Worker, waits for the first real frame and exposes the
-public session lifecycle. Soft and hard reset, two controllers, both cards,
-state round trips, multi-disc changes, timeout cleanup and repeated start/stop
-are covered through deterministic doubles and the selected core. M5 implements
-the multi-channel input coordinator and keyboard/gamepad sources.
+M0–M5 are complete. `PsxInput` coordinates independent sources with
+reference-counted buttons, last-input-wins opposing directions and retained
+analog ownership. `KeyboardSource` and `GamepadSource` cover focus/device loss,
+analog ramping, dead-zone rescaling, explicit player ports and rumble. M6 adds
+canvas display layout and bounded Web Audio scheduling.

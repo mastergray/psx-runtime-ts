@@ -8,6 +8,9 @@ handling, controller ports, memory cards and save states.
 
 M0 feasibility, the M1 public-contract foundation, the M2 bridge/Worker
 foundation, the M3 content pipeline and the M4 adapter/session are complete.
+The M5 input layer is also complete, including independent input channels,
+keyboard mapping, analog keyboard ramping, explicit gamepad-to-port assignment,
+dead-zone handling and rumble forwarding.
 PCSX-ReARMed at the commit recorded in
 `core/SOURCE.json` is the selected core, and Emscripten 6.0.2 is the pinned
 toolchain. The P1–P12 evidence covers real-BIOS boot, dedicated-Worker disc
@@ -32,6 +35,10 @@ small normalized descriptors and sidecars are written to MEMFS.
 M4 adds the public libretro adapter and restartable session, validated Worker
 client, production Emscripten bridge, firmware/card installation and complete
 input, reset, disc, state and terminal-cleanup lifecycle.
+
+M5 adds the multi-source input coordinator plus keyboard and standard-gamepad
+sources. It reference-counts shared controls, resolves opposing directions,
+restores analog ownership and releases held controls on focus or device loss.
 
 See the [implementation spec](docs/psx-runtime-spec.md) for the architecture,
 public contracts, probe plan, milestones and release gates. Current progress

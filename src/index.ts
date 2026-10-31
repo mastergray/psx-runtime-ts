@@ -1,6 +1,9 @@
 export { default as PsxRuntimeError } from "./PsxRuntimeError/PsxRuntimeError.js";
 export { default as DiscSetAudit } from "./DiscSetAudit/DiscSetAudit.js";
 export { default as LibretroPsxAdapter } from "./LibretroPsxAdapter/LibretroPsxAdapter.js";
+export { default as PsxInput } from "./PsxInput/PsxInput.js";
+export { default as KeyboardSource, DEFAULT_KEYBOARD_MAP } from "./KeyboardSource/KeyboardSource.js";
+export { default as GamepadSource } from "./GamepadSource/GamepadSource.js";
 export {
     isPsxRuntimeErrorConfig,
     type PsxRuntimeErrorConfig,
@@ -26,6 +29,33 @@ export {
     type WorkerErrorEventLike,
     type WorkerMessageEventLike,
 } from "./LibretroPsxAdapter/types.js";
+export {
+    isPsxInputChannel,
+    isPsxInputConfig,
+    isPsxInputLike,
+    type PsxInputChannel,
+    type PsxInputConfig,
+    type PsxInputLike,
+} from "./PsxInput/types.js";
+export {
+    isKeyboardSourceConfig,
+    type KeyboardAnalogBinding,
+    type KeyboardAnalogConfig,
+    type KeyboardEventLike,
+    type KeyboardEventTargetLike,
+    type KeyboardMap,
+    type KeyboardSourceConfig,
+    type KeyboardVisibilityTargetLike,
+} from "./KeyboardSource/types.js";
+export {
+    isGamepadSourceConfig,
+    type GamepadButtonLike,
+    type GamepadEventTargetLike,
+    type GamepadHapticActuatorLike,
+    type GamepadLike,
+    type GamepadProviderLike,
+    type GamepadSourceConfig,
+} from "./GamepadSource/types.js";
 
 export {
     isAuditedDisc,
