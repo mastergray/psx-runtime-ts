@@ -17,13 +17,14 @@ are in [the implementation spec](psx-runtime-spec.md).
   - [x] Boot through a private user-supplied BIOS with sanitized evidence.
   - [x] Close XA/CD audio, card/state/disc and near-maximum-disc memory probes.
   - [x] Select PCSX-ReARMed and commit the production source/toolchain pins.
-- [ ] M1: implement public contracts, errors and deterministic build metadata.
+- [x] M1: implement public contracts, errors and deterministic build metadata.
 - [ ] M2–M9: bridge, Worker, content, adapter, browser surfaces and storage.
 - [ ] M10: pass all `v1.0.0` release gates.
 
-## Next work: M1
+## Next work: M2
 
-M0 is complete. PCSX-ReARMed and Emscripten 6.0.2 are pinned in `core/`, with
-the full P1–P12 record in `docs/probes/`. M1 defines the public contracts,
-stable error model and deterministic build identity consumed by every later
-milestone.
+M0 and M1 are complete. The package now exposes the validated content, input,
+session and build contracts, the stable runtime error registry, and a
+path/timestamp-free SHA-256 build identity over every material core-build
+input. M2 implements the narrow libretro shim and private Worker protocol
+against a deterministic synthetic core double.

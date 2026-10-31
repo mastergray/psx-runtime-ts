@@ -14,14 +14,7 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist/index.d.ts",
-    "dist/index.d.ts.map",
-    "dist/index.js",
-    "dist/index.js.map",
-    "dist/shared.types.d.ts",
-    "dist/shared.types.d.ts.map",
-    "dist/shared.types.js",
-    "dist/shared.types.js.map",
+    "dist",
     "src",
     "LICENSE",
     "README.md"

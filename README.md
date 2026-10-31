@@ -6,12 +6,18 @@ the browser. It follows the lifecycle and package boundaries established by
 PlayStation-specific libretro bridge, Worker-hosted WebAssembly core, disc
 handling, controller ports, memory cards and save states.
 
-M0 feasibility is complete. PCSX-ReARMed at the commit recorded in
+M0 feasibility and the M1 public-contract foundation are complete.
+PCSX-ReARMed at the commit recorded in
 `core/SOURCE.json` is the selected core, and Emscripten 6.0.2 is the pinned
 toolchain. The P1–P12 evidence covers real-BIOS boot, dedicated-Worker disc
 access, video geometry and formats, NTSC/PAL timing, XA/CD audio, both memory
 cards, state and disc changes, near-maximum-disc memory and repeated 60-second
 endurance runs at 60 and 120 Hz host cadence.
+
+The root package exports validated content, firmware, controller, session and
+build-metadata contracts together with `PsxRuntimeError`. The normalized core
+recipe in `core/build.json` feeds a deterministic SHA-256 build identity with
+no local path or timestamp input.
 
 See the [implementation spec](docs/psx-runtime-spec.md) for the architecture,
 public contracts, probe plan, milestones and release gates. Current progress

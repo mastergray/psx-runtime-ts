@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "core": "PCSX-ReARMed",
+  "coreVersion": "9f8b028",
+  "artifacts": [
+    "psx-core.js",
+    "psx-core.wasm",
+    "core.worker.js"
+  ],
+  "supportedContent": [
+    "cue",
+    "m3u",
+    "sbi"
+  ],
+  "controllerTypes": [
+    "none",
+    "digital",
+    "dualshock"
+  ],
+  "firmware": {
+    "required": true,
+    "byteLengths": [
+      524288
+    ],
+    "systemFilenames": {
+      "ntsc-u": "scph5501.bin",
+      "ntsc-j": "scph5500.bin",
+      "pal": "scph5502.bin"
+    }
+  },
+  "memory": {
+    "initialPages": 1024,
+    "maximumPages": 8192
+  },
+  "pthreads": false,
+  "makeArguments": [
+    "-f",
+    "Makefile.libretro",
+    "platform=emscripten",
+    "HAVE_CHD=0"
+  ],
+  "compileFlags": [
+    "-O2",
+    "-DNO_DYLIB",
+    "-DNO_SOCKET",
+    "-msimd128",
+    "-ftree-vectorize",
+    "-sUSE_ZLIB=1"
+  ],
+  "linkFlags": [
+    "-O3",
+    "-sMODULARIZE=1",
+    "-sEXPORT_ES6=1",
+    "-sEXPORT_NAME=createPsxCore",
+    "-sENVIRONMENT=worker",
+    "-sFORCE_FILESYSTEM=1",
+    "-lworkerfs.js",
+    "-sUSE_ZLIB=1",
+    "-sALLOW_MEMORY_GROWTH=1",
+    "-sINITIAL_MEMORY=67108864",
+    "-sMAXIMUM_MEMORY=536870912",
+    "-sGROWABLE_ARRAYBUFFERS=0",
+    "-sNO_EXIT_RUNTIME=1",
+    "-sASYNCIFY=0",
+    "-sEXPORTED_RUNTIME_METHODS=FS,WORKERFS,HEAPU8,HEAP16,HEAP32"
+  ],
+  "licenses": [
+    {
+      "id": "GPL-2.0-or-later",
+      "notice": "notices/PCSX-ReARMed-COPYING.txt"
+    },
+    {
+      "id": "Emscripten",
+      "notice": "notices/Emscripten-LICENSE.txt"
+    }
+  ]
+}

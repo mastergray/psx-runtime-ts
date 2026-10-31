@@ -1,13 +1,12 @@
 # Emulator core build boundary
 
-This directory will contain the immutable source identity, Emscripten pin,
-production patches and normalized build recipe selected by milestone M0 in
-the implementation spec.
+This directory contains the immutable source identity, Emscripten pin,
+production patches and normalized build recipe selected by milestones M0 and
+M1 in the implementation spec.
 
-There is deliberately no production `SOURCE.json` or `EMSDK_VERSION` yet. The
-baseline M0 comparison provisionally favors PCSX-ReARMed, but the remaining
-media, card, state, controlled firmware-path and near-maximum-disc memory
-probes must close before recording the production values. PAL/NTSC long-run
-timing and determinism plus dynamic geometry are complete. Probe-only pins live
-under `core/probes/`. Source checkouts and compiled output belong under ignored
-caches and `dist/core/`, not here.
+`SOURCE.json` and `EMSDK_VERSION` pin PCSX-ReARMed and Emscripten after the
+complete M0 comparison. `build.json` is the source-controlled M1 recipe whose
+material flags, memory limits and runtime metadata feed the deterministic
+build identity. Probe-only inputs remain under `core/probes/`. Source
+checkouts and compiled output belong under ignored caches and `dist/core/`,
+not here.

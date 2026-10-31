@@ -1,6 +1,6 @@
 # Browser PlayStation Runtime — Implementation Spec
 
-**Status:** draft implementation contract for `psx-runtime-ts`
+**Status:** implementation contract for `psx-runtime-ts`; M0–M1 complete
 
 **Target:** the first usable desktop-browser release (`v1.0.0`)
 
