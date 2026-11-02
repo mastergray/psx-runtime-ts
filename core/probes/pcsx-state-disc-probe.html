@@ -5,7 +5,7 @@
 <script>
 (async () => {
     try {
-        const base = "/fixtures/generated/m0/multidisc";
+        const base = "/tests/fixtures/generated/m0/multidisc";
         const [disc1CueResponse, disc1BinResponse, disc2CueResponse, disc2BinResponse] = await Promise.all([
             fetch(`${base}/disc1/m0-fixture.cue`),
             fetch(`${base}/disc1/m0-fixture.bin`),

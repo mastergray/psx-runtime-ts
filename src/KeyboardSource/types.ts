@@ -57,7 +57,7 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const isTarget = (value: unknown): value is KeyboardEventTargetLike => isObject(value)
     && typeof value.addEventListener === "function" && typeof value.removeEventListener === "function";
 
-const isMap = (value: unknown): value is KeyboardMap => isObject(value)
+export const isKeyboardMap = (value: unknown): value is KeyboardMap => isObject(value)
     && Object.entries(value).every(([code, control]) => code.length > 0 && isPsxButtonControl(control));
 
 const isAnalog = (value: unknown): value is KeyboardAnalogConfig => {
@@ -73,6 +73,6 @@ const isAnalog = (value: unknown): value is KeyboardAnalogConfig => {
 export function isKeyboardSourceConfig(value: unknown): value is KeyboardSourceConfig {
     return isObject(value) && isPsxInputLike(value.input) && isTarget(value.target)
         && (value.visibilityTarget === undefined || isTarget(value.visibilityTarget))
-        && (value.map === undefined || isMap(value.map))
+        && (value.map === undefined || isKeyboardMap(value.map))
         && (value.analog === undefined || isAnalog(value.analog));
 }

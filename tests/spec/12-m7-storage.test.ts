@@ -1,5 +1,6 @@
 import CTGTest, { CTGTestPredicates as P } from "ctg-js-test";
 import {
+    isPsxFirmwareRecord,
     isPsxStateRecord,
     isPsxStorageConfig,
     PsxRuntimeError,
@@ -41,6 +42,7 @@ class MemoryDriver implements PsxStorageDriverLike {
     readonly stores: Record<PsxStorageStore, Map<string, unknown>> = {
         cards: new Map(),
         states: new Map(),
+        firmware: new Map(),
     };
 
     async read(store: PsxStorageStore, key: string): Promise<unknown> {
@@ -134,6 +136,43 @@ const codeOf = async (action: () => Promise<unknown>): Promise<number | null> =>
 const testFile: TestFile = {
     label: "M7 persistent cards, states and auto-save",
     cases: [
+        {
+            label: "firmware remains private to browser storage and is keyed by region",
+            run: () => CTGTest.init("firmware")
+                .stage("store firmware", async () => {
+                    const driver = new MemoryDriver();
+                    let now = Date.UTC(2026, 10, 1, 12);
+                    const storage = new PsxStorage({ driver, now: () => now++ });
+                    const saved = await storage.saveFirmware({
+                        name: "user-firmware.bin",
+                        region: "ntsc-u",
+                        blob: new Blob([new Uint8Array([1, 2, 3])]),
+                    });
+                    const loaded = await storage.loadFirmware("ntsc-u");
+                    const listed = await storage.listFirmware();
+                    const invalidRegion = await codeOf(() => storage.loadFirmware("invalid" as "ntsc-u"));
+                    await storage.deleteFirmware("ntsc-u");
+                    return {
+                        valid: isPsxFirmwareRecord(saved),
+                        identity: [saved.format, saved.version, saved.region, saved.storedAt],
+                        bytes: [...new Uint8Array(await loaded!.blob.arrayBuffer())],
+                        distinctBlobs: [saved.blob !== loaded!.blob, loaded!.blob !== listed[0]!.blob],
+                        listed: listed.map(({ region, blob }) => [region, blob.size]),
+                        invalidRegion,
+                        deleted: await storage.loadFirmware("ntsc-u"),
+                    };
+                })
+                .assert("firmware behavior", ({ subject }) => subject, P.equals<unknown>({
+                    valid: true,
+                    identity: ["psx-runtime-firmware", 1, "ntsc-u", "2026-11-01T12:00:00.000Z"],
+                    bytes: [1, 2, 3],
+                    distinctBlobs: [true, true],
+                    listed: [["ntsc-u", 3]],
+                    invalidRegion: 1,
+                    deleted: null,
+                }))
+                .start(undefined),
+        },
         {
             label: "memory-card writes use optimistic revisions and retain the recoverable prior revision",
             run: () => CTGTest.init("memory cards")

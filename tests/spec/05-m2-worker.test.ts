@@ -70,6 +70,7 @@ const startPayload: WorkerStartPayload = {
     memoryCards: { 1: new Uint8Array(128 * 1024), 2: new Uint8Array(128 * 1024) },
     gameId: "fixture",
     region: "ntsc-u",
+    initialDiscIndex: 0,
     controllers: { 1: "dualshock", 2: "digital" },
     options: {},
 };
@@ -173,11 +174,12 @@ const testFile: TestFile = {
                     start,
                     { ...start, requestId: 0 },
                     { ...start, payload: { ...startPayload, contentPath: "../bad.cue" } },
+                    { ...start, payload: { ...startPayload, initialDiscIndex: 1 } },
                     command({ type: "tick", requestId: 2, generation: 1, timestamp: 10 }),
                     { type: "tick", requestId: 2, generation: 1, timestamp: -1 },
                     command({ type: "set-button", requestId: 3, generation: 1, port: 1, button: "cross", pressed: true }),
                     { type: "set-axis", requestId: 4, generation: 1, port: 1, axis: "left-x", value: 2 },
-                ].map(isWorkerCommand), P.equals<boolean[]>([true, false, false, true, false, true, false]))
+                ].map(isWorkerCommand), P.equals<boolean[]>([true, false, false, false, true, false, true, false]))
                 .assert("output verdicts", () => [
                     { type: "response", command: "start", requestId: 1, generation: 1, ok: true, result: machine },
                     { type: "response", command: "reset", requestId: 2, generation: 1, ok: false, error: { code: 19, message: "failed", data: null } },

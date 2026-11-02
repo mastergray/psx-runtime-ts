@@ -25,8 +25,8 @@
     try {
         await reportStage("before-fetch");
         const [cueResponse, binResponse] = await Promise.all([
-            fetch("/fixtures/generated/m0/m0-fixture.cue"),
-            fetch("/fixtures/generated/m0/m0-fixture.bin"),
+            fetch("/tests/fixtures/generated/m0/m0-fixture.cue"),
+            fetch("/tests/fixtures/generated/m0/m0-fixture.bin"),
         ]);
         if (!cueResponse.ok || !binResponse.ok) throw new Error("Memory probe fixture fetch failed");
         const [cue, fixtureBin] = await Promise.all([cueResponse.blob(), binResponse.blob()]);

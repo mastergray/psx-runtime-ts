@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import { copyFile, readFile, utimes, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { strToU8, zipSync } from "fflate";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
-const fixtureRoot = resolve(repositoryRoot, "fixtures/homebrew");
-const generatedRoot = resolve(repositoryRoot, "fixtures/generated/m0");
+const fixtureRoot = resolve(repositoryRoot, "tests/fixtures/homebrew");
+const generatedRoot = resolve(repositoryRoot, "tests/fixtures/generated/m0");
 const manifest = JSON.parse(await readFile(resolve(fixtureRoot, "TOOLCHAIN.json"), "utf8"));
 const sdkRoot = process.env.PSN00BSDK_ROOT;
 
@@ -125,6 +126,7 @@ const buildFixture = async ({
     projectFile = "iso.xml",
     variant,
 }) => {
+    await rm(outputRoot, { recursive: true, force: true });
     run("cmake", [
         "-S", fixtureRoot,
         "-B", outputRoot,
@@ -218,8 +220,69 @@ for (const configuration of [
     fixtures.push(await buildFixture(configuration));
 }
 
+const buildDiagnosticDisc = async ({ directory, executable, project }) => {
+    await mkdir(directory, { recursive: true });
+    const stagedExecutable = resolve(directory, executable);
+    const stagedSystem = resolve(directory, "diagnostic-system.cnf");
+    const stagedLicense = resolve(directory, "LICENSE");
+    const stagedProject = resolve(directory, "iso.xml");
+    await Promise.all([
+        copyFile(resolve(generatedRoot, executable), stagedExecutable),
+        copyFile(resolve(fixtureRoot, "diagnostic-system.cnf"), stagedSystem),
+        copyFile(resolve(fixtureRoot, "LICENSE"), stagedLicense),
+        copyFile(resolve(fixtureRoot, project), stagedProject),
+    ]);
+    await Promise.all([stagedExecutable, stagedSystem, stagedLicense, stagedProject]
+        .map((path) => utimes(path, fixedTimestamp, fixedTimestamp)));
+    run(imageBuilder, ["-y", stagedProject], directory);
+};
+
+const diagnosticsRoot = resolve(generatedRoot, "diagnostics");
+const controllerRoot = resolve(diagnosticsRoot, "controller");
+const audioRoot = resolve(diagnosticsRoot, "audio");
+await Promise.all([
+    buildDiagnosticDisc({
+        directory: controllerRoot,
+        executable: "controller-test.exe",
+        project: "iso-controller.xml",
+    }),
+    buildDiagnosticDisc({
+        directory: audioRoot,
+        executable: "audio-test.exe",
+        project: "iso-audio.xml",
+    }),
+]);
+
+const playlist = "controller/controller-test.cue\naudio/audio-test.cue\n";
+const playlistPath = resolve(diagnosticsRoot, "psx-runtime-diagnostics.m3u");
+await writeFile(playlistPath, playlist);
+await utimes(playlistPath, fixedTimestamp, fixedTimestamp);
+const [controllerCue, controllerBin, audioCue, audioBin] = await Promise.all([
+    readFile(resolve(controllerRoot, "controller-test.cue")),
+    readFile(resolve(controllerRoot, "controller-test.bin")),
+    readFile(resolve(audioRoot, "audio-test.cue")),
+    readFile(resolve(audioRoot, "audio-test.bin")),
+]);
+const zipOptions = { level: 6, mtime: fixedTimestamp };
+const archive = zipSync({
+    "psx-runtime-diagnostics.m3u": [strToU8(playlist), zipOptions],
+    "controller/controller-test.cue": [controllerCue, zipOptions],
+    "controller/controller-test.bin": [controllerBin, zipOptions],
+    "audio/audio-test.cue": [audioCue, zipOptions],
+    "audio/audio-test.bin": [audioBin, zipOptions],
+});
+const archivePath = resolve(generatedRoot, "psx-runtime-diagnostics.zip");
+await writeFile(archivePath, archive);
+await utimes(archivePath, fixedTimestamp, fixedTimestamp);
+
 console.log(JSON.stringify({
     toolchain: manifest.version,
     compiler: compilerVersion,
     fixtures,
+    diagnostics: {
+        discs: 2,
+        entry: "psx-runtime-diagnostics.m3u",
+        archiveBytes: archive.byteLength,
+        archiveSha256: createHash("sha256").update(archive).digest("hex"),
+    },
 }));

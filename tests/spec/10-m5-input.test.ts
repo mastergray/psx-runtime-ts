@@ -340,6 +340,7 @@ const testFile: TestFile = {
                         deadZone: 0.2,
                         triggerThreshold: 0.7,
                         invertAxes: { "left-y": true },
+                        buttonMaps: { one: { cross: 1, circle: 0 } },
                     };
                     const source = new GamepadSource(config);
                     source.attach();
@@ -354,6 +355,7 @@ const testFile: TestFile = {
                     return {
                         config: isGamepadSourceConfig(config),
                         duplicateRejected: isGamepadSourceConfig({ ...config, assignments: { 3: 1, 7: 1 } }),
+                        buttonMapRejected: isGamepadSourceConfig({ ...config, buttonMaps: { one: { cross: -1 } } }),
                         players: source.players,
                         buttons: session.buttons,
                         axes: session.axes,
@@ -365,15 +367,16 @@ const testFile: TestFile = {
                 .assert("gamepad behavior", ({ subject }) => subject, P.equals<unknown>({
                     config: true,
                     duplicateRejected: false,
+                    buttonMapRejected: false,
                     players: [
                         { index: 3, port: 1, id: null },
                         { index: 7, port: 2, id: null },
                     ],
                     buttons: [
-                        "1:cross:true",
+                        "1:circle:true",
                         "1:left:true",
                         "2:start:true",
-                        "1:cross:false",
+                        "1:circle:false",
                         "1:left:false",
                         "2:start:false",
                     ],

@@ -35,4 +35,6 @@ content identity with incremental Worker hashing, retains track Blobs in
 IndexedDB and deduplicates renamed copies. Quota and cancellation failures
 leave no partial record. The package audit rejects private inputs, generated
 media, caches and core binaries while checking the selected core notices. M10
-runs and records every clean-checkout `v1.0.0` gate.
+also adds bounded local ZIP expansion plus a two-disc controller/audio
+diagnostic under `tests/fixtures`. It then runs and records every
+clean-checkout `v1.0.0` gate.

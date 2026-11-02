@@ -1,29 +1,56 @@
-import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";
-import { isDiscPath } from "../shared.types.js";
+// Dependencies:
+import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";    // Reports structurally invalid top-level audit input
+import { isDiscPath } from "../shared.types.js";                       // Validates normalized relative content and descriptor paths
 
+// Type dependencies:
 import type {
-    AuditedDiscEntry,
-    AuditedTrack,
-    DiscFile,
-    DiscSet,
+    AuditedDiscEntry,    // Resolved cue, track, and optional sidecar result
+    AuditedTrack,        // Resolved data or audio track metadata
+    DiscFile,            // Supplied normalized path and blob pair
+    DiscSet,             // Top-level identity, entry, and file collection
 } from "../shared.types.js";
 import type {
-    DiscSetAuditResult,
-    DiscSetIssue,
-    DiscSetIssueCode,
-    DiscSetIssueSeverity,
+    DiscSetAuditResult,       // Success or failure report returned to callers
+    DiscSetIssue,             // One structured audit diagnostic
+    DiscSetIssueCode,         // Closed diagnostic category set
+    DiscSetIssueSeverity,     // Error or warning classification
 } from "./types.js";
 
-const MAX_FILES = 64;
-const MAX_DISCS = 8;
-const MAX_TRACKS = 99;
-const MAX_DESCRIPTOR_BYTES = 256 * 1024;
-const MAX_CUE_LINE_BYTES = 1024;
-const FILE_DIRECTIVE = /^\s*FILE\s+(?:"([^"\r\n]+)"|([^\s"]+))\s+([^\s]+)\s*$/iu;
-const TRACK_DIRECTIVE = /^\s*TRACK\s+(\d{1,3})\s+([^\s]+)\s*$/iu;
-const INDEX_DIRECTIVE = /^\s*INDEX\s+(\d{1,3})\s+(\d{1,3}):(\d{2}):(\d{2})\s*$/iu;
-const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;
-const SUPPORTED_TRACK_MODES = new Map<string, "data" | "audio">([
+/**
+ *
+ * Type Declarations
+ *
+ */
+
+// TYPE :: {exact:MAP, folded:MAP}
+// Exact and case-folded views used to resolve descriptor references deterministically.
+interface FileLookup {
+    readonly exact: ReadonlyMap<string, DiscFile>;                           // First file at each exact supplied path
+    readonly folded: ReadonlyMap<string, ReadonlyArray<DiscFile>>;           // All files grouped by lowercase path
+}
+
+// TYPE :: {number:NUMBER, file:discFile?, kind:"data"|"audio"?, line:NUMBER, hasIndexOne:BOOLEAN, lastIndex:NUMBER, lastTime:NUMBER}
+// Mutable parser state for the CUE track currently being accumulated.
+interface PendingTrack {
+    readonly number: number;                 // Declared one-based track number
+    readonly file?: DiscFile;                // Resolved file active at the TRACK directive
+    readonly kind?: "data" | "audio";       // Normalized supported track mode
+    readonly line: number;                   // One-based source line for diagnostics
+    hasIndexOne: boolean;                    // Whether required INDEX 01 was observed
+    lastIndex: number;                       // Highest index number observed for ordering
+    lastTime: number;                        // Latest MSF timestamp observed for ordering
+}
+
+const MAX_FILES = 64;                          // Maximum supplied files audited as one set
+const MAX_DISCS = 8;                           // Maximum CUE entries accepted from one playlist
+const MAX_TRACKS = 99;                         // Maximum sequential tracks accepted per CUE
+const MAX_DESCRIPTOR_BYTES = 256 * 1024;       // Maximum bytes read from one CUE or M3U
+const MAX_CUE_LINE_BYTES = 1024;                // Maximum encoded bytes accepted on one CUE line
+const FILE_DIRECTIVE = /^\s*FILE\s+(?:"([^"\r\n]+)"|([^\s"]+))\s+([^\s]+)\s*$/iu; // Supported FILE syntax
+const TRACK_DIRECTIVE = /^\s*TRACK\s+(\d{1,3})\s+([^\s]+)\s*$/iu;                     // Supported TRACK syntax
+const INDEX_DIRECTIVE = /^\s*INDEX\s+(\d{1,3})\s+(\d{1,3}):(\d{2}):(\d{2})\s*$/iu; // Supported INDEX syntax
+const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;       // Forbidden descriptor controls excluding line whitespace
+const SUPPORTED_TRACK_MODES = new Map<string, "data" | "audio">([                     // CUE modes normalized for runtime mounting
     ["AUDIO", "audio"],
     ["MODE1/2048", "data"],
     ["MODE1/2352", "data"],
@@ -31,35 +58,28 @@ const SUPPORTED_TRACK_MODES = new Map<string, "data" | "audio">([
     ["MODE2/2352", "data"],
 ]);
 
-interface FileLookup {
-    readonly exact: ReadonlyMap<string, DiscFile>;
-    readonly folded: ReadonlyMap<string, ReadonlyArray<DiscFile>>;
-}
-
-interface PendingTrack {
-    readonly number: number;
-    readonly file?: DiscFile;
-    readonly kind?: "data" | "audio";
-    readonly line: number;
-    hasIndexOne: boolean;
-    lastIndex: number;
-    lastTime: number;
-}
-
+// METHOD :: UNKNOWN -> BOOLEAN
+// Narrows a value to a non-null object for structural validation.
 const isObject = (value: unknown): value is Record<string, unknown> =>
     typeof value === "object" && value !== null;
 
+// METHOD :: UNKNOWN -> BOOLEAN
+// Narrows a value to the Blob operations and size semantics required by the audit.
 const isBlobLike = (value: unknown): value is Blob => isObject(value)
     && typeof value.size === "number" && Number.isSafeInteger(value.size) && value.size >= 0
     && typeof value.arrayBuffer === "function" && typeof value.slice === "function"
     && typeof value.stream === "function" && typeof value.text === "function";
 
+// METHOD :: UNKNOWN -> BOOLEAN
+// Narrows top-level input to a minimally shaped disc set before detailed diagnostics.
 const isAuditInput = (value: unknown): value is DiscSet => isObject(value)
     && typeof value.gameId === "string" && value.gameId.trim().length > 0
     && typeof value.entry === "string" && Array.isArray(value.files)
     && value.files.every((file) => isObject(file)
         && typeof file.path === "string" && isBlobLike(file.blob));
 
+// METHOD :: [discSetIssue], discSetIssueSeverity, discSetIssueCode, STRING, STRING?, NUMBER? -> VOID
+// Appends one structured diagnostic with optional path and line context.
 const addIssue = (
     issues: DiscSetIssue[],
     severity: DiscSetIssueSeverity,
@@ -71,22 +91,30 @@ const addIssue = (
     issues.push({ severity, code, message, ...(path === undefined ? {} : { path }), ...(line === undefined ? {} : { line }) });
 };
 
+// METHOD :: STRING -> STRING
+// Returns the normalized parent directory portion of one content path.
 const directoryOf = (path: string): string => {
     const slash = path.lastIndexOf("/");
     return slash < 0 ? "" : path.slice(0, slash);
 };
 
+// METHOD :: STRING, STRING -> STRING
+// Resolves one descriptor reference relative to its normalized parent path.
 const resolveRelativePath = (base: string, reference: string): string => {
     const directory = directoryOf(base);
     return directory.length === 0 ? reference : `${directory}/${reference}`;
 };
 
+// METHOD :: STRING -> STRING
+// Returns a lowercase final-component extension or an empty string.
 const extensionOf = (path: string): string => {
     const slash = path.lastIndexOf("/");
     const dot = path.lastIndexOf(".");
     return dot > slash ? path.slice(dot).toLowerCase() : "";
 };
 
+// METHOD :: [discFile] -> fileLookup
+// Builds exact and case-folded lookup views for supplied content.
 const lookupFor = (files: ReadonlyArray<DiscFile>): FileLookup => {
     const exact = new Map<string, DiscFile>();
     const folded = new Map<string, DiscFile[]>();
@@ -100,6 +128,8 @@ const lookupFor = (files: ReadonlyArray<DiscFile>): FileLookup => {
     return { exact, folded };
 };
 
+// METHOD :: STRING, STRING, fileLookup, [discSetIssue], NUMBER -> discFile?
+// Resolves one safe reference and records missing, case, or ambiguity errors.
 const resolveFile = (
     descriptorPath: string,
     reference: string,
@@ -138,6 +168,8 @@ const resolveFile = (
     return undefined;
 };
 
+// METHOD :: discFile, [discSetIssue] -> PROMISE(STRING?)
+// Reads one bounded descriptor as strict UTF-8 without forbidden controls.
 const descriptorText = async (
     file: DiscFile,
     issues: DiscSetIssue[],
@@ -172,6 +204,8 @@ const descriptorText = async (
     return text;
 };
 
+// METHOD :: discFile, fileLookup, [discSetIssue], SET<STRING> -> STRING?
+// Resolves an optional same-basename SBI sidecar and records case errors.
 const sidecarFor = (
     cue: DiscFile,
     lookup: FileLookup,
@@ -193,6 +227,8 @@ const sidecarFor = (
     return undefined;
 };
 
+// METHOD :: discFile, fileLookup, [discSetIssue], SET<STRING> -> PROMISE(auditedDiscEntry)
+// Parses and resolves one bounded CUE into ordered audited track metadata.
 const auditCue = async (
     cue: DiscFile,
     lookup: FileLookup,
@@ -214,6 +250,8 @@ const auditCue = async (
     const lastFileTime = new Map<string, number>();
     const emptyReported = new Set<string>();
 
+    // METHOD :: VOID -> VOID
+    // Validates and commits the pending track before parser state advances.
     const finishTrack = (): void => {
         if (currentTrack === undefined) return;
         if (!currentTrack.hasIndexOne) {
@@ -349,9 +387,27 @@ const auditCue = async (
     return { cue: cue.path, tracks, ...(sbi === undefined ? {} : { sbi }) };
 };
 
+/**
+ *
+ * Class
+ *
+ */
+
+// Provides a stateless bounded audit for CUE and M3U PlayStation disc sets.
 export default class DiscSetAudit {
+
+    // CONSTRUCTOR :: VOID -> discSetAudit
+    // Prevents instances because auditing has no persistent state.
     private constructor() {}
 
+    /**
+     *
+     * Static Methods
+     *
+     */
+
+    // METHOD :: discSet -> PROMISE(discSetAuditResult)
+    // Validates paths, descriptors, disc limits, tracks, sidecars, and references.
     static async audit(set: DiscSet): Promise<DiscSetAuditResult> {
         if (!isAuditInput(set)) {
             throw new PsxRuntimeError({

@@ -36,6 +36,7 @@ export interface PsxBuildRecipe {
     };
     readonly memory: { readonly initialPages: number; readonly maximumPages: number };
     readonly pthreads: false;
+    readonly sourceDateEpoch: number;
     readonly makeArguments: ReadonlyArray<string>;
     readonly compileFlags: ReadonlyArray<string>;
     readonly linkFlags: ReadonlyArray<string>;
@@ -51,6 +52,7 @@ export interface PsxBuildIdentity {
     readonly compileFlags: ReadonlyArray<string>;
     readonly linkFlags: ReadonlyArray<string>;
     readonly memory: { readonly initialPages: number; readonly maximumPages: number };
+    readonly sourceDateEpoch: number;
 }
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
@@ -107,7 +109,9 @@ export function isPsxToolchainIdentity(value: unknown): value is PsxToolchainIde
 
 export function isPsxBuildRecipe(value: unknown): value is PsxBuildRecipe {
     if (!isObject(value) || !isStringArray(value.makeArguments)
-        || !isStringArray(value.compileFlags) || !isStringArray(value.linkFlags)) return false;
+        || !isStringArray(value.compileFlags) || !isStringArray(value.linkFlags)
+        || !Number.isSafeInteger(value.sourceDateEpoch)
+        || (value.sourceDateEpoch as number) < 0) return false;
     const publicShape = {
         ...value,
         formatVersion: value.schemaVersion,
@@ -130,7 +134,8 @@ export function isPsxBuildIdentity(value: unknown): value is PsxBuildIdentity {
         && isStringArray(value.linkFlags) && isObject(value.memory)
         && Number.isInteger(value.memory.initialPages) && (value.memory.initialPages as number) > 0
         && Number.isInteger(value.memory.maximumPages)
-        && (value.memory.maximumPages as number) >= (value.memory.initialPages as number);
+        && (value.memory.maximumPages as number) >= (value.memory.initialPages as number)
+        && Number.isSafeInteger(value.sourceDateEpoch) && (value.sourceDateEpoch as number) >= 0;
 }
 
 export const buildIdentityFor = (
@@ -148,6 +153,7 @@ export const buildIdentityFor = (
     compileFlags: recipe.compileFlags,
     linkFlags: recipe.linkFlags,
     memory: recipe.memory,
+    sourceDateEpoch: recipe.sourceDateEpoch,
 });
 
 export const buildIdFor = (identity: PsxBuildIdentity): string => {
@@ -174,6 +180,7 @@ export const buildIdFor = (identity: PsxBuildIdentity): string => {
             initialPages: identity.memory.initialPages,
             maximumPages: identity.memory.maximumPages,
         },
+        sourceDateEpoch: identity.sourceDateEpoch,
     };
     return sha256(JSON.stringify(normalized));
 };

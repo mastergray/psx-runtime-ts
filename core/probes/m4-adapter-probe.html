@@ -38,10 +38,10 @@ const build = {
 
 try {
     const [cueOne, binOne, cueTwo, binTwo, bios] = await Promise.all([
-        getBlob("/fixtures/generated/m0/multidisc/disc1/m0-fixture.cue"),
-        getBlob("/fixtures/generated/m0/multidisc/disc1/m0-fixture.bin"),
-        getBlob("/fixtures/generated/m0/multidisc/disc2/m0-fixture.cue"),
-        getBlob("/fixtures/generated/m0/multidisc/disc2/m0-fixture.bin"),
+        getBlob("/tests/fixtures/generated/m0/multidisc/disc1/m0-fixture.cue"),
+        getBlob("/tests/fixtures/generated/m0/multidisc/disc1/m0-fixture.bin"),
+        getBlob("/tests/fixtures/generated/m0/multidisc/disc2/m0-fixture.cue"),
+        getBlob("/tests/fixtures/generated/m0/multidisc/disc2/m0-fixture.bin"),
         getBlob("/private/bios"),
     ]);
     const game = {

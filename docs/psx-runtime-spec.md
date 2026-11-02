@@ -60,7 +60,7 @@ module, libretro constant or worker protocol type.
 | `ArcadeDisplay` | `PsxDisplay` | frame geometry may change while a game is running |
 | `ArcadeAudio` | `PsxAudio` | consumes the core-reported rate, normally 44.1 kHz |
 | `RomSetAudit` | `DiscSetAudit` | validates CUE/M3U references and track files, not parent/BIOS ROM sets |
-| `ArcadeStorage` | `PsxStorage` | stores raw memory-card images separately from build-locked save states |
+| `ArcadeStorage` | `PsxStorage` | stores firmware and raw memory-card images separately from build-locked save states |
 | `ArcadeRomStore` | `PsxGameStore` | stores potentially very large `Blob`s and a normalized disc manifest |
 | `ArcadeCabinet` | `PsxConsole` | console-oriented composition root; no DIP/coin/service concepts |
 
@@ -83,11 +83,11 @@ The first release includes:
 - keyboard and Gamepad API sources;
 - two persistent 128 KiB memory-card images;
 - named save states with strict core-build and game identity checks;
-- local-file loading, an optional IndexedDB game library and a developer
-  harness; and
+- raw-file, directory and ZIP loading, optional IndexedDB firmware and game
+  storage, and a developer harness; and
 - Chromium release gates for NTSC, PAL, multi-track and multi-disc fixtures.
 
-CHD, PBP, ECM, CCD/IMG/SUB, MDF/MDS, archive extraction, light guns,
+CHD, PBP, ECM, CCD/IMG/SUB, MDF/MDS, non-ZIP archives, light guns,
 mouse-based controllers, NegCon, multitap, cheats, rewind, run-ahead, netplay,
 achievements, shaders and enhanced internal resolution are not v1 features.
 They require explicit later milestones rather than pass-through core options.
@@ -99,8 +99,9 @@ contain no commercial disc image or Sony BIOS, do not link to either, and do
 not provide default download URLs.
 
 - The runtime accepts files the page or its user supplies at run time.
-- BIOS hashes and disc metadata may be stored because they are identifiers,
-  not copyrighted content. BIOS bytes never leave the user's browser.
+- A page may explicitly store user-supplied BIOS bytes in browser-local
+  IndexedDB. Firmware is keyed by region, removable independently, and never
+  leaves the user's browser.
 - Automated real-core tests use a reproducible, redistributable homebrew test
   disc built from committed source. Its toolchain and asset licenses are
   recorded beside the fixture.
@@ -173,6 +174,8 @@ psx-runtime-ts/
         PsxStorage/
         PsxGameStore/
         PsxConsole/
+        ZipDiscSource/
+        ZipFirmwareSource/
     scripts/
         build-core.ts
         build-fixture.ts
@@ -181,9 +184,9 @@ psx-runtime-ts/
     harness/
         index.html
         main.ts
-    fixtures/
-        homebrew/                    # source and deterministic build recipe; generated media ignored
     tests/
+        fixtures/
+            homebrew/                # source and deterministic build recipe; generated media ignored
         run.ts
         support/
         spec/
@@ -230,7 +233,8 @@ The root exports:
 - `DiscSetAudit`;
 - `PsxInput`, `PsxDisplay`, `PsxAudio`, `PsxPlayer`;
 - `KeyboardSource`, `GamepadSource` and `DEFAULT_KEYBOARD_MAP`;
-- `PsxStorage`, `PsxGameStore`, `PsxConsole`; and
+- `PsxStorage`, `PsxGameStore`, `PsxConsole`, `ZipDiscSource` and
+  `ZipFirmwareSource`; and
 - every public config/event type plus its structural predicate.
 
 Worker message types, libretro constants, raw Emscripten module types, mount
@@ -365,6 +369,7 @@ interface PsxRumbleEvent {
 interface PsxStartConfig {
     readonly game: DiscSet;
     readonly bios: BiosImage;
+    readonly initialDiscIndex?: number;
     readonly controllers?: Readonly<Partial<Record<ControllerPort, PsxControllerType>>>;
     readonly memoryCards?: Readonly<Partial<Record<ControllerPort, Uint8Array>>>;
     readonly options?: Readonly<Record<string, string | number | boolean>>;
@@ -467,6 +472,7 @@ a validating constructor and `PsxRuntimeError.is()`.
 | 18 | `UNSUPPORTED` | browser or requested controller/content/option is unsupported |
 | 19 | `WORKER_FAILED` | Worker crashes, sends malformed output or misses a terminal timeout |
 | 20 | `MEMORY_EXCEEDED` | Wasm reaches its configured maximum memory |
+| 21 | `ARCHIVE_INVALID` | a ZIP is malformed, unsafe, encrypted, ambiguous or exceeds extraction limits |
 
 Core logs are attached as bounded ordered records. They never include original
 local paths; the mount plan exposes generated `/content/...` names to the core.
@@ -664,7 +670,26 @@ The audit does not claim to authenticate a game dump or replace a preservation
 database. It proves only that the supplied set is safe to mount and internally
 complete. Core load failure remains `CORE_START_FAILED` with sanitized logs.
 
-### 5.2 BIOS validation
+### 5.2 ZIP disc sources
+
+`PsxConsole.resolveFiles`, and therefore `auditFiles`, `importFiles` and
+`startFiles`, accepts either the existing raw selection or one ZIP selected by
+itself. The ZIP is a transport container: it is expanded locally and its CUE,
+BIN, M3U and SBI files enter the same `DiscSetAudit` and mount-plan path as raw
+files. The core never receives or interprets the archive.
+
+Extraction streams compressed input and rejects malformed or encrypted ZIPs,
+compression methods other than stored/deflate, unsafe or case-ambiguous paths,
+more than 64 files, an entry larger than 1 GiB, or more than 8 GiB total
+compressed or expanded data. A ZIP may contain one CUE/BIN disc or one M3U
+whose relative entries reach all included discs. Mixing a ZIP with separately
+selected files is an explicit `ARCHIVE_INVALID` error.
+
+The library stores only the normalized extracted `Blob`s and descriptors; it
+does not retain a redundant copy of the ZIP. Directory selection and explicit
+multi-file selection remain supported for already-extracted content.
+
+### 5.3 BIOS validation
 
 BIOS validation is separate from disc auditing. It checks the `Blob` size
 against `build.firmware.byteLengths`, computes SHA-256, verifies the caller's
@@ -673,6 +698,13 @@ in `build.firmware.systemFilenames`. A hash table may label recognized retail
 revisions and warn about a declared-region mismatch, but v1 does not reject an
 otherwise supported retail image merely because its hash is absent from that
 table.
+
+`ZipFirmwareSource` accepts a small user-supplied ZIP and extracts only an
+image whose byte length is supported by the active build. A single candidate
+is accepted directly. If several candidates exist, exactly one filename must
+identify the selected NTSC-U, NTSC-J or PAL region; ambiguous archives fail
+with `BIOS_INVALID`. Compressed, entry and total expanded-size limits are much
+smaller than disc ZIP limits so a firmware archive cannot act as a ZIP bomb.
 
 The v1 build disables silent HLE fallback. The shim must report whether the
 core opened the supplied BIOS; if upstream has no stable frontend signal, the
@@ -712,14 +744,15 @@ fallback to a public CDN exists.
 
 `start`:
 
-1. validates and audits the disc set and BIOS before starting a Worker;
+1. validates and audits the disc set, initial disc index and BIOS before starting a Worker;
 2. verifies requested content/controller/options against `build.json` and the
    public allowlist;
 3. copies incoming card arrays, validates the exact raw-card size and fills a
    missing slot with a deterministic formatted blank card;
 4. creates a fresh Worker and clones the audited `Blob`s plus the
    generated mount plan;
-5. waits for module instantiation, mount completion, core load, AV info and the
+5. selects the requested initial M3U image through libretro's disk-control
+   interface before core load, then waits for AV info and the
    first valid frame; and
 6. resolves a session or terminates the Worker and rejects with one typed
    error. Partial startup never leaves listeners, scheduler handles or Workers.
@@ -779,7 +812,10 @@ frame-based rate, recenters on release and remains deterministic under fake
 One browser gamepad maps to one controller port. Standard mapping uses the
 usual face, shoulder, d-pad, start/select, stick and stick-click indices.
 Config includes dead zone, trigger threshold, axis inversion and an explicit
-browser-index-to-port assignment.
+browser-index-to-port assignment. Optional per-device button maps are keyed by
+the browser gamepad ID; each digital PlayStation button can override its
+standard index or use `null` to remain unbound. Analog axes retain the standard
+four-axis layout.
 
 Polling uses an injected provider and frame scheduler. Disconnect releases the
 channel. `PsxRumbleEvent` calls `GamepadHapticActuator.playEffect` only when
@@ -845,7 +881,9 @@ game store while accepting page-owned canvas/container/gesture elements.
 
 It does not create a page, modal, file picker or game list. It exposes methods
 to normalize a `FileList`, audit/import it, start a stored game, bind a browser
-gamepad to a port and dispose the complete graph.
+gamepad to a port, replace the live keyboard map, replace a device-specific
+gamepad button map and dispose the complete graph. Live mapping changes rebuild
+only the browser input sources; they do not restart the emulated session.
 
 ## 9. Persistence and local game storage
 
@@ -892,7 +930,25 @@ core pin never attempts optimistic state compatibility.
 Names are trimmed Unicode strings of 1–80 code points. Storage rejects control
 characters and normalizes to NFC for equality.
 
-### 9.3 `PsxGameStore`
+### 9.3 Firmware storage
+
+`PsxStorage` can save, load, list and delete user-supplied firmware. Records
+are keyed by `ntsc-u`, `ntsc-j` or `pal`, so storing one region replaces only
+that region. Each record is a versioned `psx-runtime-firmware` envelope with
+the original `Blob` and an ISO storage timestamp. Reads return a fresh `Blob`
+view, malformed records fail with `STORAGE_FAILED`, and firmware storage is
+never automatic at the library boundary.
+
+The default IndexedDB schema stores firmware beside cards and states in a
+separate object store. Upgrading an existing version-1 database adds that
+store without rewriting or deleting existing saves.
+
+The harness resolves a raw image or regional firmware ZIP before calling
+`saveFirmware`, so a ZIP container or wrong-sized image is never persisted as
+firmware. Existing malformed records remain removable and produce an
+actionable replacement message rather than being silently deleted.
+
+### 9.4 `PsxGameStore`
 
 The optional library stores a normalized manifest and the original track
 `Blob`s in IndexedDB without converting them to byte arrays. Import audits
@@ -914,15 +970,24 @@ them.
 
 The harness is a consumer of the package, not a second runtime. It provides:
 
-- BIOS and game file pickers plus drag/drop;
+- a single-ZIP game picker plus drag/drop for the release-test workflow;
 - an audit panel showing every missing/invalid reference;
-- canvas, audio unlock, keyboard map and gamepad-to-port assignment;
+- separate browser-local **Check And Store** actions for firmware and games,
+  with independent removal;
+- a **System** surface before **Game**; Game and Library remain disabled until
+  stored firmware for the selected region matches the active core's supported
+  byte lengths;
+- canvas, audio state and per-player binding tables that capture the next
+  keyboard key or gamepad button for each digital control;
+- a validated browser-wide control profile in `localStorage`; keyboard maps
+  and device-ID-keyed gamepad button maps survive reload, while transient
+  browser gamepad indices do not, and the user can restore defaults;
 - controller type selection before start;
 - pause/resume, soft/hard reset, disc selection and fullscreen;
 - two card selectors, import/export and auto-save status;
 - named state create/load/delete;
 - sanitized core logs and timing/audio/video counters; and
-- optional private preload config for local browser tests.
+- optional private BIOS/content preload config for local browser tests.
 
 The preload config is git-ignored, contains local paths only, and is read by
 `serve-harness.ts`; it never enters browser bundles or package output. The
@@ -943,7 +1008,7 @@ without cross-origin-isolation headers.
 | M7 | `PsxStorage`, state envelope and auto-save | cards survive reload; incompatible states reject; simulated write conflict preserves both revisions |
 | M8 | player, console, harness and preload | local files and stored games run through the same public composition path |
 | M9 | `PsxGameStore`, packaging, licenses and release gates | large Blob import/dedup/quota behavior passes; package contains no game, BIOS or core cache |
-| M10 | v1 release | every gate in section 13 passes from a clean checkout |
+| M10 | v1 release | ZIP/M3U diagnostics and every gate in section 13 pass from a clean checkout |
 | M11+ | optional CHD, additional controllers, touch UI, alternate core, enhanced graphics | each is independently probed and does not widen the v1 contracts accidentally |
 
 M0 is a hard gate. M1 types may be drafted in parallel, but no production
@@ -989,8 +1054,8 @@ used when one fixture cannot express all cases cleanly.
 
 ### 13.1 Suites
 
-**`spec` (Node):** every type predicate; error construction; CUE/M3U parser
-and hostile paths; mount-plan rewriting; build metadata and fingerprinting;
+**`spec` (Node):** every type predicate; error construction; CUE/M3U parser,
+hostile ZIPs and paths; mount-plan rewriting; build metadata and fingerprinting;
 worker protocol reducer; frame accumulator at 50/59.94/60 Hz; pixel conversion
 and pitch; buffer pool; input channels/SOCD/analog ownership; display layout;
 audio queue arithmetic; card validation/revision conflicts; state envelope;
@@ -1056,7 +1121,7 @@ The following are intentionally outside v1:
 - a hosted game deployment format, manifest-driven shell or public ROM CDN;
 - RetroArch UI/config/database behavior;
 - mobile/touch acceptance, installable PWA or service-worker caching;
-- archive extraction and patch formats;
+- non-ZIP archive extraction and patch formats;
 - CHD/PBP and non-CUE descriptor families;
 - multitap (players 3–8), light gun, mouse, NegCon and specialty controllers;
 - enhanced internal resolution, texture replacement, shaders and WebGL;

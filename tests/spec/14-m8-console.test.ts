@@ -1,5 +1,6 @@
 import CTGTest, { CTGTestPredicates as P } from "ctg-js-test";
 import {
+    DEFAULT_KEYBOARD_MAP,
     isPsxConsoleConfig,
     PsxConsole,
 } from "../../src/index.ts";
@@ -161,6 +162,8 @@ const testFile: TestFile = {
                         name: "firmware", region: "ntsc-u", blob: new Blob([new Uint8Array([1])]),
                     } });
                     const localInput = player.input!;
+                    console.setKeyboardMap({ ...DEFAULT_KEYBOARD_MAP, KeyZ: { port: 2, button: "circle" } });
+                    console.setGamepadButtonMap("pad", { cross: null, triangle: 0 });
                     keyboardTarget.key("keydown", "KeyZ");
                     keyboardTarget.key("keyup", "KeyZ");
                     scheduler.pulse();
@@ -190,9 +193,9 @@ const testFile: TestFile = {
                     audit: [true, 1],
                     starts: [["local", "game.cue", 2], ["stored", "game.cue", 2]],
                     samePathShape: ["game.cue", "track.bin"],
-                    localInput: ["down:1:cross", "up:1:cross", "down:2:cross", "release:2:cross"],
+                    localInput: ["down:2:circle", "up:2:circle", "down:2:triangle", "release:2:triangle"],
                     storedInput: ["down:1:up", "release:1:up"],
-                    imported: ["stored", 1],
+                    imported: ["stored", 2],
                     cleanup: [0, 0, 1],
                 }))
                 .start(undefined),

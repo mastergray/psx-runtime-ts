@@ -122,6 +122,7 @@ export type PsxOptions = Readonly<Record<string, string | number | boolean>>;
 export interface PsxStartConfig {
     readonly game: DiscSet;
     readonly bios: BiosImage;
+    readonly initialDiscIndex?: number;
     readonly controllers?: Readonly<Partial<Record<ControllerPort, PsxControllerType>>>;
     readonly memoryCards?: Readonly<Partial<Record<ControllerPort, Uint8Array>>>;
     readonly options?: PsxOptions;
@@ -385,6 +386,7 @@ export function isPsxOptions(value: unknown): value is PsxOptions {
 
 export function isPsxStartConfig(value: unknown): value is PsxStartConfig {
     return isObject(value) && isDiscSet(value.game) && isBiosImage(value.bios)
+        && (value.initialDiscIndex === undefined || isNonNegativeInteger(value.initialDiscIndex))
         && (value.controllers === undefined || isPortRecord(value.controllers, isPsxControllerType, false))
         && (value.memoryCards === undefined || isPortRecord(
             value.memoryCards,

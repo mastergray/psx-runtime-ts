@@ -22,6 +22,11 @@ static int16_t observed_axis;
 static unsigned unload_count;
 static unsigned deinit_count;
 static unsigned controller_count;
+static unsigned controller_before_load_count;
+static unsigned controller_devices[2];
+static bool game_loaded;
+static unsigned initial_image_count;
+static char initial_image_path[128];
 static char disc_trace[32];
 static size_t disc_trace_size;
 
@@ -53,7 +58,8 @@ static bool replace_image_index(unsigned index, const struct retro_game_info *in
 }
 static bool add_image_index(void) { return false; }
 static bool set_initial_image(unsigned index, const char *path) {
-    (void) path;
+    initial_image_count++;
+    snprintf(initial_image_path, sizeof(initial_image_path), "%s", path == NULL ? "" : path);
     disc_index = index;
     return index < 2;
 }
@@ -78,6 +84,13 @@ void retro_init(void) {
     tray_open = false;
     observed_button = 0;
     observed_axis = 0;
+    controller_count = 0;
+    controller_before_load_count = 0;
+    controller_devices[0] = 0;
+    controller_devices[1] = 0;
+    game_loaded = false;
+    initial_image_count = 0;
+    initial_image_path[0] = '\0';
     disc_trace_size = 0;
     disc_trace[0] = '\0';
     memset(cards, 0x11, CARD_BYTES);
@@ -127,7 +140,10 @@ void retro_get_system_av_info(struct retro_system_av_info *info) {
     };
 }
 void retro_set_controller_port_device(unsigned port, unsigned device) {
-    if (port < 2 && device == RETRO_DEVICE_JOYPAD) controller_count++;
+    if (port >= 2) return;
+    controller_count++;
+    controller_devices[port] = device;
+    if (!game_loaded) controller_before_load_count++;
 }
 void retro_reset(void) { frame_count = 0; }
 
@@ -174,9 +190,10 @@ bool retro_unserialize(const void *data, size_t size) {
     return true;
 }
 bool retro_load_game(const struct retro_game_info *game) {
-    return game != NULL && game->path != NULL
+    game_loaded = game != NULL && game->path != NULL
         && strcmp(game->path, "/content/index/game.cue") == 0
         && game->data == NULL && game->size == 0;
+    return game_loaded;
 }
 void retro_unload_game(void) { unload_count++; }
 unsigned retro_get_region(void) { return 0; }
@@ -188,4 +205,8 @@ int fake_observed_axis(void) { return observed_axis; }
 unsigned fake_unload_count(void) { return unload_count; }
 unsigned fake_deinit_count(void) { return deinit_count; }
 unsigned fake_controller_count(void) { return controller_count; }
+unsigned fake_controller_before_load_count(void) { return controller_before_load_count; }
+unsigned fake_controller_device(unsigned port) { return port < 2 ? controller_devices[port] : 0; }
+unsigned fake_initial_image_count(void) { return initial_image_count; }
+const char *fake_initial_image_path(void) { return initial_image_path; }
 const char *fake_disc_trace(void) { return disc_trace; }

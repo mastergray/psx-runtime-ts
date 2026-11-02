@@ -6,8 +6,8 @@
 (async () => {
     try {
         const [cueResponse, binResponse] = await Promise.all([
-            fetch("/fixtures/generated/m0/geometry/m0-fixture.cue"),
-            fetch("/fixtures/generated/m0/geometry/m0-fixture.bin"),
+            fetch("/tests/fixtures/generated/m0/geometry/m0-fixture.cue"),
+            fetch("/tests/fixtures/generated/m0/geometry/m0-fixture.bin"),
         ]);
         if (!cueResponse.ok || !binResponse.ok) throw new Error("Geometry fixture fetch failed");
         const [cue, bin] = await Promise.all([cueResponse.blob(), binResponse.blob()]);

@@ -280,6 +280,45 @@ static unsigned controller_device(const char *options_json, unsigned port) {
     return RETRO_DEVICE_JOYPAD;
 }
 
+static int initial_disc(
+    const char *options_json,
+    unsigned *index,
+    char *path,
+    size_t path_capacity
+) {
+    if (options_json == NULL) return 0;
+    const char *index_key = "\"initialDiscIndex\":";
+    const char *index_value = strstr(options_json, index_key);
+    if (index_value == NULL) return 0;
+    index_value += strlen(index_key);
+    char *index_end = NULL;
+    unsigned long parsed = strtoul(index_value, &index_end, 10);
+    if (index_end == index_value || parsed > 7) return -1;
+
+    const char *path_key = "\"initialDiscPath\":\"";
+    const char *path_value = strstr(index_end, path_key);
+    if (path_value == NULL) return -1;
+    path_value += strlen(path_key);
+    const char *path_end = strchr(path_value, '"');
+    if (path_end == NULL) return -1;
+    size_t length = (size_t) (path_end - path_value);
+    if (length == 0 || length >= path_capacity || memchr(path_value, '\\', length) != NULL) return -1;
+    if (strncmp(path_value, "/content/index/", 15) != 0
+        || length < 4 || strncmp(path_end - 4, ".cue", 4) != 0) return -1;
+    memcpy(path, path_value, length);
+    path[length] = '\0';
+    *index = (unsigned) parsed;
+    return 1;
+}
+
+static int reject_start(const char *message) {
+    if (message != NULL) log_callback(RETRO_LOG_ERROR, "%s\n", message);
+    failed_start_log_size = frontend.log_size;
+    memcpy(failed_start_log, frontend.log, failed_start_log_size + 1);
+    psx_frontend_stop();
+    return 0;
+}
+
 int psx_frontend_start(const char *content_path, const char *options_json) {
     if (frontend.started || content_path == NULL || content_path[0] == '\0') return 0;
     frontend.pixel_format = RETRO_PIXEL_FORMAT_0RGB1555;
@@ -297,21 +336,30 @@ int psx_frontend_start(const char *content_path, const char *options_json) {
     if (retro_api_version() != RETRO_API_VERSION) return 0;
     retro_init();
     frontend.initialized = true;
-    retro_set_controller_port_device(0, controller_device(options_json, 0));
-    retro_set_controller_port_device(1, controller_device(options_json, 1));
+    unsigned initial_disc_index = 0;
+    char initial_disc_path[1024];
+    int initial_disc_result = initial_disc(
+        options_json,
+        &initial_disc_index,
+        initial_disc_path,
+        sizeof(initial_disc_path)
+    );
+    if (initial_disc_result < 0) return reject_start("Initial disc selection is malformed.");
+    if (initial_disc_result > 0 && (
+        !frontend.disk_available
+        || frontend.disk.set_initial_image == NULL
+        || !frontend.disk.set_initial_image(initial_disc_index, initial_disc_path)
+    )) return reject_start("The core rejected the initial disc selection.");
     const struct retro_game_info game = {
         .path = content_path,
         .data = NULL,
         .size = 0,
         .meta = NULL,
     };
-    if (!retro_load_game(&game)) {
-        failed_start_log_size = frontend.log_size;
-        memcpy(failed_start_log, frontend.log, failed_start_log_size + 1);
-        psx_frontend_stop();
-        return 0;
-    }
+    if (!retro_load_game(&game)) return reject_start(NULL);
     frontend.loaded = true;
+    retro_set_controller_port_device(0, controller_device(options_json, 0));
+    retro_set_controller_port_device(1, controller_device(options_json, 1));
     retro_get_system_av_info(&frontend.av_info);
     frontend.started = true;
     return 1;

@@ -118,8 +118,10 @@ class FakeAdapter implements PsxAdapter {
     readonly starts: PsxStartConfig[] = [];
     readonly sessions: FakeSession[] = [];
     replayFrame = true;
+    failStart = false;
     async start(config: PsxStartConfig): Promise<PsxSession> {
         this.starts.push(config);
+        if (this.failStart) throw new Error("adapter start failed");
         const session = new FakeSession(config.memoryCards);
         session.replayFrame = this.replayFrame;
         this.sessions.push(session);
@@ -133,9 +135,11 @@ class FakeDisplay {
     detached = 0;
     destroyed = 0;
     unsubscribe: Unsubscribe | null = null;
+    failAttach = false;
     attach(session: PsxSession): Unsubscribe {
         this.hasFrame = false;
         this.unsubscribe = session.onFrame(() => { this.frames++; this.hasFrame = true; });
+        if (this.failAttach) throw new Error("display attach failed");
         return this.unsubscribe;
     }
     detach(): void { this.unsubscribe?.(); this.unsubscribe = null; this.detached++; }
@@ -153,9 +157,11 @@ class FakeStorage {
     readonly cards = new Map<string, PsxMemoryCardRecord>();
     readonly states = new Map<string, PsxStateRecord>();
     saves = 0;
+    failLoad = false;
 
     key(profileId: string, cardId: string): string { return `${profileId}:${cardId}`; }
     async loadMemoryCard(profileId: string, cardId: string): Promise<PsxMemoryCardRecord | null> {
+        if (this.failLoad) throw new Error("card load failed");
         const value = this.cards.get(this.key(profileId, cardId));
         return value === undefined ? null : { ...value, bytes: value.bytes.slice() };
     }
@@ -201,7 +207,12 @@ class FakeStorage {
 
 class ManualIntervals {
     readonly handles = new Set<() => void>();
-    setInterval(callback: () => void): unknown { this.handles.add(callback); return callback; }
+    failSet = false;
+    setInterval(callback: () => void): unknown {
+        if (this.failSet) throw new Error("timer start failed");
+        this.handles.add(callback);
+        return callback;
+    }
     clearInterval(handle: unknown): void { this.handles.delete(handle as () => void); }
 }
 
@@ -350,6 +361,87 @@ const testFile: TestFile = {
                     duplicate: 10,
                     final: "destroyed",
                 }))
+                .start(undefined),
+        },
+        {
+            label: "every startup phase unwinds listeners, timers, audio and session ownership",
+            run: () => CTGTest.init("startup phase matrix")
+                .stage("fail each phase", async () => {
+                    const results = [];
+                    for (const phase of [
+                        "card-load", "adapter", "display", "first-frame",
+                        "audio-create", "audio-validate", "timer",
+                    ] as const) {
+                        const adapter = new FakeAdapter();
+                        const display = new FakeDisplay();
+                        const storage = new FakeStorage();
+                        const intervals = new ManualIntervals();
+                        const audios: FakeAudio[] = [];
+                        if (phase === "card-load") storage.failLoad = true;
+                        if (phase === "adapter") adapter.failStart = true;
+                        if (phase === "display") display.failAttach = true;
+                        if (phase === "first-frame") adapter.replayFrame = false;
+                        if (phase === "timer") intervals.failSet = true;
+                        const createAudio = phase === "audio-create"
+                            ? () => { throw new Error("audio create failed"); }
+                            : phase === "audio-validate"
+                                ? (() => ({})) as unknown as () => FakeAudio
+                                : () => {
+                                    const audio = new FakeAudio();
+                                    audios.push(audio);
+                                    return audio;
+                                };
+                        const player = new PsxPlayer({
+                            adapter,
+                            display,
+                            createAudio,
+                            storage,
+                            profileId: "release",
+                            memoryCardIds: { 1: "one", 2: "two" },
+                            intervalScheduler: intervals,
+                        });
+                        const failure = await codeOf(() => player.start({ game, bios }));
+                        const session = adapter.sessions[0];
+                        results.push({
+                            phase,
+                            failed: failure !== null,
+                            status: player.status,
+                            sessions: adapter.sessions.length,
+                            exits: session?.calls.filter((call) => call === "exit").length ?? 0,
+                            frameListeners: session?.frameListeners.size ?? 0,
+                            exitListeners: session?.exitListeners.size ?? 0,
+                            displayAttached: display.unsubscribe !== null,
+                            timers: intervals.handles.size,
+                            audioLive: audios.filter((audio) => audio.destroyed === 0).length,
+                            writes: storage.saves,
+                        });
+                        await player.destroy();
+                    }
+                    return results;
+                })
+                .assert("all phases are clean", ({ subject }) => subject, P.equals<unknown>([
+                    { phase: "card-load", failed: true, status: "idle", sessions: 0, exits: 0,
+                        frameListeners: 0, exitListeners: 0, displayAttached: false, timers: 0,
+                        audioLive: 0, writes: 0 },
+                    { phase: "adapter", failed: true, status: "idle", sessions: 0, exits: 0,
+                        frameListeners: 0, exitListeners: 0, displayAttached: false, timers: 0,
+                        audioLive: 0, writes: 0 },
+                    { phase: "display", failed: true, status: "idle", sessions: 1, exits: 1,
+                        frameListeners: 0, exitListeners: 0, displayAttached: false, timers: 0,
+                        audioLive: 0, writes: 0 },
+                    { phase: "first-frame", failed: true, status: "idle", sessions: 1, exits: 1,
+                        frameListeners: 0, exitListeners: 0, displayAttached: false, timers: 0,
+                        audioLive: 0, writes: 0 },
+                    { phase: "audio-create", failed: true, status: "idle", sessions: 1, exits: 1,
+                        frameListeners: 0, exitListeners: 0, displayAttached: false, timers: 0,
+                        audioLive: 0, writes: 0 },
+                    { phase: "audio-validate", failed: true, status: "idle", sessions: 1, exits: 1,
+                        frameListeners: 0, exitListeners: 0, displayAttached: false, timers: 0,
+                        audioLive: 0, writes: 0 },
+                    { phase: "timer", failed: true, status: "idle", sessions: 1, exits: 1,
+                        frameListeners: 0, exitListeners: 0, displayAttached: false, timers: 0,
+                        audioLive: 0, writes: 0 },
+                ]))
                 .start(undefined),
         },
     ],

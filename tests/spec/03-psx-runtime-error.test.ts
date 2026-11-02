@@ -29,6 +29,7 @@ const CODES = {
     UNSUPPORTED: 18,
     WORKER_FAILED: 19,
     MEMORY_EXCEEDED: 20,
+    ARCHIVE_INVALID: 21,
 } as const;
 
 const capture = (action: () => unknown): unknown => {
@@ -56,15 +57,15 @@ const testFile: TestFile = {
                     codes: PsxRuntimeError.CODE,
                     frozen: Object.isFrozen(PsxRuntimeError.CODE),
                     first: PsxRuntimeError.labelOf(1),
-                    last: PsxRuntimeError.labelOf(20),
+                    last: PsxRuntimeError.labelOf(21),
                     invalid: PsxRuntimeError.labelOf(999),
-                }), P.equals<unknown>({ codes: CODES, frozen: true, first: "INVALID_CONFIG", last: "MEMORY_EXCEEDED", invalid: "INVALID_CODE" }))
+                }), P.equals<unknown>({ codes: CODES, frozen: true, first: "INVALID_CONFIG", last: "ARCHIVE_INVALID", invalid: "INVALID_CODE" }))
                 .start(undefined),
         },
         {
             label: "every constructible code yields an immutable typed Error",
             run: () => CTGTest.init("constructible codes")
-                .assert("all twenty public codes", () => Object.values(CODES)
+                .assert("all twenty-one public codes", () => Object.values(CODES)
                     .filter((code) => code > 0)
                     .every((code) => {
                         const error = new PsxRuntimeError({ code, message: "failure", data: { code } });
@@ -80,14 +81,14 @@ const testFile: TestFile = {
                 .assert("typed construction failures", () => [
                     capture(() => new PsxRuntimeError({ code: -1, message: "m" })),
                     capture(() => new PsxRuntimeError({ code: 0, message: "m" })),
-                    capture(() => new PsxRuntimeError({ code: 21, message: "m" })),
+                    capture(() => new PsxRuntimeError({ code: 22, message: "m" })),
                     capture(() => new PsxRuntimeError(invalidConfig({ code: "1", message: "m" }))),
                     capture(() => new PsxRuntimeError({ code: 1, message: " " })),
                     capture(() => new PsxRuntimeError(invalidConfig({ code: 1 }))),
                 ].map(snapshot), P.equals<unknown>([
                     { code: -1, label: "INVALID_CODE", message: "Error code is not a constructible registry code.", data: -1 },
                     { code: -1, label: "INVALID_CODE", message: "Error code is not a constructible registry code.", data: 0 },
-                    { code: -1, label: "INVALID_CODE", message: "Error code is not a constructible registry code.", data: 21 },
+                    { code: -1, label: "INVALID_CODE", message: "Error code is not a constructible registry code.", data: 22 },
                     { code: -1, label: "INVALID_CODE", message: "Error code is not a constructible registry code.", data: null },
                     { code: 2, label: "INVALID_MESSAGE", message: "Error message must be a non-empty string.", data: " " },
                     { code: 2, label: "INVALID_MESSAGE", message: "Error message must be a non-empty string.", data: null },

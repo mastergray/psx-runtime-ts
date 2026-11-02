@@ -108,6 +108,7 @@ class LoopbackCore implements WorkerCore {
     };
     frames = 0;
     stops = 0;
+    initialDiscIndex = 0;
 
     constructor() {
         LoopbackCore.instances.push(this);
@@ -115,6 +116,7 @@ class LoopbackCore implements WorkerCore {
 
     start(payload: WorkerStartPayload): PsxMachineInfo {
         this.calls.push("start:" + payload.contentPath);
+        this.initialDiscIndex = payload.initialDiscIndex;
         this.cards = {
             1: payload.memoryCards[1].slice(),
             2: payload.memoryCards[2].slice(),
@@ -331,8 +333,10 @@ const testFile: TestFile = {
                     const session = await drive(adapter.start({
                         game,
                         bios,
+                        initialDiscIndex: 1,
                         controllers: { 1: "dualshock", 2: "digital" },
                     }), scheduler) as PsxSession;
+                    const initialDisc = session.discIndex;
                     const events = { ticks: 0, frames: [] as number[], sounds: 0, rumble: 0, exits: 0 };
                     session.onTick(() => { events.ticks++; });
                     session.onFrame((frame) => events.frames.push(frame.width));
@@ -369,6 +373,8 @@ const testFile: TestFile = {
                         state: [...state],
                         cards: [cardBefore[20], cardAfter[20]],
                         discAfterChange: 1,
+                        initialDisc,
+                        workerInitialDiscs: LoopbackCore.instances.map(({ initialDiscIndex }) => initialDiscIndex),
                         workers: LoopbackWorker.instances.length,
                         terminated: LoopbackWorker.instances.map(({ terminated }) => terminated),
                         coreStops: LoopbackCore.instances.map(({ stops }) => stops),
@@ -390,6 +396,8 @@ const testFile: TestFile = {
                     state: [7, 8, 9],
                     cards: [42, 42],
                     discAfterChange: 1,
+                    initialDisc: 1,
+                    workerInitialDiscs: [1, 1],
                     workers: 2,
                     terminated: [true, true],
                     coreStops: [1, 1],
@@ -432,6 +440,7 @@ const testFile: TestFile = {
                             bios: { ...bios, blob: new Blob([new Uint8Array([1])]) },
                         })),
                         capture(() => adapter.start({ game, bios, options: { unsupported: true } })),
+                        capture(() => adapter.start({ game, bios, initialDiscIndex: 2 })),
                     ]);
                     return {
                         codes: errors.map(codeOf),
@@ -439,7 +448,7 @@ const testFile: TestFile = {
                     };
                 })
                 .assert("typed preflight", ({ subject }) => subject, P.equals<unknown>({
-                    codes: [6, 7, 18],
+                    codes: [6, 7, 18, 1],
                     workers: 0,
                 }))
                 .start(undefined),

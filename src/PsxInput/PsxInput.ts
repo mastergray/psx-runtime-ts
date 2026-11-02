@@ -1,248 +1,346 @@
-import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";
+// Dependencies:
+import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";    // Reports invalid input and destroyed lifecycle use
 import {
-    isPsxAxisControl,
-    isPsxButtonControl,
+    isPsxAxisControl,       // Validates analog control coordinates
+    isPsxButtonControl,     // Validates digital control coordinates
 } from "../shared.types.js";
-import { isPsxInputConfig } from "./types.js";
+import { isPsxInputConfig } from "./types.js";                         // Validates the injected emulation session
 
+// Type dependencies:
 import type {
-    Listener,
-    PsxAxisControl,
-    PsxButtonControl,
-    PsxMachineInfo,
-    PsxRumbleEvent,
-    Unsubscribe,
+    Listener,            // Observer accepted by session event streams
+    PsxAxisControl,      // Physical port and analog-axis coordinate
+    PsxButtonControl,    // Physical port and digital-button coordinate
+    PsxMachineInfo,      // Immutable identity of the active emulation session
+    PsxRumbleEvent,      // Strong and weak motor command from the core
+    Unsubscribe,         // Cleanup returned by an event subscription
 } from "../shared.types.js";
-import type { PsxInputChannel, PsxInputConfig } from "./types.js";
+import type {
+    PsxInputChannel,     // Isolated ownership handle for one input source
+    PsxInputConfig,      // Session dependency used by the coordinator
+} from "./types.js";
 
+/**
+ *
+ * Type Declarations
+ *
+ */
+
+// TYPE :: {buttons:MAP, axes:MAP, destroyed:BOOLEAN}
+// Controls owned by one independently releasable input source.
 interface ChannelState {
-    readonly buttons: Map<string, PsxButtonControl>;
-    readonly axes: Map<string, AxisState>;
-    destroyed: boolean;
+    readonly buttons: Map<string, PsxButtonControl>;    // Digital controls currently held by this source
+    readonly axes: Map<string, AxisState>;              // Last analog value supplied by this source
+    destroyed: boolean;                                 // Whether this channel has relinquished ownership
 }
 
+// TYPE :: {control:psxButtonControl, holders:SET}
+// Shared digital control and every channel that currently holds it.
 interface HeldButton {
-    readonly control: PsxButtonControl;
-    readonly holders: Set<ChannelState>;
+    readonly control: PsxButtonControl;     // Stable coordinate forwarded to the session
+    readonly holders: Set<ChannelState>;    // Channels that must all release before key-up
 }
 
+// TYPE :: {control:psxAxisControl, value:NUMBER, sequence:NUMBER, owner:channelState}
+// One channel's latest candidate value for a physical analog axis.
 interface AxisState {
-    readonly control: PsxAxisControl;
-    value: number;
-    sequence: number;
-    readonly owner: ChannelState;
+    readonly control: PsxAxisControl;    // Stable coordinate forwarded to the session
+    value: number;                       // Normalized value in the inclusive -1 to 1 range
+    sequence: number;                    // Monotonic precedence for competing sources
+    readonly owner: ChannelState;        // Channel that supplied this value
 }
 
-const buttonKey = ({ port, button }: PsxButtonControl): string => `${port}:${button}`;
-const axisKey = ({ port, axis }: PsxAxisControl): string => `${port}:${axis}`;
-const OPPOSITE: Readonly<Partial<Record<PsxButtonControl["button"], PsxButtonControl["button"]>>> = {
+const OPPOSITE: Readonly<Partial<Record<PsxButtonControl["button"], PsxButtonControl["button"]>>> = { // Mutually exclusive D-pad directions
     up: "down",
     down: "up",
     left: "right",
     right: "left",
 };
 
+// METHOD :: psxButtonControl -> STRING
+// Produces the canonical ownership key for one digital control.
+const buttonKey = ({ port, button }: PsxButtonControl): string => `${port}:${button}`;
+
+// METHOD :: psxAxisControl -> STRING
+// Produces the canonical ownership key for one analog control.
+const axisKey = ({ port, axis }: PsxAxisControl): string => `${port}:${axis}`;
+
+// METHOD :: STRING, UNKNOWN -> psxRuntimeError
+// Creates one invalid input configuration or operation error.
 const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
     code: PsxRuntimeError.CODE.INVALID_CONFIG,
     message,
     data,
 });
 
-export default class PsxInput {
-    readonly #session: PsxInputConfig["session"];
-    readonly #channels = new Set<ChannelState>();
-    readonly #buttons = new Map<string, HeldButton>();
-    readonly #axes = new Map<string, Map<ChannelState, AxisState>>();
-    readonly #effectiveAxes = new Map<string, AxisState>();
-    readonly #defaultChannel: PsxInputChannel;
-    #sequence = 0;
-    #destroyed = false;
+/**
+ *
+ * Class
+ *
+ */
 
+// Coordinates multiple input sources into one deterministic PSX session state.
+export default class PsxInput {
+
+    /* Instance Fields */
+    private readonly _session: PsxInputConfig["session"];                         // Active session receiving effective input state
+    private readonly _channels = new Set<ChannelState>();                         // Live ownership channels
+    private readonly _buttons = new Map<string, HeldButton>();                    // Effective digital controls and their owners
+    private readonly _axes = new Map<string, Map<ChannelState, AxisState>>();      // Axis candidates grouped by physical coordinate
+    private readonly _effectiveAxes = new Map<string, AxisState>();                // Candidate currently forwarded for each axis
+    private readonly _defaultChannel: PsxInputChannel;                             // Backward-compatible direct-call ownership channel
+    private _sequence = 0;                                                         // Monotonic precedence assigned to analog writes
+    private _destroyed = false;                                                    // Whether session input ownership has ended
+
+    // CONSTRUCTOR :: psxInputConfig -> psxInput
+    // Validates the session dependency and creates the default ownership channel.
     constructor(config: PsxInputConfig) {
         if (!isPsxInputConfig(config)) throw invalid("PsxInput config must contain a live session.", config);
-        this.#session = config.session;
-        this.#defaultChannel = this.createChannel();
+        this._session = config.session;
+        this._defaultChannel = this.createChannel();
     }
 
+    /**
+     *
+     * Properties
+     *
+     */
+
+    // GETTER :: VOID -> psxMachineInfo
+    // Exposes the active machine identity from the session.
     get machine(): PsxMachineInfo {
-        return this.#session.machine;
+        return this._session.machine;
     }
 
+    // GETTER :: VOID -> [psxButtonControl]
+    // Returns a stable immutable snapshot of effective digital controls.
     get snapshot(): ReadonlyArray<PsxButtonControl> {
-        return Object.freeze([...this.#buttons.values()]
+        return Object.freeze([...this._buttons.values()]
             .map(({ control }) => Object.freeze({ ...control }))
             .sort((left, right) => buttonKey(left).localeCompare(buttonKey(right))));
     }
 
+    // GETTER :: VOID -> [{control:psxAxisControl, value:NUMBER}]
+    // Returns a stable immutable snapshot of effective analog controls.
     get axes(): ReadonlyArray<{ readonly control: PsxAxisControl; readonly value: number }> {
-        return Object.freeze([...this.#effectiveAxes.entries()]
+        return Object.freeze([...this._effectiveAxes.entries()]
             .sort(([left], [right]) => left.localeCompare(right))
             .map(([, state]) => Object.freeze({ control: Object.freeze({ ...state.control }), value: state.value })));
     }
 
+    /**
+     *
+     * Instance Methods
+     *
+     */
+
+    // METHOD :: VOID -> psxInputChannel
+    // Creates an isolated channel whose controls can be released as one unit.
     createChannel(): PsxInputChannel {
-        this.#assertLive();
+        this._assertLive();
         const state: ChannelState = { buttons: new Map(), axes: new Map(), destroyed: false };
-        this.#channels.add(state);
+        this._channels.add(state);
         return {
-            press: (control) => this.#press(state, control),
-            release: (control) => this.#release(state, control),
-            setAxis: (control, value) => this.#setAxis(state, control, value),
-            releaseAll: () => this.#releaseChannel(state),
-            destroy: () => this.#destroyChannel(state),
+            press: (control) => this._press(state, control),
+            release: (control) => this._release(state, control),
+            setAxis: (control, value) => this._setAxis(state, control, value),
+            releaseAll: () => this._releaseChannel(state),
+            destroy: () => this._destroyChannel(state),
         };
     }
 
+    // METHOD :: psxButtonControl -> VOID
+    // Presses one control through the default ownership channel.
     press(control: PsxButtonControl): void {
-        this.#defaultChannel.press(control);
+        this._defaultChannel.press(control);
     }
 
+    // METHOD :: psxButtonControl -> VOID
+    // Releases one control from the default ownership channel.
     release(control: PsxButtonControl): void {
-        this.#defaultChannel.release(control);
+        this._defaultChannel.release(control);
     }
 
+    // METHOD :: psxAxisControl, NUMBER -> VOID
+    // Sets one analog value through the default ownership channel.
     setAxis(control: PsxAxisControl, value: number): void {
-        this.#defaultChannel.setAxis(control, value);
+        this._defaultChannel.setAxis(control, value);
     }
 
+    // METHOD :: VOID -> VOID
+    // Releases controls owned by every live channel.
     releaseAll(): void {
-        this.#assertLive();
-        for (const channel of [...this.#channels]) this.#releaseChannel(channel);
+        this._assertLive();
+        for (const channel of [...this._channels]) this._releaseChannel(channel);
     }
 
+    // METHOD :: listener -> unsubscribe
+    // Subscribes to completed emulation ticks.
     onTick(listener: Listener<void>): Unsubscribe {
-        this.#assertLive();
+        this._assertLive();
         if (typeof listener !== "function") throw invalid("PsxInput onTick requires a listener.", listener);
-        return this.#session.onTick(listener);
+        return this._session.onTick(listener);
     }
 
+    // METHOD :: listener -> unsubscribe
+    // Subscribes to core rumble events.
     onRumble(listener: Listener<PsxRumbleEvent>): Unsubscribe {
-        this.#assertLive();
+        this._assertLive();
         if (typeof listener !== "function") throw invalid("PsxInput onRumble requires a listener.", listener);
-        return this.#session.onRumble(listener);
+        return this._session.onRumble(listener);
     }
 
+    // METHOD :: VOID -> VOID
+    // Releases all state and permanently closes every channel.
     destroy(): void {
-        if (this.#destroyed) return;
+        if (this._destroyed) return;
         this.releaseAll();
-        for (const channel of this.#channels) channel.destroyed = true;
-        this.#channels.clear();
-        this.#destroyed = true;
+        for (const channel of this._channels) channel.destroyed = true;
+        this._channels.clear();
+        this._destroyed = true;
     }
 
-    #press(channel: ChannelState, control: PsxButtonControl): void {
-        this.#assertChannel(channel);
+    /**
+     *
+     * Private Methods
+     *
+     */
+
+    // METHOD :: channelState, psxButtonControl -> VOID
+    // Adds one channel as a holder and forwards the first effective press.
+    private _press(channel: ChannelState, control: PsxButtonControl): void {
+        this._assertChannel(channel);
         if (!isPsxButtonControl(control)) throw invalid("PsxInput press requires a button control.", control);
         const stable = Object.freeze({ ...control });
         const key = buttonKey(stable);
         if (channel.buttons.has(key)) return;
         const opposite = OPPOSITE[stable.button];
-        if (opposite !== undefined) this.#releaseEveryHolder(buttonKey({ port: stable.port, button: opposite }));
-        const held = this.#buttons.get(key);
+        if (opposite !== undefined) this._releaseEveryHolder(buttonKey({ port: stable.port, button: opposite }));
+        const held = this._buttons.get(key);
         if (held === undefined) {
-            this.#buttons.set(key, { control: stable, holders: new Set([channel]) });
-            this.#session.setButton(stable, true);
+            this._buttons.set(key, { control: stable, holders: new Set([channel]) });
+            this._session.setButton(stable, true);
         } else {
             held.holders.add(channel);
         }
         channel.buttons.set(key, stable);
     }
 
-    #release(channel: ChannelState, control: PsxButtonControl): void {
-        this.#assertChannel(channel);
+    // METHOD :: channelState, psxButtonControl -> VOID
+    // Validates and releases one channel's digital control.
+    private _release(channel: ChannelState, control: PsxButtonControl): void {
+        this._assertChannel(channel);
         if (!isPsxButtonControl(control)) throw invalid("PsxInput release requires a button control.", control);
-        this.#releaseButton(channel, buttonKey(control));
+        this._releaseButton(channel, buttonKey(control));
     }
 
-    #releaseButton(channel: ChannelState, key: string): void {
+    // METHOD :: channelState, STRING -> VOID
+    // Removes one holder and forwards release after the final owner leaves.
+    private _releaseButton(channel: ChannelState, key: string): void {
         if (!channel.buttons.has(key)) return;
-        const held = this.#buttons.get(key);
+        const held = this._buttons.get(key);
         channel.buttons.delete(key);
         if (held === undefined) return;
         held.holders.delete(channel);
         if (held.holders.size === 0) {
-            this.#buttons.delete(key);
-            this.#session.setButton(held.control, false);
+            this._buttons.delete(key);
+            this._session.setButton(held.control, false);
         }
     }
 
-    #releaseEveryHolder(key: string): void {
-        const held = this.#buttons.get(key);
+    // METHOD :: STRING -> VOID
+    // Removes a mutually exclusive direction from every owning channel.
+    private _releaseEveryHolder(key: string): void {
+        const held = this._buttons.get(key);
         if (held === undefined) return;
         for (const holder of [...held.holders]) {
             holder.buttons.delete(key);
             held.holders.delete(holder);
         }
-        this.#buttons.delete(key);
-        this.#session.setButton(held.control, false);
+        this._buttons.delete(key);
+        this._session.setButton(held.control, false);
     }
 
-    #setAxis(channel: ChannelState, control: PsxAxisControl, value: number): void {
-        this.#assertChannel(channel);
+    // METHOD :: channelState, psxAxisControl, NUMBER -> VOID
+    // Records one normalized axis candidate and gives it latest-write precedence.
+    private _setAxis(channel: ChannelState, control: PsxAxisControl, value: number): void {
+        this._assertChannel(channel);
         if (!isPsxAxisControl(control) || !Number.isFinite(value)) {
             throw invalid("PsxInput setAxis requires an axis control and finite value.", { control, value });
         }
         const stable = Object.freeze({ ...control });
         const key = axisKey(stable);
         const normalized = Math.max(-1, Math.min(1, value));
-        const state: AxisState = { control: stable, value: normalized, sequence: ++this.#sequence, owner: channel };
+        const state: AxisState = { control: stable, value: normalized, sequence: ++this._sequence, owner: channel };
         channel.axes.set(key, state);
-        const owners = this.#axes.get(key) ?? new Map<ChannelState, AxisState>();
+        const owners = this._axes.get(key) ?? new Map<ChannelState, AxisState>();
         owners.set(channel, state);
-        this.#axes.set(key, owners);
-        this.#forwardAxis(key, state);
+        this._axes.set(key, owners);
+        this._forwardAxis(key, state);
     }
 
-    #releaseAxis(channel: ChannelState, key: string): void {
+    // METHOD :: channelState, STRING -> VOID
+    // Removes an axis candidate and restores the next-most-recent owner.
+    private _releaseAxis(channel: ChannelState, key: string): void {
         const state = channel.axes.get(key);
         if (state === undefined) return;
         channel.axes.delete(key);
-        const owners = this.#axes.get(key);
+        const owners = this._axes.get(key);
         if (owners === undefined) return;
         owners.delete(channel);
         if (owners.size === 0) {
-            this.#axes.delete(key);
-            const effective = this.#effectiveAxes.get(key);
-            this.#effectiveAxes.delete(key);
-            if (effective !== undefined && effective.value !== 0) this.#session.setAxis(effective.control, 0);
+            this._axes.delete(key);
+            const effective = this._effectiveAxes.get(key);
+            this._effectiveAxes.delete(key);
+            if (effective !== undefined && effective.value !== 0) this._session.setAxis(effective.control, 0);
             return;
         }
         const next = [...owners.values()].sort((left, right) => right.sequence - left.sequence)[0]!;
-        if (this.#effectiveAxes.get(key)?.owner === channel) this.#forwardAxis(key, next);
+        if (this._effectiveAxes.get(key)?.owner === channel) this._forwardAxis(key, next);
     }
 
-    #forwardAxis(key: string, state: AxisState): void {
-        const previous = this.#effectiveAxes.get(key);
-        this.#effectiveAxes.set(key, state);
+    // METHOD :: STRING, axisState -> VOID
+    // Promotes and forwards one effective analog value when it changed.
+    private _forwardAxis(key: string, state: AxisState): void {
+        const previous = this._effectiveAxes.get(key);
+        this._effectiveAxes.set(key, state);
         if (previous?.value !== state.value || previous.owner !== state.owner) {
-            this.#session.setAxis(state.control, state.value);
+            this._session.setAxis(state.control, state.value);
         }
     }
 
-    #releaseChannel(channel: ChannelState): void {
-        this.#assertChannel(channel);
-        for (const key of [...channel.buttons.keys()].sort()) this.#releaseButton(channel, key);
-        for (const key of [...channel.axes.keys()].sort()) this.#releaseAxis(channel, key);
+    // METHOD :: channelState -> VOID
+    // Deterministically releases all digital and analog state for one channel.
+    private _releaseChannel(channel: ChannelState): void {
+        this._assertChannel(channel);
+        for (const key of [...channel.buttons.keys()].sort()) this._releaseButton(channel, key);
+        for (const key of [...channel.axes.keys()].sort()) this._releaseAxis(channel, key);
     }
 
-    #destroyChannel(channel: ChannelState): void {
-        this.#assertLive();
+    // METHOD :: channelState -> VOID
+    // Releases and permanently removes one ownership channel.
+    private _destroyChannel(channel: ChannelState): void {
+        this._assertLive();
         if (channel.destroyed) return;
-        this.#releaseChannel(channel);
+        this._releaseChannel(channel);
         channel.destroyed = true;
-        this.#channels.delete(channel);
+        this._channels.delete(channel);
     }
 
-    #assertChannel(channel: ChannelState): void {
-        this.#assertLive();
+    // METHOD :: channelState -> VOID
+    // Rejects operations through a closed channel or coordinator.
+    private _assertChannel(channel: ChannelState): void {
+        this._assertLive();
         if (channel.destroyed) throw new PsxRuntimeError({
             code: PsxRuntimeError.CODE.DESTROYED,
             message: "The PlayStation input channel has been destroyed.",
         });
     }
 
-    #assertLive(): void {
-        if (this.#destroyed) throw new PsxRuntimeError({
+    // METHOD :: VOID -> VOID
+    // Rejects operations after coordinator destruction.
+    private _assertLive(): void {
+        if (this._destroyed) throw new PsxRuntimeError({
             code: PsxRuntimeError.CODE.DESTROYED,
             message: "The PlayStation input coordinator has been destroyed.",
         });

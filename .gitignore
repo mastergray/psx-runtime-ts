@@ -16,7 +16,7 @@ dist/
 coverage/
 .cache/
 core/.cache/
-fixtures/generated/
+tests/fixtures/generated/
 test-discs/
 harness/preload.local.json
 

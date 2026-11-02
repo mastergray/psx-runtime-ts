@@ -245,7 +245,8 @@ const testFile: TestFile = {
                     options: [isPsxOptions({ frameskip: false, level: 2, mode: "safe" }), isPsxOptions({ level: NaN }), isPsxOptions({ "": true })],
                     start: [
                         isPsxStartConfig({ game, bios }),
-                        isPsxStartConfig({ game, bios, controllers: { 1: "digital" }, memoryCards: { 2: new Uint8Array(128 * 1024) } }),
+                        isPsxStartConfig({ game, bios, initialDiscIndex: 1, controllers: { 1: "digital" }, memoryCards: { 2: new Uint8Array(128 * 1024) } }),
+                        isPsxStartConfig({ game, bios, initialDiscIndex: -1 }),
                         isPsxStartConfig({ game, bios, controllers: { 3: "digital" } }),
                         isPsxStartConfig({ game, bios, memoryCards: { 1: new Uint8Array(2) } }),
                     ],
@@ -254,7 +255,7 @@ const testFile: TestFile = {
                 }), P.equals({
                     machine: [true, false, false, false, false],
                     options: [true, false, false],
-                    start: [true, true, false, false],
+                    start: [true, true, false, false, false],
                     session: [true, false, false],
                     adapter: [true, false],
                 }))

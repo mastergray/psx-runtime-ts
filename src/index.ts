@@ -3,13 +3,16 @@ export { default as DiscSetAudit } from "./DiscSetAudit/DiscSetAudit.js";
 export { default as LibretroPsxAdapter } from "./LibretroPsxAdapter/LibretroPsxAdapter.js";
 export { default as PsxInput } from "./PsxInput/PsxInput.js";
 export { default as KeyboardSource, DEFAULT_KEYBOARD_MAP } from "./KeyboardSource/KeyboardSource.js";
-export { default as GamepadSource } from "./GamepadSource/GamepadSource.js";
+export { default as GamepadSource, DEFAULT_GAMEPAD_BUTTON_MAP } from "./GamepadSource/GamepadSource.js";
 export { default as PsxDisplay } from "./PsxDisplay/PsxDisplay.js";
 export { default as PsxAudio } from "./PsxAudio/PsxAudio.js";
 export { default as PsxStorage } from "./PsxStorage/PsxStorage.js";
 export { default as PsxGameStore } from "./PsxGameStore/PsxGameStore.js";
 export { default as PsxPlayer } from "./PsxPlayer/PsxPlayer.js";
 export { default as PsxConsole } from "./PsxConsole/PsxConsole.js";
+export { default as ZipDiscSource } from "./ZipDiscSource/ZipDiscSource.js";
+export { default as ZipFirmwareSource } from "./ZipFirmwareSource/ZipFirmwareSource.js";
+export type { PsxFirmwareFile } from "./ZipFirmwareSource/types.js";
 export {
     isPsxRuntimeErrorConfig,
     type PsxRuntimeErrorConfig,
@@ -44,6 +47,7 @@ export {
     type PsxInputLike,
 } from "./PsxInput/types.js";
 export {
+    isKeyboardMap,
     isKeyboardSourceConfig,
     type KeyboardAnalogBinding,
     type KeyboardAnalogConfig,
@@ -54,7 +58,11 @@ export {
     type KeyboardVisibilityTargetLike,
 } from "./KeyboardSource/types.js";
 export {
+    isGamepadButtonMap,
+    isGamepadButtonMaps,
     isGamepadSourceConfig,
+    type GamepadButtonMap,
+    type GamepadButtonMaps,
     type GamepadButtonLike,
     type GamepadEventTargetLike,
     type GamepadHapticActuatorLike,
@@ -109,6 +117,7 @@ export {
 } from "./PsxAudio/types.js";
 export {
     isPsxIndexedDbFactoryLike,
+    isPsxFirmwareRecord,
     isPsxMemoryCardRecord,
     isPsxMemoryCardSaveConfig,
     isPsxStateLoadConfig,
@@ -120,6 +129,7 @@ export {
     isPsxStorageInitConfig,
     PSX_MEMORY_CARD_BYTES,
     type PsxIndexedDbFactoryLike,
+    type PsxFirmwareRecord,
     type PsxMemoryCardRecord,
     type PsxMemoryCardSaveConfig,
     type PsxStateLoadConfig,

@@ -14,6 +14,10 @@ option(PSX_FIXTURE_CARDS "Write deterministic markers to both memory cards" OFF)
 option(PSX_FIXTURE_MULTIDISC "Poll and display the mounted disc label" OFF)
 
 psn00bsdk_add_executable(m0-fixture STATIC main.c)
+psn00bsdk_add_executable(controller-test STATIC diagnostic.c)
+psn00bsdk_add_executable(audio-test STATIC diagnostic.c)
+target_sources(controller-test PRIVATE pad_spi.c)
+target_sources(audio-test PRIVATE pad_spi.c)
 
 if(PSX_FIXTURE_PAL)
     target_compile_definitions(m0-fixture PRIVATE PSX_FIXTURE_PAL=1)

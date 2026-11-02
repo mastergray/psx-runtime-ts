@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
 const packageJson = JSON.parse(await readFile(new URL("package.json", root), "utf8"));
@@ -51,11 +51,49 @@ for (const license of build.licenses ?? []) {
 }
 await access(new URL("docs/core-distribution.md", root));
 
+const coreRoot = new URL("dist/core/", root);
+let coreFiles = [];
+try {
+    const walk = async (directory, prefix = "") => {
+        const entries = await readdir(directory, { withFileTypes: true });
+        for (const entry of entries) {
+            const path = `${prefix}${entry.name}`;
+            if (entry.isDirectory()) await walk(new URL(`${entry.name}/`, directory), `${path}/`);
+            else coreFiles.push(path);
+        }
+    };
+    await walk(coreRoot);
+    const allowedCoreFiles = new Set([
+        "BUILD-RECIPE.json",
+        "SOURCE-OFFER.md",
+        "SOURCE.json",
+        "build.json",
+        "core.worker.js",
+        "psx-core.js",
+        "psx-core.wasm",
+        ...build.licenses.map(({ notice }) => notice),
+    ]);
+    for (const path of coreFiles) {
+        if (!allowedCoreFiles.has(path)) throw new Error(`Hosted core has an unexpected file: ${path}`);
+    }
+    for (const path of allowedCoreFiles) {
+        if (!coreFiles.includes(path)) throw new Error(`Hosted core is missing required file: ${path}`);
+    }
+    const hostedBuild = JSON.parse(await readFile(new URL("build.json", coreRoot), "utf8"));
+    if (hostedBuild.pthreads !== false || hostedBuild.artifacts.join(",") !== build.artifacts.join(",")) {
+        throw new Error("Hosted core build metadata does not match the production recipe");
+    }
+} catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    coreFiles = [];
+}
+
 console.log(JSON.stringify({
     ok: true,
     files: paths.length,
     bytes: report.unpackedSize,
     exports: exportKeys,
     coreIncluded: paths.some((path) => path.startsWith("dist/core/")),
+    hostedCoreFiles: coreFiles.length,
     notices: build.licenses.map(({ id }) => id),
 }));

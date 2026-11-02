@@ -1,76 +1,95 @@
-import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";
-import { applyMountPlan } from "./MountPlan.js";
+// Dependencies:
+import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";    // Reports module, startup, memory, drive, and lifecycle failures
+import { applyMountPlan } from "./MountPlan.js";                       // Materializes audited content in the Emscripten filesystem
 
-import type { WorkerStartPayload } from "../LibretroPsxAdapter/protocol.js";
+// Type dependencies:
+import type { WorkerStartPayload } from "../LibretroPsxAdapter/protocol.js";    // Fully resolved firmware, content, cards, and build input
 import type {
-    ControllerPort,
-    PsxAxis,
-    PsxButton,
-    PsxMachineInfo,
-    PsxRumbleEvent,
+    ControllerPort,    // Physical controller and memory-card slot
+    PsxAxis,           // Closed set of analog controls
+    PsxButton,         // Closed set of digital controls
+    PsxMachineInfo,    // Validated core identity and AV capabilities
+    PsxRumbleEvent,    // Normalized controller motor output
 } from "../shared.types.js";
-import type { CoreRunOutput, WorkerCore } from "./WorkerRuntime.js";
+import type {
+    CoreRunOutput,    // Video, audio, and rumble produced by one frame
+    WorkerCore,       // Backend contract implemented by this bridge
+} from "./WorkerRuntime.js";
 
+/**
+ *
+ * Type Declarations
+ *
+ */
+
+// TYPE :: Emscripten filesystem operations needed during startup
+// Minimal filesystem surface exposed by the generated module.
 interface CoreFileSystem {
-    mkdir(path: string): unknown;
-    mount(type: unknown, options: { readonly blobs: ReadonlyArray<{ readonly name: string; readonly data: Blob }> }, mountpoint: string): unknown;
-    writeFile(path: string, bytes: Uint8Array): unknown;
+    mkdir(path: string): unknown;    // Creates one runtime directory
+    mount(type: unknown, options: { readonly blobs: ReadonlyArray<{ readonly name: string; readonly data: Blob }> }, mountpoint: string): unknown; // Mounts worker-backed blobs
+    writeFile(path: string, bytes: Uint8Array): unknown;    // Writes one copied byte file
 }
 
+// TYPE :: Generated Emscripten heap, filesystem, and PSX C ABI
+// Runtime module boundary validated before any core operation.
 export interface EmscriptenPsxModule {
-    readonly FS: CoreFileSystem;
-    readonly WORKERFS: unknown;
-    readonly HEAPU8: Uint8Array;
-    readonly HEAP16: Int16Array;
-    _malloc(bytes: number): number;
-    _free(pointer: number): void;
-    stringToUTF8(value: string, pointer: number, capacity: number): void;
-    lengthBytesUTF8(value: string): number;
-    _psx_start(contentPath: number, optionsJson: number): number;
-    _psx_run_frame(): number;
-    _psx_set_button(port: number, id: number, pressed: number): void;
-    _psx_set_axis(port: number, id: number, value: number): void;
-    _psx_reset(): number;
-    _psx_serialize_size(): number;
-    _psx_serialize(out: number, size: number): number;
-    _psx_unserialize(data: number, size: number): number;
-    _psx_memory_card_size(slot: number): number;
-    _psx_read_memory_card(slot: number, out: number, size: number): number;
-    _psx_write_memory_card(slot: number, data: number, size: number): number;
-    _psx_set_disc(index: number): number;
-    _psx_disc_count(): number;
-    _psx_stop(): void;
-    _psx_video_width(): number;
-    _psx_video_height(): number;
-    _psx_base_width(): number;
-    _psx_base_height(): number;
-    _psx_video_pitch(): number;
-    _psx_video_format(): number;
-    _psx_video_data(): number;
-    _psx_video_size(): number;
-    _psx_video_duplicate(): number;
-    _psx_audio_data(): number;
-    _psx_audio_frames(): number;
-    _psx_frames_per_second(): number;
-    _psx_sample_rate(): number;
-    _psx_is_pal(): number;
-    _psx_aspect_ratio(): number;
-    _psx_max_width(): number;
-    _psx_max_height(): number;
-    _psx_disc_index(): number;
-    _psx_tray_open(): number;
-    _psx_rumble(port: number, effect: number): number;
-    _psx_log_size(): number;
-    _psx_log_data(): number;
+    readonly FS: CoreFileSystem;           // Mounted-content and writable-file operations
+    readonly WORKERFS: unknown;            // Emscripten worker-backed filesystem type
+    readonly HEAPU8: Uint8Array;           // Unsigned byte view of linear memory
+    readonly HEAP16: Int16Array;           // Signed sample view of linear memory
+    _malloc(bytes: number): number;         // Allocates linear-memory bytes and returns a pointer
+    _free(pointer: number): void;           // Releases one linear-memory allocation
+    stringToUTF8(value: string, pointer: number, capacity: number): void; // Copies a terminated UTF-8 string into memory
+    lengthBytesUTF8(value: string): number; // Measures UTF-8 bytes excluding the terminator
+    _psx_start(contentPath: number, optionsJson: number): number;         // Starts the shim from string pointers
+    _psx_run_frame(): number;                                        // Executes one emulation frame
+    _psx_set_button(port: number, id: number, pressed: number): void; // Sets one native digital input
+    _psx_set_axis(port: number, id: number, value: number): void;     // Sets one native analog input
+    _psx_reset(): number;                                            // Performs a soft core reset
+    _psx_serialize_size(): number;                                   // Reports required save-state bytes
+    _psx_serialize(out: number, size: number): number;                // Writes a save state into linear memory
+    _psx_unserialize(data: number, size: number): number;             // Restores a save state from linear memory
+    _psx_memory_card_size(slot: number): number;                      // Reports one native card byte length
+    _psx_read_memory_card(slot: number, out: number, size: number): number; // Writes one card into linear memory
+    _psx_write_memory_card(slot: number, data: number, size: number): number; // Restores one card from linear memory
+    _psx_set_disc(index: number): number;                             // Changes the active zero-based disc
+    _psx_disc_count(): number;                                       // Reports mounted disc count
+    _psx_stop(): void;                                                // Stops the shim and core
+    _psx_video_width(): number;                                      // Reports current output width
+    _psx_video_height(): number;                                     // Reports current output height
+    _psx_base_width(): number;                                       // Reports initial geometry width
+    _psx_base_height(): number;                                      // Reports initial geometry height
+    _psx_video_pitch(): number;                                      // Reports source bytes per row
+    _psx_video_format(): number;                                     // Reports native pixel-format identifier
+    _psx_video_data(): number;                                       // Reports current video pointer
+    _psx_video_size(): number;                                       // Reports current video byte length
+    _psx_video_duplicate(): number;                                  // Reports whether the prior frame repeats
+    _psx_audio_data(): number;                                       // Reports current stereo sample pointer
+    _psx_audio_frames(): number;                                     // Reports current stereo frame count
+    _psx_frames_per_second(): number;                                // Reports nominal frame rate
+    _psx_sample_rate(): number;                                      // Reports nominal audio sample rate
+    _psx_is_pal(): number;                                           // Reports PAL timing selection
+    _psx_aspect_ratio(): number;                                     // Reports display-corrected aspect ratio
+    _psx_max_width(): number;                                        // Reports maximum output width
+    _psx_max_height(): number;                                       // Reports maximum output height
+    _psx_disc_index(): number;                                       // Reports active zero-based disc
+    _psx_tray_open(): number;                                        // Reports virtual tray state
+    _psx_rumble(port: number, effect: number): number;                // Reports one native rumble motor level
+    _psx_log_size(): number;                                         // Reports diagnostic log byte length
+    _psx_log_data(): number;                                         // Reports diagnostic log pointer
 }
 
+// TYPE :: ARRAY<STRING, UNKNOWN>? -> emscriptenPsxModule|PROMISE(emscriptenPsxModule)
+// Generated module factory loaded from the build artifact.
 export type EmscriptenPsxFactory = (
     options?: Readonly<Record<string, unknown>>,
 ) => EmscriptenPsxModule | Promise<EmscriptenPsxModule>;
 
+// TYPE :: STRING -> PROMISE(emscriptenPsxFactory)
+// Injectable dynamic-import boundary for generated module code.
 export type CoreModuleLoader = (url: string) => Promise<EmscriptenPsxFactory>;
 
-const BUTTON_IDS: Readonly<Record<PsxButton, number>> = {
+const BUTTON_IDS: Readonly<Record<PsxButton, number>> = {    // Public button names to libretro joypad identifiers
     circle: 0,
     square: 1,
     select: 2,
@@ -89,19 +108,23 @@ const BUTTON_IDS: Readonly<Record<PsxButton, number>> = {
     r3: 15,
 };
 
-const AXIS_IDS: Readonly<Record<PsxAxis, number>> = {
+const AXIS_IDS: Readonly<Record<PsxAxis, number>> = {        // Public axis names to shim analog identifiers
     "left-x": 0,
     "left-y": 1,
     "right-x": 2,
     "right-y": 3,
 };
 
+// METHOD :: STRING, UNKNOWN? -> psxRuntimeError
+// Creates one generated-module loading or shape failure.
 const moduleFailure = (message: string, data: unknown = null): PsxRuntimeError => new PsxRuntimeError({
     code: PsxRuntimeError.CODE.CORE_LOAD_FAILED,
     message,
     data,
 });
 
+// METHOD :: UNKNOWN -> BOOLEAN
+// Narrows an instantiated value to the required Emscripten module surface.
 const isModule = (value: unknown): value is EmscriptenPsxModule => {
     if (typeof value !== "object" || value === null) return false;
     const module = value as Partial<EmscriptenPsxModule>;
@@ -114,6 +137,8 @@ const isModule = (value: unknown): value is EmscriptenPsxModule => {
         && typeof module._psx_run_frame === "function" && typeof module._psx_stop === "function";
 };
 
+// METHOD :: STRING, STRING -> STRING
+// Resolves a module-relative artifact with a path fallback for non-URL deployments.
 const relativeTo = (url: string, path: string): string => {
     try {
         return new URL(path, url).href;
@@ -123,45 +148,74 @@ const relativeTo = (url: string, path: string): string => {
     }
 };
 
-export default class EmscriptenPsxCore implements WorkerCore {
-    readonly #loadModule: CoreModuleLoader;
-    #module: EmscriptenPsxModule | null = null;
-    #payload: WorkerStartPayload | null = null;
-    #stopped = false;
-    #rumble = [[0, 0], [0, 0]];
+/**
+ *
+ * Class
+ *
+ */
 
+// Adapts the generated Emscripten PSX shim to the worker core contract.
+export default class EmscriptenPsxCore implements WorkerCore {
+
+    /* Instance Fields */
+    private readonly _loadModule: CoreModuleLoader;                  // Dynamic generated-module import boundary
+    private _module: EmscriptenPsxModule | null = null;             // Live validated module after startup
+    private _payload: WorkerStartPayload | null = null;             // Startup input retained for bridge lifetime
+    private _stopped = false;                                       // Whether module ownership has ended
+    private _rumble = [[0, 0], [0, 0]];                             // Previous native strong and weak motor values by port
+
+    // CONSTRUCTOR :: coreModuleLoader -> emscriptenPsxCore
+    // Retains the generated-module loader for deferred worker startup.
     constructor(loadModule: CoreModuleLoader) {
-        this.#loadModule = loadModule;
+        this._loadModule = loadModule;
     }
 
+    /**
+     *
+     * Instance Methods
+     *
+     */
+
+    // METHOD :: workerStartPayload -> PROMISE(psxMachineInfo)
+    // Loads the module, mounts content and firmware, starts the core, and reports capabilities.
     async start(payload: WorkerStartPayload): Promise<PsxMachineInfo> {
-        if (this.#module !== null || this.#stopped) throw moduleFailure("The core bridge cannot be started twice.");
+        if (this._module !== null || this._stopped) throw moduleFailure("The core bridge cannot be started twice.");
         let factory: EmscriptenPsxFactory;
         let module: EmscriptenPsxModule;
         try {
-            factory = await this.#loadModule(payload.moduleUrl);
+            factory = await this._loadModule(payload.moduleUrl);
             module = await factory({ locateFile: (path: string) => relativeTo(payload.moduleUrl, path) });
         } catch (error) {
             throw moduleFailure("The Emscripten PlayStation module could not be instantiated.", error instanceof Error ? error.message : null);
         }
         if (!isModule(module)) throw moduleFailure("The Emscripten module exposes an invalid core surface.");
-        this.#module = module;
-        this.#payload = payload;
+        this._module = module;
+        this._payload = payload;
         try {
             await applyMountPlan(module.FS, module.WORKERFS, payload.mountPlan);
             module.FS.mkdir("/system");
             module.FS.mkdir("/save");
             module.FS.writeFile(payload.bios.path, new Uint8Array(await payload.bios.blob.arrayBuffer()));
-            const optionsJson = JSON.stringify({ controllers: payload.controllers, options: payload.options });
-            const started = this.#withStrings(payload.contentPath, optionsJson, (content, options) =>
+            const discPaths = payload.mountPlan.descriptors
+                .filter(({ path }) => path.endsWith(".cue"))
+                .map(({ path }) => path);
+            const optionsJson = JSON.stringify({
+                controllers: payload.controllers,
+                options: payload.options,
+                ...(payload.initialDiscIndex === 0 ? {} : {
+                    initialDiscIndex: payload.initialDiscIndex,
+                    initialDiscPath: discPaths[payload.initialDiscIndex],
+                }),
+            });
+            const started = this._withStrings(payload.contentPath, optionsJson, (content, options) =>
                 module._psx_start(content, options));
             if (started !== 1) throw new PsxRuntimeError({
                 code: PsxRuntimeError.CODE.CORE_START_FAILED,
                 message: "The PlayStation core rejected the generated content mount.",
-                data: this.#sanitizedLog(),
+                data: this._sanitizedLog(),
             });
-            this.#writeCard(1, payload.memoryCards[1]);
-            this.#writeCard(2, payload.memoryCards[2]);
+            this._writeCard(1, payload.memoryCards[1]);
+            this._writeCard(2, payload.memoryCards[2]);
             const width = module._psx_base_width();
             const height = module._psx_base_height();
             const aspectRatio = module._psx_aspect_ratio();
@@ -172,7 +226,7 @@ export default class EmscriptenPsxCore implements WorkerCore {
             if (![width, height, aspectRatio, framesPerSecond, sampleRate, maximumWidth, maximumHeight]
                 .every((value) => Number.isFinite(value) && value > 0)) throw new Error("Core returned invalid AV information");
             const cueCount = payload.mountPlan.descriptors.filter(({ path }) => path.endsWith(".cue")).length;
-            const log = this.#sanitizedLog();
+            const log = this._sanitizedLog();
             const firmware = /\bHLE\b|BIOS[^\n]*(?:not found|missing)/iu.test(log) ? "hle" : "bios";
             return {
                 core: payload.build.core,
@@ -202,12 +256,14 @@ export default class EmscriptenPsxCore implements WorkerCore {
         }
     }
 
+    // METHOD :: VOID -> coreRunOutput
+    // Executes one frame and copies current video, audio, and changed rumble output.
     runFrame(): CoreRunOutput {
-        const module = this.#liveModule();
+        const module = this._liveModule();
         if (module._psx_run_frame() !== 1) throw new PsxRuntimeError({
             code: PsxRuntimeError.CODE.WORKER_FAILED,
             message: "The PlayStation core failed while running a frame.",
-            data: this.#sanitizedLog(),
+            data: this._sanitizedLog(),
         });
         const width = module._psx_video_width();
         const height = module._psx_video_height();
@@ -221,7 +277,7 @@ export default class EmscriptenPsxCore implements WorkerCore {
                 height,
                 pitch: module._psx_video_pitch(),
                 aspectRatio: module._psx_aspect_ratio(),
-                format: this.#pixelFormat(module._psx_video_format()),
+                format: this._pixelFormat(module._psx_video_format()),
             } as const;
         const audioFrames = module._psx_audio_frames();
         const audioPointer = module._psx_audio_data();
@@ -232,33 +288,41 @@ export default class EmscriptenPsxCore implements WorkerCore {
         for (let port = 0; port < 2; port++) {
             const strong = module._psx_rumble(port, 0);
             const weak = module._psx_rumble(port, 1);
-            if (strong !== this.#rumble[port]![0] || weak !== this.#rumble[port]![1]) {
-                this.#rumble[port] = [strong, weak];
+            if (strong !== this._rumble[port]![0] || weak !== this._rumble[port]![1]) {
+                this._rumble[port] = [strong, weak];
                 rumble.push({ port: (port + 1) as ControllerPort, strong: strong / 0xffff, weak: weak / 0xffff });
             }
         }
         return { video, ...(audio === undefined ? {} : { audio }), ...(rumble.length === 0 ? {} : { rumble }) };
     }
 
+    // METHOD :: controllerPort, psxButton, BOOLEAN -> VOID
+    // Converts and forwards one digital controller state.
     setButton(port: ControllerPort, button: PsxButton, pressed: boolean): void {
-        this.#liveModule()._psx_set_button(port - 1, BUTTON_IDS[button], pressed ? 1 : 0);
+        this._liveModule()._psx_set_button(port - 1, BUTTON_IDS[button], pressed ? 1 : 0);
     }
 
+    // METHOD :: controllerPort, psxAxis, NUMBER -> VOID
+    // Clamps, scales, and forwards one analog controller state.
     setAxis(port: ControllerPort, axis: PsxAxis, value: number): void {
         const scaled = value <= -1 ? -32768 : Math.round(Math.max(-1, Math.min(1, value)) * 32767);
-        this.#liveModule()._psx_set_axis(port - 1, AXIS_IDS[axis], scaled);
+        this._liveModule()._psx_set_axis(port - 1, AXIS_IDS[axis], scaled);
     }
 
+    // METHOD :: "soft"|"hard" -> VOID
+    // Performs a soft reset and leaves hard-reset worker replacement to the session.
     reset(kind: "soft" | "hard"): void {
         if (kind === "hard") throw new PsxRuntimeError({
             code: PsxRuntimeError.CODE.UNSUPPORTED,
             message: "Hard reset is owned by the main-thread session lifecycle.",
         });
-        if (this.#liveModule()._psx_reset() !== 1) throw new Error("Core rejected reset");
+        if (this._liveModule()._psx_reset() !== 1) throw new Error("Core rejected reset");
     }
 
+    // METHOD :: NUMBER -> {discIndex:NUMBER, trayOpen:BOOLEAN}
+    // Changes the active disc and returns core-reported drive state.
     setDisc(index: number): { readonly discIndex: number; readonly trayOpen: boolean } {
-        const module = this.#liveModule();
+        const module = this._liveModule();
         if (module._psx_set_disc(index) !== 1) throw new PsxRuntimeError({
             code: PsxRuntimeError.CODE.DISC_CHANGE_FAILED,
             message: "The PlayStation core rejected the disc change.",
@@ -267,56 +331,74 @@ export default class EmscriptenPsxCore implements WorkerCore {
         return { discIndex: module._psx_disc_index(), trayOpen: module._psx_tray_open() !== 0 };
     }
 
+    // METHOD :: controllerPort -> uint8Array
+    // Copies one validated memory-card image out of linear memory.
     readMemoryCard(slot: ControllerPort): Uint8Array {
-        const module = this.#liveModule();
+        const module = this._liveModule();
         const nativeSlot = slot - 1;
         const size = module._psx_memory_card_size(nativeSlot);
         if (size !== 128 * 1024) throw new Error("Core exposed an invalid memory-card size");
-        return this.#withBytes(size, (pointer) => {
+        return this._withBytes(size, (pointer) => {
             if (module._psx_read_memory_card(nativeSlot, pointer, size) !== 1) throw new Error("Core card read failed");
             return module.HEAPU8.slice(pointer, pointer + size);
         });
     }
 
+    // METHOD :: VOID -> uint8Array
+    // Captures one core save-state payload from linear memory.
     serializeState(): Uint8Array {
-        const module = this.#liveModule();
+        const module = this._liveModule();
         const size = module._psx_serialize_size();
         if (!Number.isSafeInteger(size) || size <= 0) throw new Error("Core exposed an invalid state size");
-        return this.#withBytes(size, (pointer) => {
+        return this._withBytes(size, (pointer) => {
             if (module._psx_serialize(pointer, size) !== 1) throw new Error("Core state serialization failed");
             return module.HEAPU8.slice(pointer, pointer + size);
         });
     }
 
+    // METHOD :: uint8Array -> VOID
+    // Copies and restores one core save-state payload through linear memory.
     unserializeState(bytes: Uint8Array): void {
-        const module = this.#liveModule();
-        this.#withBytes(bytes.byteLength, (pointer) => {
+        const module = this._liveModule();
+        this._withBytes(bytes.byteLength, (pointer) => {
             module.HEAPU8.set(bytes, pointer);
             if (module._psx_unserialize(pointer, bytes.byteLength) !== 1) throw new Error("Core state restoration failed");
         });
     }
 
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Stops the module at most once and clears bridge references.
     async stop(): Promise<void> {
-        if (this.#stopped) return;
-        this.#stopped = true;
-        const module = this.#module;
-        this.#module = null;
-        this.#payload = null;
+        if (this._stopped) return;
+        this._stopped = true;
+        const module = this._module;
+        this._module = null;
+        this._payload = null;
         if (module !== null) module._psx_stop();
     }
 
-    #writeCard(slot: ControllerPort, bytes: Uint8Array): void {
-        const module = this.#liveModule();
+    /**
+     *
+     * Private Methods
+     *
+     */
+
+    // METHOD :: controllerPort, uint8Array -> VOID
+    // Copies one exact-size memory-card image into the core.
+    private _writeCard(slot: ControllerPort, bytes: Uint8Array): void {
+        const module = this._liveModule();
         const nativeSlot = slot - 1;
         if (module._psx_memory_card_size(nativeSlot) !== bytes.byteLength) throw new Error("Core rejected memory-card size");
-        this.#withBytes(bytes.byteLength, (pointer) => {
+        this._withBytes(bytes.byteLength, (pointer) => {
             module.HEAPU8.set(bytes, pointer);
             if (module._psx_write_memory_card(nativeSlot, pointer, bytes.byteLength) !== 1) throw new Error("Core card restore failed");
         });
     }
 
-    #withStrings<T>(first: string, second: string, action: (firstPointer: number, secondPointer: number) => T): T {
-        const module = this.#liveModule();
+    // METHOD :: STRING, STRING, (NUMBER, NUMBER -> T) -> T
+    // Allocates two temporary UTF-8 strings and always releases their memory.
+    private _withStrings<T>(first: string, second: string, action: (firstPointer: number, secondPointer: number) => T): T {
+        const module = this._liveModule();
         const firstBytes = module.lengthBytesUTF8(first) + 1;
         const secondBytes = module.lengthBytesUTF8(second) + 1;
         const firstPointer = module._malloc(firstBytes);
@@ -336,8 +418,10 @@ export default class EmscriptenPsxCore implements WorkerCore {
         }
     }
 
-    #withBytes<T>(size: number, action: (pointer: number) => T): T {
-        const module = this.#liveModule();
+    // METHOD :: NUMBER, (NUMBER -> T) -> T
+    // Allocates one temporary byte region and always releases its memory.
+    private _withBytes<T>(size: number, action: (pointer: number) => T): T {
+        const module = this._liveModule();
         const pointer = module._malloc(size);
         if (pointer === 0) throw new PsxRuntimeError({
             code: PsxRuntimeError.CODE.MEMORY_EXCEEDED,
@@ -351,8 +435,10 @@ export default class EmscriptenPsxCore implements WorkerCore {
         }
     }
 
-    #sanitizedLog(): string {
-        const module = this.#module;
+    // METHOD :: VOID -> STRING
+    // Returns a bounded diagnostic log with filesystem paths redacted.
+    private _sanitizedLog(): string {
+        const module = this._module;
         if (module === null) return "";
         const size = Math.min(module._psx_log_size(), 32 * 1024);
         const pointer = module._psx_log_data();
@@ -362,18 +448,22 @@ export default class EmscriptenPsxCore implements WorkerCore {
             .replace(/\/[\w .-]+(?:\/[\w .-]+)+/gu, "[path]");
     }
 
-    #pixelFormat(value: number): "0rgb1555" | "xrgb8888" | "rgb565" {
+    // METHOD :: NUMBER -> "0rgb1555"|"xrgb8888"|"rgb565"
+    // Converts one native pixel-format identifier to the runtime union.
+    private _pixelFormat(value: number): "0rgb1555" | "xrgb8888" | "rgb565" {
         if (value === 0) return "0rgb1555";
         if (value === 1) return "xrgb8888";
         if (value === 2) return "rgb565";
         throw new Error("Core selected an unsupported pixel format");
     }
 
-    #liveModule(): EmscriptenPsxModule {
-        if (this.#module === null || this.#stopped) throw new PsxRuntimeError({
+    // METHOD :: VOID -> emscriptenPsxModule
+    // Returns the live module or rejects operations outside its lifecycle.
+    private _liveModule(): EmscriptenPsxModule {
+        if (this._module === null || this._stopped) throw new PsxRuntimeError({
             code: PsxRuntimeError.CODE.DESTROYED,
             message: "The Emscripten core bridge is not running.",
         });
-        return this.#module;
+        return this._module;
     }
 }

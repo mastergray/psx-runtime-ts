@@ -26,16 +26,17 @@ const probes = {
     m7: "/core/probes/m7-storage-probe.html",
     m8: "/harness/index.html",
     m9: "/core/probes/m9-game-store-probe.html",
+    m10: "/core/probes/m10-release-probe.html",
 };
 
 if (probe === undefined || !(probe in probes)) {
-    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry|media|cards|stateDisc|memory|bios|m4|m6|m7|m8|m9>");
+    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry|media|cards|stateDisc|memory|bios|m4|m6|m7|m8|m9|m10>");
     process.exit(2);
 }
 
 const root = resolve(import.meta.dirname, "../..");
 let privateBiosPath;
-if (probe === "bios" || probe === "m4") {
+if (probe === "bios" || probe === "m4" || probe === "m10") {
     if (process.env.PSX_BIOS_PATH === undefined || process.env.PSX_BIOS_PATH.length === 0) {
         console.error("P3 requires PSX_BIOS_PATH to identify the private BIOS input");
         process.exit(3);
@@ -101,6 +102,8 @@ const routes = new Map([
     ["/core/probes/m6-browser-probe.html", ["core/probes/m6-browser-probe.html", "text/html; charset=utf-8"]],
     ["/core/probes/m7-storage-probe.html", ["core/probes/m7-storage-probe.html", "text/html; charset=utf-8"]],
     ["/core/probes/m9-game-store-probe.html", ["core/probes/m9-game-store-probe.html", "text/html; charset=utf-8"]],
+    ["/core/probes/m10-release-probe.html", ["core/probes/m10-release-probe.html", "text/html; charset=utf-8"]],
+    ["/vendor/fflate.js", ["node_modules/fflate/esm/browser.js", "text/javascript; charset=utf-8"]],
     ["/harness/index.html", ["harness/index.html", "text/html; charset=utf-8"]],
     ["/dist/probes/workerfs-module.mjs", ["dist/probes/workerfs-module.mjs", "text/javascript; charset=utf-8"]],
     ["/dist/probes/workerfs-module.wasm", ["dist/probes/workerfs-module.wasm", "application/wasm"]],
@@ -108,20 +111,21 @@ const routes = new Map([
     ["/dist/probes/pcsx-boot.wasm", ["dist/probes/pcsx-boot.wasm", "application/wasm"]],
     ["/dist/probes/beetle-boot.mjs", ["dist/probes/beetle-boot.mjs", "text/javascript; charset=utf-8"]],
     ["/dist/probes/beetle-boot.wasm", ["dist/probes/beetle-boot.wasm", "application/wasm"]],
-    ["/fixtures/generated/m0/m0-fixture.cue", ["fixtures/generated/m0/m0-fixture.cue", "application/octet-stream"]],
-    ["/fixtures/generated/m0/m0-fixture.bin", ["fixtures/generated/m0/m0-fixture.bin", "application/octet-stream"]],
-    ["/fixtures/generated/m0/pal/m0-fixture.cue", ["fixtures/generated/m0/pal/m0-fixture.cue", "application/octet-stream"]],
-    ["/fixtures/generated/m0/pal/m0-fixture.bin", ["fixtures/generated/m0/pal/m0-fixture.bin", "application/octet-stream"]],
-    ["/fixtures/generated/m0/geometry/m0-fixture.cue", ["fixtures/generated/m0/geometry/m0-fixture.cue", "application/octet-stream"]],
-    ["/fixtures/generated/m0/geometry/m0-fixture.bin", ["fixtures/generated/m0/geometry/m0-fixture.bin", "application/octet-stream"]],
-    ["/fixtures/generated/m0/media/m0-fixture.cue", ["fixtures/generated/m0/media/m0-fixture.cue", "application/octet-stream"]],
-    ["/fixtures/generated/m0/media/m0-fixture.bin", ["fixtures/generated/m0/media/m0-fixture.bin", "application/octet-stream"]],
-    ["/fixtures/generated/m0/cards/m0-fixture.cue", ["fixtures/generated/m0/cards/m0-fixture.cue", "application/octet-stream"]],
-    ["/fixtures/generated/m0/cards/m0-fixture.bin", ["fixtures/generated/m0/cards/m0-fixture.bin", "application/octet-stream"]],
-    ["/fixtures/generated/m0/multidisc/disc1/m0-fixture.cue", ["fixtures/generated/m0/multidisc/disc1/m0-fixture.cue", "application/octet-stream"]],
-    ["/fixtures/generated/m0/multidisc/disc1/m0-fixture.bin", ["fixtures/generated/m0/multidisc/disc1/m0-fixture.bin", "application/octet-stream"]],
-    ["/fixtures/generated/m0/multidisc/disc2/m0-fixture.cue", ["fixtures/generated/m0/multidisc/disc2/m0-fixture.cue", "application/octet-stream"]],
-    ["/fixtures/generated/m0/multidisc/disc2/m0-fixture.bin", ["fixtures/generated/m0/multidisc/disc2/m0-fixture.bin", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/m0-fixture.cue", ["tests/fixtures/generated/m0/m0-fixture.cue", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/m0-fixture.bin", ["tests/fixtures/generated/m0/m0-fixture.bin", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/pal/m0-fixture.cue", ["tests/fixtures/generated/m0/pal/m0-fixture.cue", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/pal/m0-fixture.bin", ["tests/fixtures/generated/m0/pal/m0-fixture.bin", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/geometry/m0-fixture.cue", ["tests/fixtures/generated/m0/geometry/m0-fixture.cue", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/geometry/m0-fixture.bin", ["tests/fixtures/generated/m0/geometry/m0-fixture.bin", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/media/m0-fixture.cue", ["tests/fixtures/generated/m0/media/m0-fixture.cue", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/media/m0-fixture.bin", ["tests/fixtures/generated/m0/media/m0-fixture.bin", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/cards/m0-fixture.cue", ["tests/fixtures/generated/m0/cards/m0-fixture.cue", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/cards/m0-fixture.bin", ["tests/fixtures/generated/m0/cards/m0-fixture.bin", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/multidisc/disc1/m0-fixture.cue", ["tests/fixtures/generated/m0/multidisc/disc1/m0-fixture.cue", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/multidisc/disc1/m0-fixture.bin", ["tests/fixtures/generated/m0/multidisc/disc1/m0-fixture.bin", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/multidisc/disc2/m0-fixture.cue", ["tests/fixtures/generated/m0/multidisc/disc2/m0-fixture.cue", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/multidisc/disc2/m0-fixture.bin", ["tests/fixtures/generated/m0/multidisc/disc2/m0-fixture.bin", "application/octet-stream"]],
+    ["/tests/fixtures/generated/m0/psx-runtime-diagnostics.zip", ["tests/fixtures/generated/m0/psx-runtime-diagnostics.zip", "application/zip"]],
 ]);
 
 let resolveResult;
@@ -138,7 +142,9 @@ const server = createServer((request, response) => {
         response.end();
         return;
     }
-    if (url.pathname === "/private/bios" && (probe === "bios" || probe === "m4") && privateBiosPath !== undefined) {
+    if (url.pathname === "/private/bios"
+        && (probe === "bios" || probe === "m4" || probe === "m10")
+        && privateBiosPath !== undefined) {
         response.writeHead(200, {
             "content-type": "application/octet-stream",
             "cache-control": "no-store",
@@ -236,6 +242,30 @@ try {
     const page = await browser.newPage();
     const pageErrors = [];
     page.on("pageerror", (error) => pageErrors.push(error.message));
+    if (probe === "m8") {
+        await page.addInitScript(() => {
+            const state = { pressed: false };
+            const button = {
+                get pressed() { return state.pressed; },
+                get touched() { return state.pressed; },
+                get value() { return state.pressed ? 1 : 0; },
+            };
+            const pad = {
+                index: 0,
+                id: "M8 Test Gamepad",
+                connected: true,
+                mapping: "standard",
+                timestamp: 1,
+                buttons: [button],
+                axes: [0, 0, 0, 0],
+            };
+            Object.defineProperty(navigator, "getGamepads", {
+                configurable: true,
+                value: () => [pad],
+            });
+            globalThis.__m8GamepadState = state;
+        });
+    }
     await page.goto(`http://127.0.0.1:${address.port}${probes[probe]}`, {
         waitUntil: "domcontentloaded",
     });
@@ -243,6 +273,65 @@ try {
     if (probe === "m8") {
         await page.waitForFunction(() => document.querySelector("#screen") !== null
             && document.querySelectorAll("button").length >= 10);
+        await page.click("[data-open-dialog='controllers-dialog']");
+        await page.click("#player-tab-2");
+        const tabSelected = await page.getAttribute("#player-tab-2", "aria-selected");
+        const playerOneHidden = await page.getAttribute("#player-panel-1", "hidden");
+        const playerTwoHidden = await page.getAttribute("#player-panel-2", "hidden");
+        await page.click("#change-2-up");
+        const keyboardListening = await page.textContent("#change-2-up");
+        await page.keyboard.press("KeyG");
+        await page.waitForFunction(() => document.querySelector("#keyboard-2-up")?.textContent === "G");
+        await page.click("#change-2-circle");
+        const gamepadListening = await page.textContent("#change-2-circle");
+        await page.evaluate(() => { globalThis.__m8GamepadState.pressed = true; });
+        await page.waitForFunction(() => document.querySelector("#pad-label-2")?.textContent === "M8 Test Gamepad"
+            && document.querySelector("#pad-label-1")?.textContent === "not connected"
+            && document.querySelector("#gamepad-2-circle")?.textContent === "A"
+            && document.querySelector("#gamepad-2-cross")?.textContent === "unbound");
+        const captured = await page.evaluate(() => ({
+            playerOnePad: document.querySelector("#pad-label-1")?.textContent,
+            playerTwoPad: document.querySelector("#pad-label-2")?.textContent,
+            playerTwoUpKey: document.querySelector("#keyboard-2-up")?.textContent,
+            playerTwoCircleButton: document.querySelector("#gamepad-2-circle")?.textContent,
+            playerTwoCrossButton: document.querySelector("#gamepad-2-cross")?.textContent,
+            stored: localStorage.getItem("psx-runtime:ui:controls") !== null,
+        }));
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForFunction(() => document.querySelector("#keyboard-2-up")?.textContent === "G"
+            && document.querySelector("#gamepad-1-circle")?.textContent === "A"
+            && document.querySelector("#gamepad-1-cross")?.textContent === "unbound");
+        await page.click("[data-open-dialog='controllers-dialog']");
+        const persisted = await page.evaluate(() => ({
+            playerOnePad: document.querySelector("#pad-label-1")?.textContent,
+            playerTwoUpKey: document.querySelector("#keyboard-2-up")?.textContent,
+            playerOneCircleButton: document.querySelector("#gamepad-1-circle")?.textContent,
+            playerOneCrossButton: document.querySelector("#gamepad-1-cross")?.textContent,
+            storageStatus: document.querySelector("#control-storage-status")?.textContent,
+        }));
+        await page.click("#restore-controls");
+        await page.waitForFunction(() => document.querySelector("#keyboard-2-up")?.textContent === "I"
+            && document.querySelector("#gamepad-1-cross")?.textContent === "A"
+            && document.querySelector("#gamepad-1-circle")?.textContent === "B"
+            && localStorage.getItem("psx-runtime:ui:controls") === null);
+        const restored = await page.evaluate(() => ({
+            playerTwoUpKey: document.querySelector("#keyboard-2-up")?.textContent,
+            playerOneCrossButton: document.querySelector("#gamepad-1-cross")?.textContent,
+            playerOneCircleButton: document.querySelector("#gamepad-1-circle")?.textContent,
+            stored: localStorage.getItem("psx-runtime:ui:controls") !== null,
+        }));
+        await page.evaluate(() => localStorage.setItem("psx-runtime:ui:controls", JSON.stringify({
+            version: 1,
+            keyboard: { "": { port: 1, button: "cross" } },
+            gamepads: {},
+        })));
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForFunction(() => document.querySelector("#control-storage-status")?.textContent
+            === "The stored control profile is invalid and was ignored; default bindings are active.");
+        const invalidIgnored = await page.evaluate(() => ({
+            playerTwoUpKey: document.querySelector("#keyboard-2-up")?.textContent,
+            storageStatus: document.querySelector("#control-storage-status")?.textContent,
+        }));
         const harness = await page.evaluate(() => ({
             title: document.title,
             buttons: document.querySelectorAll("button").length,
@@ -250,8 +339,31 @@ try {
             canvas: document.querySelector("#screen") instanceof HTMLCanvasElement,
         }));
         resolveResult({
-            ok: harness.canvas && harness.buttons >= 10 && harness.status === "idle" && pageErrors.length === 0,
+            ok: harness.canvas && harness.buttons >= 10 && harness.status === "idle"
+                && tabSelected === "true" && playerOneHidden === "" && playerTwoHidden === null
+                && keyboardListening === "Press a key or button…"
+                && gamepadListening === "Press a key or button…"
+                && captured.playerOnePad === "not connected" && captured.playerTwoPad === "M8 Test Gamepad"
+                && captured.playerTwoUpKey === "G" && captured.playerTwoCircleButton === "A"
+                && captured.playerTwoCrossButton === "unbound" && captured.stored
+                && persisted.playerOnePad === "M8 Test Gamepad" && persisted.playerTwoUpKey === "G"
+                && persisted.playerOneCircleButton === "A" && persisted.playerOneCrossButton === "unbound"
+                && persisted.storageStatus === "Stored control bindings loaded from this browser."
+                && restored.playerTwoUpKey === "I" && restored.playerOneCrossButton === "A"
+                && restored.playerOneCircleButton === "B" && !restored.stored
+                && invalidIgnored.playerTwoUpKey === "I"
+                && invalidIgnored.storageStatus === "The stored control profile is invalid and was ignored; default bindings are active."
+                && pageErrors.length === 0,
             ...harness,
+            captured,
+            persisted,
+            restored,
+            invalidIgnored,
+            tabSelected,
+            playerOneHidden: playerOneHidden === "",
+            playerTwoHidden: playerTwoHidden !== null,
+            keyboardListening,
+            gamepadListening,
             pageErrors,
         });
     }

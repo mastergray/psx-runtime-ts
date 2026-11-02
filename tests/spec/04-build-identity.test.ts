@@ -114,6 +114,10 @@ const testFile: TestFile = {
                         compile: buildIdFor({ ...identity, compileFlags: [...identity.compileFlags, "-g0"] }),
                         link: buildIdFor({ ...identity, linkFlags: [...identity.linkFlags, "-flto"] }),
                         memory: buildIdFor({ ...identity, memory: { ...identity.memory, maximumPages: 8191 } }),
+                        sourceDateEpoch: buildIdFor({
+                            ...identity,
+                            sourceDateEpoch: identity.sourceDateEpoch + 1,
+                        }),
                     };
                     return {
                         hex: /^[a-f0-9]{64}$/u.test(base),
@@ -122,14 +126,14 @@ const testFile: TestFile = {
                             .filter(([name]) => name !== "reordered")
                             .every(([, id]) => id !== base),
                         excludesLocalPath: !JSON.stringify(identity).includes("/home/"),
-                        excludesTimestamp: !Object.keys(identity).some((key) => /time|date/iu.test(key)),
+                        pinsSourceDateEpoch: identity.sourceDateEpoch === 946684800,
                     };
                 }, P.equals<unknown>({
                     hex: true,
                     stable: true,
                     allMaterialChangesDiffer: true,
                     excludesLocalPath: true,
-                    excludesTimestamp: true,
+                    pinsSourceDateEpoch: true,
                 }))
                 .start(undefined),
         },

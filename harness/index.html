@@ -4,72 +4,252 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>psx-runtime-ts harness</title>
+  <script type="importmap">{"imports":{"fflate":"/node_modules/fflate/esm/browser.js"}}</script>
   <style>
-    :root { color-scheme: dark; font: 14px system-ui, sans-serif; }
-    body { margin: 0; background: #101216; color: #e9edf2; }
-    main { display: grid; grid-template-columns: minmax(18rem, 24rem) 1fr; min-height: 100vh; }
-    aside { padding: 1rem; border-right: 1px solid #343943; overflow: auto; }
-    section { display: grid; place-items: center; min-width: 0; background: #050608; }
-    #screen-stage { width: min(100%, 1280px); aspect-ratio: 4 / 3; display: grid; place-items: center; overflow: hidden; }
-    canvas { max-width: 100%; max-height: 100%; }
-    fieldset { margin: 0 0 1rem; border: 1px solid #343943; }
-    label { display: grid; gap: .25rem; margin: .5rem 0; }
-    input, select, button { font: inherit; }
-    .buttons { display: flex; flex-wrap: wrap; gap: .4rem; margin: .5rem 0; }
-    #status { color: #8ed0ff; }
-    #log { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 8rem; }
-    @media (max-width: 800px) { main { grid-template-columns: 1fr; } aside { border-right: 0; } }
+    :root { color-scheme: dark; font: 14px/1.45 Inter, ui-sans-serif, system-ui, sans-serif; background: #07090d; color: #edf2f7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 20rem; min-height: 100vh; background: #07090d; }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid #66c7ff; outline-offset: 2px; }
+    .menu-bar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: .75rem; min-height: 4rem; padding: .65rem .9rem; border-bottom: 1px solid #303845; background: color-mix(in srgb, #10151d 94%, transparent); backdrop-filter: blur(16px); }
+    .brand { flex: 0 0 auto; font-weight: 750; letter-spacing: .01em; }
+    .menu-actions { display: flex; gap: .35rem; overflow-x: auto; scrollbar-width: thin; }
+    .menu-actions button, .dialog-close { border: 1px solid #3a4656; border-radius: .45rem; padding: .45rem .7rem; background: #18202b; cursor: pointer; }
+    .menu-actions button:hover, .dialog-close:hover { border-color: #6694b5; background: #202c3a; }
+    .menu-actions button:disabled { cursor: not-allowed; opacity: .45; }
+    .menu-actions button:disabled:hover { border-color: #3a4656; background: #18202b; }
+    .status-strip { display: flex; align-items: center; gap: .5rem; min-width: 0; margin-left: auto; padding: .4rem .65rem; border: 1px solid #344252; border-radius: 999px; background: #0c1118; }
+    .status-dot { width: .65rem; height: .65rem; flex: 0 0 auto; border-radius: 50%; background: #768292; box-shadow: 0 0 0 .2rem #76829222; }
+    .status-strip[data-state="starting"] .status-dot { background: #f1ba62; box-shadow: 0 0 0 .2rem #f1ba6222; }
+    .status-strip[data-state="stopping"] .status-dot { background: #f1ba62; box-shadow: 0 0 0 .2rem #f1ba6222; }
+    .status-strip[data-state="running"] .status-dot { background: #59d6a0; box-shadow: 0 0 0 .2rem #59d6a022; }
+    .status-strip[data-state="paused"] .status-dot { background: #76b9ff; box-shadow: 0 0 0 .2rem #76b9ff22; }
+    .status-strip[data-state="failed"] .status-dot { background: #ef7d75; box-shadow: 0 0 0 .2rem #ef7d7522; }
+    .status-strip[data-state="destroyed"] .status-dot { background: #ef7d75; box-shadow: 0 0 0 .2rem #ef7d7522; }
+    #status { flex: 0 0 auto; color: #cde9ff; font-weight: 700; text-transform: capitalize; }
+    #status-detail { max-width: 28rem; overflow: hidden; color: #aeb9c7; text-overflow: ellipsis; white-space: nowrap; }
+    main { min-height: calc(100vh - 4rem); }
+    .screen-workspace { min-height: calc(100vh - 4rem); display: grid; place-items: center; padding: 1rem; background: radial-gradient(circle at 50% 40%, #17202d 0, #090c11 45%, #050608 100%); }
+    #screen-stage { position: relative; width: min(100%, 1280px); max-height: calc(100vh - 6rem); aspect-ratio: 4 / 3; display: grid; place-items: center; overflow: hidden; border: 1px solid #283343; border-radius: .7rem; background: #000; box-shadow: 0 1.2rem 4rem #0009; }
+    canvas { max-width: 100%; max-height: 100%; image-rendering: auto; }
+    #screen-message { position: absolute; inset: 50% auto auto 50%; max-width: min(30rem, calc(100% - 2rem)); transform: translate(-50%, -50%); padding: .8rem 1rem; border: 1px solid #3a4656; border-radius: .55rem; background: #0d131dcc; color: #c7d2de; text-align: center; backdrop-filter: blur(8px); }
+    [hidden] { display: none !important; }
+    dialog { width: min(46rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); margin: auto; padding: 0; overflow: hidden; border: 1px solid #3a4656; border-radius: .75rem; background: #111720; color: #edf2f7; box-shadow: 0 1.5rem 5rem #000c; }
+    dialog::backdrop { background: #020407b8; backdrop-filter: blur(5px); }
+    dialog.status-dialog { width: min(58rem, calc(100vw - 2rem)); }
+    .dialog-shell { display: grid; grid-template-rows: auto minmax(0, 1fr); max-height: calc(100vh - 2rem); }
+    .dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .85rem 1rem; border-bottom: 1px solid #303845; background: #151d28; }
+    .dialog-header h2 { margin: 0; font-size: 1.05rem; }
+    .dialog-body { padding: 1rem; overflow: auto; }
+    fieldset { margin: 0 0 1rem; padding: .7rem .85rem; border: 1px solid #303b49; border-radius: .55rem; }
+    fieldset:last-child { margin-bottom: 0; }
+    legend { padding: 0 .35rem; color: #b9c8d8; font-weight: 700; }
+    label { display: grid; gap: .3rem; margin: .55rem 0; color: #c9d3de; }
+    input, select { width: 100%; min-width: 0; border: 1px solid #3b4858; border-radius: .35rem; padding: .45rem .55rem; background: #090d13; color: #edf2f7; }
+    input[type="range"] { padding: .25rem; }
+    .buttons { display: flex; flex-wrap: wrap; gap: .45rem; margin: .65rem 0 0; }
+    .buttons button { border: 1px solid #425267; border-radius: .4rem; padding: .48rem .7rem; background: #1d2937; cursor: pointer; }
+    .buttons button:hover { border-color: #67a3cc; background: #26384a; }
+    .buttons button.primary { border-color: #3f8ab8; background: #17628d; }
+    .buttons button:disabled { cursor: wait; opacity: .6; }
+    .feedback { margin: .75rem 0; padding: .65rem .75rem; border: 1px solid #3a4656; border-radius: .45rem; background: #0b1017; color: #b8c4d1; }
+    .feedback[data-state="working"] { border-color: #8b6b38; color: #f1cb8a; }
+    .feedback[data-state="success"] { border-color: #2e7458; color: #83e3b9; }
+    .feedback[data-state="error"] { border-color: #8a4541; color: #ffaaa3; }
+    small { color: #9caabc; }
+    code { color: #bfe6ff; }
+    details { margin: .6rem 0; }
+    summary { cursor: pointer; color: #c9d7e6; }
+    #log { margin: .5rem 0 0; padding: .75rem; min-height: 10rem; max-height: 22rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #303b49; border-radius: .45rem; background: #080b10; color: #c6d0dc; }
+    .diagnostic-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+    .diagnostic-grid p { margin: 0; padding: .65rem; border: 1px solid #303b49; border-radius: .45rem; background: #0b1017; }
+    .key-map { width: 100%; margin: .75rem 0; border-collapse: collapse; font-size: .92rem; }
+    .key-map th, .key-map td { padding: .4rem .5rem; border: 1px solid #303b49; text-align: left; }
+    .key-map th { background: #151d28; color: #c9d7e6; }
+    .key-map td { background: #0b1017; color: #b8c4d1; }
+    .player-tabs { display: flex; gap: .35rem; margin: 0 0 .85rem; border-bottom: 1px solid #303b49; }
+    .player-tabs button { margin-bottom: -1px; padding: .5rem .8rem; border: 1px solid transparent; border-bottom-color: #303b49; background: transparent; color: #9eabb9; cursor: pointer; }
+    .player-tabs button[aria-selected="true"] { border-color: #3f8ab8 #3f8ab8 #111720; color: #d8efff; background: #111720; }
+    .device-line { margin: .7rem 0; color: #b8c4d1; }
+    .binding-change { border: 1px solid #425267; border-radius: .35rem; padding: .35rem .55rem; background: #1d2937; color: inherit; cursor: pointer; }
+    .binding-change:hover { border-color: #67a3cc; background: #26384a; }
+    .binding-change[data-capturing="true"] { border-color: #b5843f; color: #ffd99b; }
+    .binding-status { min-height: 1.4rem; margin: .65rem 0; color: #9caabc; }
+    @media (max-width: 900px) {
+      .menu-bar { flex-wrap: wrap; }
+      .brand { width: 100%; }
+      .menu-actions { order: 2; width: 100%; }
+      .status-strip { position: absolute; top: .55rem; right: .7rem; max-width: calc(100% - 12rem); }
+      #status-detail { max-width: 15rem; }
+      main, .screen-workspace { min-height: calc(100vh - 7rem); }
+      #screen-stage { max-height: calc(100vh - 9rem); }
+    }
+    @media (max-width: 560px) {
+      #status-detail { display: none; }
+      .diagnostic-grid { grid-template-columns: 1fr; }
+      dialog { width: calc(100vw - 1rem); max-height: calc(100vh - 1rem); }
+      .dialog-shell { max-height: calc(100vh - 1rem); }
+    }
   </style>
 </head>
 <body>
+<header class="menu-bar">
+  <div class="brand">PlayStation runtime harness</div>
+  <nav class="menu-actions" aria-label="Harness controls">
+    <button id="system-menu" type="button" aria-haspopup="dialog" aria-controls="system-dialog" aria-expanded="false" data-open-dialog="system-dialog">System</button>
+    <button id="game-menu" type="button" aria-haspopup="dialog" aria-controls="game-dialog" aria-expanded="false" data-open-dialog="game-dialog" disabled title="Check and store valid firmware in System first.">Game</button>
+    <button id="library-menu" type="button" aria-haspopup="dialog" aria-controls="library-dialog" aria-expanded="false" data-open-dialog="library-dialog" disabled title="Check and store valid firmware in System first.">Library</button>
+    <button type="button" aria-haspopup="dialog" aria-controls="session-dialog" aria-expanded="false" data-open-dialog="session-dialog">Session</button>
+    <button type="button" aria-haspopup="dialog" aria-controls="controllers-dialog" aria-expanded="false" data-open-dialog="controllers-dialog">Controllers</button>
+    <button type="button" aria-haspopup="dialog" aria-controls="memory-cards-dialog" aria-expanded="false" data-open-dialog="memory-cards-dialog">Memory Cards</button>
+    <button type="button" aria-haspopup="dialog" aria-controls="status-dialog" aria-expanded="false" data-open-dialog="status-dialog">Status</button>
+  </nav>
+  <div id="status-strip" class="status-strip" data-state="idle" role="status" aria-live="polite">
+    <span class="status-dot" aria-hidden="true"></span>
+    <span id="status">idle</span>
+    <span id="status-detail">Ready for a game ZIP.</span>
+  </div>
+</header>
 <main>
-  <aside>
-    <h1>PlayStation runtime harness</h1>
-    <p id="status">idle</p>
+  <section class="screen-workspace" aria-label="PlayStation display">
+    <div id="screen-stage">
+      <canvas id="screen"></canvas>
+      <div id="screen-message">Open <strong>System</strong> and check/store firmware, then open Game.</div>
+    </div>
+  </section>
+</main>
+
+<dialog id="system-dialog" aria-labelledby="system-dialog-title">
+  <div class="dialog-shell">
+    <header class="dialog-header"><h2 id="system-dialog-title">System</h2><button class="dialog-close" type="button" data-close-dialog>Close</button></header>
+    <div class="dialog-body">
     <fieldset>
-      <legend>Runtime</legend>
-      <label>Core build URL <input id="build-url" value="/dist/core"></label>
+      <legend>Firmware</legend>
+      <details><summary>Advanced</summary><label>Core build URL <input id="build-url" value="/dist/core"></label></details>
       <label>Firmware <input id="bios" type="file"></label>
-      <label>Firmware region <select id="bios-region"><option value="ntsc-u">NTSC-U</option><option value="ntsc-j">NTSC-J</option><option value="pal">PAL</option></select></label>
-      <label>Disc directory <input id="game-files" type="file" multiple webkitdirectory></label>
-      <label>Game ID <input id="game-id" value="local-test"></label>
-      <label>Entry override <input id="entry" placeholder="Optional CUE or M3U path"></label>
-      <label>Port 1 controller <select id="controller-1"><option>dualshock</option><option>digital</option><option>none</option></select></label>
-      <label>Port 2 controller <select id="controller-2"><option>digital</option><option>dualshock</option><option>none</option></select></label>
-      <div class="buttons"><button id="audit">Audit</button><button id="start">Start</button><button id="stop">Stop</button></div>
+      <p>Firmware status: <code id="firmware-status">select a user-supplied image</code></p>
+      <label>Firmware region <select id="bios-region"><option value="ntsc-u" selected>NTSC-U (United States)</option><option value="ntsc-j">NTSC-J (Japan)</option><option value="pal">PAL (Europe)</option></select></label>
+      <div class="buttons"><button id="check-store-firmware" aria-label="Check and store firmware">Check And Store</button><button id="delete-firmware" hidden>Forget stored firmware</button></div>
+      <p><small>Check And Store validates firmware for the selected region, then keeps it only in this browser.</small></p>
     </fieldset>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="game-dialog" aria-labelledby="game-dialog-title">
+  <div class="dialog-shell">
+    <header class="dialog-header"><h2 id="game-dialog-title">Game</h2><button class="dialog-close" type="button" data-close-dialog>Close</button></header>
+    <div class="dialog-body">
     <fieldset>
-      <legend>Local library</legend>
+      <legend>Game</legend>
+      <label>Game ZIP <input id="game-files" type="file" accept=".zip,application/zip"></label>
+      <p><small>Game Check And Store validates this ZIP before adding it to the browser library.</small></p>
+      <label>Game title <input id="game-id" placeholder="Derived from the ZIP filename"></label>
+      <p><small>This is the title shown in Library. Content identity is generated automatically.</small></p>
+      <details><summary>Advanced</summary><label>Entry file override <input id="entry" placeholder="Optional CUE or M3U path"></label><p><small>Only needed when the ZIP has multiple possible entry files.</small></p></details>
+      <div id="game-feedback" class="feedback" data-state="idle" role="status" aria-live="polite">Choose a game ZIP, then run Check And Store.</div>
+      <label>Disc <select id="disc-index" disabled><option>No checked game</option></select></label>
+      <div id="disc-feedback" class="feedback" data-state="idle" role="status" aria-live="polite">Check and store a game to select its starting disc.</div>
+      <div class="buttons"><button id="audit" aria-label="Check and store game">Check And Store</button><button id="start" class="primary" disabled>Start</button></div>
+    </fieldset>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="library-dialog" aria-labelledby="library-dialog-title">
+  <div class="dialog-shell">
+    <header class="dialog-header"><h2 id="library-dialog-title">Games stored in this browser</h2><button class="dialog-close" type="button" data-close-dialog>Close</button></header>
+    <div class="dialog-body">
+    <fieldset>
+      <legend>Browser game library</legend>
       <label>Stored game <select id="stored-game"></select></label>
       <label>Display title <input id="stored-title" value="Local test"></label>
       <div class="buttons">
-        <button id="import-game">Import selected</button><button id="refresh-games">Refresh</button>
+        <button id="refresh-games">Refresh</button>
         <button id="start-stored">Start stored</button><button id="rename-stored">Rename</button>
         <button id="delete-stored">Delete</button>
       </div>
     </fieldset>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="session-dialog" aria-labelledby="session-dialog-title">
+  <div class="dialog-shell">
+    <header class="dialog-header"><h2 id="session-dialog-title">Session</h2><button class="dialog-close" type="button" data-close-dialog>Close</button></header>
+    <div class="dialog-body">
     <fieldset>
       <legend>Session</legend>
       <div class="buttons">
-        <button id="unlock">Unlock audio</button><button id="pause">Pause</button><button id="resume">Resume</button>
+        <button id="stop">Stop</button>
+        <button id="mute-audio" disabled>Mute audio</button>
+        <button id="pause">Pause</button><button id="resume">Resume</button>
         <button id="soft-reset">Soft reset</button><button id="hard-reset">Hard reset</button><button id="fullscreen">Fullscreen</button>
       </div>
-      <label>Disc index <input id="disc-index" type="number" min="0" value="0"><button id="set-disc">Set disc</button></label>
+      <p>Audio: <code id="session-audio-status" role="status" aria-live="polite">unavailable until a game starts</code></p>
+      <label>Audio volume <input id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.15"></label>
       <label>State name <input id="state-name" value="quick"></label>
       <div class="buttons"><button id="save-state">Save state</button><button id="load-state">Load state</button><button id="delete-state">Delete state</button></div>
     </fieldset>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="controllers-dialog" aria-labelledby="controllers-dialog-title">
+  <div class="dialog-shell">
+    <header class="dialog-header"><h2 id="controllers-dialog-title">Controllers</h2><button class="dialog-close" type="button" data-close-dialog>Close</button></header>
+    <div class="dialog-body">
+      <div class="player-tabs" role="tablist" aria-label="Controller player">
+        <button id="player-tab-1" type="button" role="tab" aria-controls="player-panel-1" aria-selected="true">Player 1</button>
+        <button id="player-tab-2" type="button" role="tab" aria-controls="player-panel-2" aria-selected="false">Player 2</button>
+      </div>
+      <section id="player-panel-1" role="tabpanel" aria-labelledby="player-tab-1">
+        <label>Emulated controller <select id="controller-1"><option>dualshock</option><option>digital</option><option>none</option></select></label>
+        <p class="device-line">Keyboard · Gamepad: <strong id="pad-label-1">Detecting…</strong></p>
+        <table class="key-map"><thead><tr><th>Control</th><th>Keyboard</th><th>Gamepad 1</th><th>Change</th></tr></thead><tbody id="bindings-1"></tbody></table>
+        <p id="binding-status-1" class="binding-status" role="status" aria-live="polite">Choose Change beside a control, then press a key or gamepad button.</p>
+      </section>
+      <section id="player-panel-2" role="tabpanel" aria-labelledby="player-tab-2" hidden>
+        <label>Emulated controller <select id="controller-2"><option>dualshock</option><option>digital</option><option>none</option></select></label>
+        <p class="device-line">Keyboard · Gamepad: <strong id="pad-label-2">Detecting…</strong></p>
+        <table class="key-map"><thead><tr><th>Control</th><th>Keyboard</th><th>Gamepad 2</th><th>Change</th></tr></thead><tbody id="bindings-2"></tbody></table>
+        <p id="binding-status-2" class="binding-status" role="status" aria-live="polite">Choose Change beside a control, then press a key or gamepad button.</p>
+      </section>
+      <p><small id="controller-type-status">Emulated controller types apply when the next game starts. Analog sticks continue to use the standard gamepad axes.</small></p>
+      <div class="buttons"><button id="restore-controls" type="button">Restore default bindings</button></div>
+      <p><small id="control-storage-status" role="status" aria-live="polite">Control bindings are stored in this browser.</small></p>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="memory-cards-dialog" aria-labelledby="memory-cards-dialog-title">
+  <div class="dialog-shell">
+    <header class="dialog-header"><h2 id="memory-cards-dialog-title">Memory Cards</h2><button class="dialog-close" type="button" data-close-dialog>Close</button></header>
+    <div class="dialog-body">
     <fieldset>
-      <legend>Controllers and cards</legend>
-      <label>Gamepad index for port 1 <input id="pad-1" type="number" min="0" value="0"><button id="bind-1">Bind</button></label>
-      <label>Gamepad index for port 2 <input id="pad-2" type="number" min="0" value="1"><button id="bind-2">Bind</button></label>
+      <legend>Memory Cards</legend>
+      <p id="memory-card-status">Replacement cards can be selected while no game is running.</p>
       <div class="buttons"><button id="download-card-1">Download card 1</button><button id="download-card-2">Download card 2</button></div>
       <label>Replacement card <input id="replacement-card" type="file"></label>
       <div class="buttons"><button id="replace-card-1">Replace card 1</button><button id="replace-card-2">Replace card 2</button></div>
     </fieldset>
-    <pre id="log"></pre>
-  </aside>
-  <section><div id="screen-stage"><canvas id="screen"></canvas></div></section>
-</main>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="status-dialog" class="status-dialog" aria-labelledby="status-dialog-title">
+  <div class="dialog-shell">
+    <header class="dialog-header"><h2 id="status-dialog-title">Status and diagnostics</h2><button class="dialog-close" type="button" data-close-dialog>Close</button></header>
+    <div class="dialog-body">
+      <div class="diagnostic-grid">
+        <p>Held inputs<br><code id="input-status">none</code></p>
+        <p>Audio<br><code id="audio-status">unavailable until a game starts</code></p>
+      </div>
+      <pre id="log" aria-label="Audit and session messages"></pre>
+    </div>
+  </div>
+</dialog>
 <script type="module" src="/harness-build/harness/main.js"></script>
 </body>
 </html>

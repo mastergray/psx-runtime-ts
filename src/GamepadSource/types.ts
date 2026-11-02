@@ -1,10 +1,11 @@
-import { isFrameScheduler, isPsxAxis } from "../shared.types.js";
+import { isFrameScheduler, isPsxAxis, isPsxButton } from "../shared.types.js";
 import { isPsxInputLike } from "../PsxInput/types.js";
 
 import type {
     ControllerPort,
     FrameScheduler,
     PsxAxis,
+    PsxButton,
 } from "../shared.types.js";
 import type { PsxInputLike } from "../PsxInput/types.js";
 
@@ -42,6 +43,10 @@ export interface GamepadEventTargetLike {
     removeEventListener(type: "blur" | "visibilitychange", listener: () => void): void;
 }
 
+export type GamepadButtonMap = Readonly<Partial<Record<PsxButton, number | null>>>;
+
+export type GamepadButtonMaps = Readonly<Record<string, GamepadButtonMap>>;
+
 export interface GamepadSourceConfig {
     readonly input: PsxInputLike;
     readonly provider: GamepadProviderLike;
@@ -51,6 +56,7 @@ export interface GamepadSourceConfig {
     readonly deadZone?: number;
     readonly triggerThreshold?: number;
     readonly invertAxes?: Readonly<Partial<Record<PsxAxis, boolean>>>;
+    readonly buttonMaps?: GamepadButtonMaps;
     readonly rumble?: boolean;
 }
 
@@ -60,6 +66,13 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 const inUnitRange = (value: unknown): value is number =>
     typeof value === "number" && Number.isFinite(value) && value >= 0 && value < 1;
 
+export const isGamepadButtonMap = (value: unknown): value is GamepadButtonMap => isObject(value)
+    && Object.entries(value).every(([button, index]) => isPsxButton(button)
+        && (index === null || (typeof index === "number" && Number.isSafeInteger(index) && index >= 0)));
+
+export const isGamepadButtonMaps = (value: unknown): value is GamepadButtonMaps => isObject(value)
+    && Object.entries(value).every(([id, map]) => id.trim().length > 0 && isGamepadButtonMap(map));
+
 export function isGamepadSourceConfig(value: unknown): value is GamepadSourceConfig {
     if (!isObject(value) || !isPsxInputLike(value.input) || !isObject(value.provider)
         || typeof value.provider.getGamepads !== "function" || !isFrameScheduler(value.scheduler)
@@ -67,6 +80,7 @@ export function isGamepadSourceConfig(value: unknown): value is GamepadSourceCon
         || typeof value.target.removeEventListener !== "function" || !isObject(value.assignments)
         || (value.deadZone !== undefined && !inUnitRange(value.deadZone))
         || (value.triggerThreshold !== undefined && !inUnitRange(value.triggerThreshold))
+        || (value.buttonMaps !== undefined && !isGamepadButtonMaps(value.buttonMaps))
         || (value.rumble !== undefined && typeof value.rumble !== "boolean")) return false;
     const ports = new Set<number>();
     for (const [index, port] of Object.entries(value.assignments)) {

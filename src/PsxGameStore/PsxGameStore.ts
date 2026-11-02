@@ -1,40 +1,68 @@
-import DiscSetAudit from "../DiscSetAudit/DiscSetAudit.js";
-import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";
-import { createMountPlan } from "../worker/MountPlan.js";
-import IndexedDbGameDriver from "./IndexedDbGameDriver.js";
-import WorkerBlobHasher from "./WorkerBlobHasher.js";
+// Dependencies:
+import DiscSetAudit from "../DiscSetAudit/DiscSetAudit.js";              // Validates and resolves disc structure before import
+import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";    // Reports invalid requests and persistent-storage failures
+import { createMountPlan } from "../worker/MountPlan.js";               // Produces canonical descriptors and resolved content paths
+import IndexedDbGameDriver from "./IndexedDbGameDriver.js";            // Supplies the browser persistence backend used by init()
+import WorkerBlobHasher from "./WorkerBlobHasher.js";                   // Supplies off-main-thread SHA-256 used by init()
 import {
-    isPsxGameStoreConfig,
-    isPsxGameStoreInitConfig,
-    isPsxStoredGameRecord,
+    isPsxGameStoreConfig,        // Validates direct construction dependencies
+    isPsxGameStoreInitConfig,    // Validates browser factory options
+    isPsxStoredGameRecord,       // Validates records returned by the persistence driver
 } from "./types.js";
 
-import type { AuditedDisc, DiscFile, DiscSet } from "../shared.types.js";
+// Type dependencies:
 import type {
-    PsxGameImportOptions,
-    PsxGameStoreConfig,
-    PsxGameStoreInitConfig,
-    PsxStoredGame,
-    PsxStoredGameRecord,
+    AuditedDisc,    // Fully resolved disc structure produced by the audit
+    DiscFile,       // Normalized content path and blob pair
+    DiscSet,        // Entry, identity, and files supplied to or returned from the store
+} from "../shared.types.js";
+import type {
+    PsxGameImportOptions,       // Optional title and cancellation signal for import
+    PsxGameStoreConfig,         // Driver, hasher, clock, and quota dependencies
+    PsxGameStoreInitConfig,     // Optional browser factory settings
+    PsxStoredGame,              // Lightweight immutable library summary
+    PsxStoredGameRecord,        // Complete persisted content and metadata record
 } from "./types.js";
 
-const FORMAT = "psx-runtime-game";
-const VERSION = 1;
-const GAME_ID = /^psx-v1-[a-f0-9]{64}$/u;
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;
+/**
+ *
+ * Type Declarations
+ *
+ */
 
+// TYPE :: {entry:STRING, files:[discFile], descriptors:[{path:STRING, text:STRING}], trackNames:MAP, sidecarNames:MAP}
+// Deterministically renamed content and identity inputs produced before hashing.
+interface CanonicalContent {
+    readonly entry: string;                                                // Canonical descriptor basename used to start the set
+    readonly files: ReadonlyArray<DiscFile>;                               // Canonically named descriptors, tracks, and sidecars
+    readonly descriptors: ReadonlyArray<{ readonly path: string; readonly text: string }>; // Normalized descriptor identity inputs
+    readonly trackNames: ReadonlyMap<string, string>;                      // Original track path to canonical name
+    readonly sidecarNames: ReadonlyMap<string, string>;                    // Original sidecar path to canonical name
+}
+
+const FORMAT = "psx-runtime-game";                       // Persisted game-record format identifier
+const VERSION = 1;                                       // Persisted identity and record schema version
+const GAME_ID = /^psx-v1-[a-f0-9]{64}$/u;               // Content-addressed identity accepted by public lookups
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;    // Characters forbidden in display titles
+
+// METHOD :: STRING, UNKNOWN -> psxRuntimeError
+// Creates one invalid game-library request error.
 const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
     code: PsxRuntimeError.CODE.INVALID_CONFIG,
     message,
     data,
 });
 
+// METHOD :: STRING, UNKNOWN -> psxRuntimeError
+// Creates one hashing, quota, record-integrity, or persistence error.
 const failed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
     code: PsxRuntimeError.CODE.STORAGE_FAILED,
     message,
     data,
 });
 
+// METHOD :: psxStoredGameRecord -> psxStoredGame
+// Projects a complete record into an immutable library summary.
 const summary = (record: PsxStoredGameRecord): PsxStoredGame => Object.freeze({
     gameId: record.gameId,
     displayTitle: record.displayTitle,
@@ -44,14 +72,20 @@ const summary = (record: PsxStoredGameRecord): PsxStoredGame => Object.freeze({
     discCount: record.discCount,
 });
 
+// METHOD :: psxStoredGameRecord -> discSet
+// Returns an immutable content view safe for session startup.
 const copyGame = (record: PsxStoredGameRecord): DiscSet => Object.freeze({
     gameId: record.gameId,
     entry: record.game.entry,
     files: Object.freeze(record.game.files.map(({ path, blob }) => Object.freeze({ path, blob }))),
 });
 
+// METHOD :: STRING -> STRING
+// Returns the final normalized component of a content path.
 const basename = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
 
+// METHOD :: UNKNOWN -> STRING
+// Normalizes and validates a bounded printable display title.
 const normalizeTitle = (value: unknown): string => {
     if (typeof value !== "string") throw invalid("Game display title must be a string.", value);
     const normalized = value.trim().normalize("NFC");
@@ -61,6 +95,8 @@ const normalizeTitle = (value: unknown): string => {
     return normalized;
 };
 
+// METHOD :: UNKNOWN -> STRING
+// Validates and returns an exact content-addressed game identity.
 const assertGameId = (value: unknown): string => {
     if (typeof value !== "string" || !GAME_ID.test(value)) {
         throw invalid("Stored gameId is invalid.", value);
@@ -68,6 +104,8 @@ const assertGameId = (value: unknown): string => {
     return value;
 };
 
+// METHOD :: uint8Array -> uint8Array
+// Removes transient worker mount prefixes from descriptor identity bytes.
 const normalizeDescriptor = (bytes: Uint8Array): Uint8Array => {
     const text = new TextDecoder().decode(bytes)
         .replaceAll("/content/blob/", "")
@@ -75,14 +113,8 @@ const normalizeDescriptor = (bytes: Uint8Array): Uint8Array => {
     return new TextEncoder().encode(text);
 };
 
-interface CanonicalContent {
-    readonly entry: string;
-    readonly files: ReadonlyArray<DiscFile>;
-    readonly descriptors: ReadonlyArray<{ readonly path: string; readonly text: string }>;
-    readonly trackNames: ReadonlyMap<string, string>;
-    readonly sidecarNames: ReadonlyMap<string, string>;
-}
-
+// METHOD :: discSet, auditedDisc -> PROMISE(canonicalContent)
+// Builds deterministic descriptor, track, and sidecar names for identity and storage.
 const canonicalContent = async (set: DiscSet, audit: AuditedDisc): Promise<CanonicalContent> => {
     const plan = await createMountPlan(set, audit);
     const descriptors = plan.descriptors.map(({ path, bytes }) => {
@@ -128,36 +160,61 @@ const canonicalContent = async (set: DiscSet, audit: AuditedDisc): Promise<Canon
     };
 };
 
-export default class PsxGameStore {
-    static readonly DEFAULT_DATABASE_NAME = "psx-runtime-games";
-    readonly #driver: PsxGameStoreConfig["driver"];
-    readonly #hasher: PsxGameStoreConfig["hasher"];
-    readonly #now: PsxGameStoreConfig["now"];
-    readonly #storageManager: NonNullable<PsxGameStoreConfig["storageManager"]> | null;
+/**
+ *
+ * Class
+ *
+ */
 
+// Audits, content-addresses, and atomically persists normalized game disc sets.
+export default class PsxGameStore {
+
+    /* Static Fields */
+    static readonly DEFAULT_DATABASE_NAME = "psx-runtime-games";    // Browser database name used by init()
+
+    /* Instance Fields */
+    private readonly _driver: PsxGameStoreConfig["driver"];                              // Atomic record persistence boundary
+    private readonly _hasher: PsxGameStoreConfig["hasher"];                              // Streaming SHA-256 boundary
+    private readonly _now: PsxGameStoreConfig["now"];                                    // Injectable clock for import metadata
+    private readonly _storageManager: NonNullable<PsxGameStoreConfig["storageManager"]> | null; // Optional browser quota estimator
+
+    // CONSTRUCTOR :: psxGameStoreConfig -> psxGameStore
+    // Validates and retains persistence, hashing, clock, and quota dependencies.
     constructor(config: PsxGameStoreConfig) {
         if (!isPsxGameStoreConfig(config)) throw invalid("PsxGameStore config is invalid.", config);
-        this.#driver = config.driver;
-        this.#hasher = config.hasher;
-        this.#now = config.now;
-        this.#storageManager = config.storageManager ?? null;
+        this._driver = config.driver;
+        this._hasher = config.hasher;
+        this._now = config.now;
+        this._storageManager = config.storageManager ?? null;
     }
 
+    /**
+     *
+     * Instance Methods
+     *
+     */
+
+    // METHOD :: VOID -> PROMISE([psxStoredGame])
+    // Lists validated immutable summaries ordered by title and identity.
     async list(): Promise<ReadonlyArray<PsxStoredGame>> {
-        const values = await this.#storageCall(() => this.#driver.list());
-        const records = values.map((value) => this.#storedRecord(value));
+        const values = await this._storageCall(() => this._driver.list());
+        const records = values.map((value) => this._storedRecord(value));
         records.sort((left, right) => left.displayTitle.localeCompare(right.displayTitle)
             || left.gameId.localeCompare(right.gameId));
         return Object.freeze(records.map(summary));
     }
 
+    // METHOD :: STRING -> PROMISE(discSet?)
+    // Loads one validated immutable disc set by content identity.
     async get(gameId: string): Promise<DiscSet | null> {
         const id = assertGameId(gameId);
-        const value = await this.#storageCall(() => this.#driver.read(id));
+        const value = await this._storageCall(() => this._driver.read(id));
         if (value === undefined) return null;
-        return copyGame(this.#storedRecord(value, id));
+        return copyGame(this._storedRecord(value, id));
     }
 
+    // METHOD :: discSet, psxGameImportOptions? -> PROMISE(psxStoredGame)
+    // Audits, canonicalizes, hashes, quota-checks, and atomically stores one game.
     async import(game: DiscSet, options: PsxGameImportOptions = {}): Promise<PsxStoredGame> {
         if (typeof options !== "object" || options === null
             || (options.displayTitle !== undefined && typeof options.displayTitle !== "string")
@@ -167,7 +224,7 @@ export default class PsxGameStore {
                 || typeof options.signal.removeEventListener !== "function"))) {
             throw invalid("Game import options are invalid.", options);
         }
-        this.#assertNotCancelled(options.signal);
+        this._assertNotCancelled(options.signal);
         const audit = await DiscSetAudit.audit(game);
         if (!audit.ok) throw new PsxRuntimeError({
             code: PsxRuntimeError.CODE.DISC_SET_INVALID,
@@ -182,7 +239,7 @@ export default class PsxGameStore {
             if (cached !== undefined) return cached;
             const blob = source.get(path);
             if (blob === undefined) throw failed("Audited content disappeared during hashing.", path);
-            const hash = await this.#hasher.hash(blob, options.signal);
+            const hash = await this._hasher.hash(blob, options.signal);
             if (!/^[a-f0-9]{64}$/u.test(hash)) throw failed("The Blob hasher returned an invalid digest.", null);
             hashes.set(path, hash);
             return hash;
@@ -226,17 +283,17 @@ export default class PsxGameStore {
             tracks,
             sidecars,
         });
-        const digest = await this.#hasher.hash(new Blob([identity]), options.signal);
+        const digest = await this._hasher.hash(new Blob([identity]), options.signal);
         if (!/^[a-f0-9]{64}$/u.test(digest)) throw failed("The Blob hasher returned an invalid digest.", null);
         const gameId = `psx-v1-${digest}`;
-        this.#assertNotCancelled(options.signal);
-        const existing = await this.#storageCall(() => this.#driver.read(gameId));
-        if (existing !== undefined) return summary(this.#storedRecord(existing, gameId));
+        this._assertNotCancelled(options.signal);
+        const existing = await this._storageCall(() => this._driver.read(gameId));
+        if (existing !== undefined) return summary(this._storedRecord(existing, gameId));
         const displayTitle = normalizeTitle(options.displayTitle ?? game.gameId);
         const totalBytes = canonical.files.reduce((total, file) => total + file.blob.size, 0);
-        await this.#assertQuota(totalBytes);
-        this.#assertNotCancelled(options.signal);
-        const timestamp = this.#now();
+        await this._assertQuota(totalBytes);
+        this._assertNotCancelled(options.signal);
+        const timestamp = this._now();
         if (!Number.isFinite(timestamp)) throw failed("The game-library clock returned an invalid time.", timestamp);
         const storedGame: DiscSet = Object.freeze({
             gameId,
@@ -255,9 +312,9 @@ export default class PsxGameStore {
             game: storedGame,
         });
         try {
-            await this.#driver.write(gameId, record);
+            await this._driver.write(gameId, record);
         } catch (error) {
-            const estimate = await this.#quotaData(totalBytes);
+            const estimate = await this._quotaData(totalBytes);
             throw failed("Game content could not be committed atomically.", {
                 ...(estimate ?? {}),
                 cause: error instanceof Error ? error.message : error,
@@ -266,37 +323,51 @@ export default class PsxGameStore {
         return summary(record);
     }
 
+    // METHOD :: STRING, STRING -> PROMISE(psxStoredGame)
+    // Atomically replaces display metadata without changing content identity.
     async renameDisplayTitle(gameId: string, displayTitle: string): Promise<PsxStoredGame> {
         const id = assertGameId(gameId);
         const title = normalizeTitle(displayTitle);
-        return this.#storageCall(() => this.#driver.update(id, (value) => {
+        return this._storageCall(() => this._driver.update(id, (value) => {
             if (value === undefined) throw failed("The stored game does not exist.", { gameId: id });
-            const current = this.#storedRecord(value, id);
+            const current = this._storedRecord(value, id);
             const updated = Object.freeze({ ...current, displayTitle: title });
             return { value: updated, result: summary(updated) };
         }));
     }
 
+    // METHOD :: STRING -> PROMISE(VOID)
+    // Removes one stored game by content identity.
     async delete(gameId: string): Promise<void> {
         const id = assertGameId(gameId);
-        await this.#storageCall(() => this.#driver.remove(id));
+        await this._storageCall(() => this._driver.remove(id));
     }
 
-    async #assertQuota(requiredBytes: number): Promise<void> {
-        const data = await this.#quotaData(requiredBytes);
+    /**
+     *
+     * Private Methods
+     *
+     */
+
+    // METHOD :: NUMBER -> PROMISE(VOID)
+    // Rejects an import known to exceed the browser's reported available quota.
+    private async _assertQuota(requiredBytes: number): Promise<void> {
+        const data = await this._quotaData(requiredBytes);
         if (data !== null && data.availableBytes !== null && requiredBytes > data.availableBytes) {
             throw failed("Game import exceeds the reported storage quota.", data);
         }
     }
 
-    async #quotaData(requiredBytes: number): Promise<{
+    // METHOD :: NUMBER -> PROMISE({type:"quota", requiredBytes:NUMBER, availableBytes:NUMBER?}?)
+    // Returns best-effort normalized quota diagnostics for an import.
+    private async _quotaData(requiredBytes: number): Promise<{
         readonly type: "quota";
         readonly requiredBytes: number;
         readonly availableBytes: number | null;
     } | null> {
-        if (this.#storageManager === null) return null;
+        if (this._storageManager === null) return null;
         try {
-            const estimate = await this.#storageManager.estimate();
+            const estimate = await this._storageManager.estimate();
             const usage = typeof estimate.usage === "number" && Number.isFinite(estimate.usage)
                 ? Math.max(0, estimate.usage) : null;
             const quota = typeof estimate.quota === "number" && Number.isFinite(estimate.quota)
@@ -311,18 +382,24 @@ export default class PsxGameStore {
         }
     }
 
-    #storedRecord(value: unknown, gameId?: string): PsxStoredGameRecord {
+    // METHOD :: UNKNOWN, STRING? -> psxStoredGameRecord
+    // Validates one persisted record and its optional lookup identity.
+    private _storedRecord(value: unknown, gameId?: string): PsxStoredGameRecord {
         if (!isPsxStoredGameRecord(value) || (gameId !== undefined && value.gameId !== gameId)) {
             throw failed("A stored game record is malformed.", gameId ?? null);
         }
         return value;
     }
 
-    #assertNotCancelled(signal?: AbortSignal): void {
+    // METHOD :: abortSignal? -> VOID
+    // Converts a caller cancellation signal into a typed storage failure.
+    private _assertNotCancelled(signal?: AbortSignal): void {
         if (signal?.aborted === true) throw failed("Game import was cancelled.", { type: "cancelled" });
     }
 
-    async #storageCall<T>(operation: () => Promise<T>): Promise<T> {
+    // METHOD :: (VOID -> PROMISE(T)) -> PROMISE(T)
+    // Preserves typed runtime errors and wraps untyped driver failures.
+    private async _storageCall<T>(operation: () => Promise<T>): Promise<T> {
         try {
             return await operation();
         } catch (error) {
@@ -331,6 +408,14 @@ export default class PsxGameStore {
         }
     }
 
+    /**
+     *
+     * Static Methods
+     *
+     */
+
+    // Static Factory Method :: psxGameStoreInitConfig? -> psxGameStore
+    // Creates browser storage with IndexedDB, worker hashing, and quota estimation.
     static init(config: PsxGameStoreInitConfig = {}): PsxGameStore {
         if (!isPsxGameStoreInitConfig(config)) throw invalid("PsxGameStore init config is invalid.", config);
         const factory = config.indexedDB ?? globalThis.indexedDB;

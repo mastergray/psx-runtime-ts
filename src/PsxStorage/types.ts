@@ -1,10 +1,16 @@
-import { isPsxMachineInfo, isPsxSession } from "../shared.types.js";
+import { isBiosImage, isPsxMachineInfo, isPsxRegion, isPsxSession } from "../shared.types.js";
 
-import type { ControllerPort, PsxMachineInfo, PsxSession } from "../shared.types.js";
+import type {
+    BiosImage,
+    ControllerPort,
+    PsxMachineInfo,
+    PsxRegion,
+    PsxSession,
+} from "../shared.types.js";
 
 export const PSX_MEMORY_CARD_BYTES = 128 * 1024;
 
-export type PsxStorageStore = "cards" | "states";
+export type PsxStorageStore = "cards" | "states" | "firmware";
 
 export interface PsxStorageMutation<T = unknown, R = unknown> {
     readonly value?: T;
@@ -52,6 +58,12 @@ export interface PsxMemoryCardSaveConfig {
     readonly cardId: string;
     readonly expectedRevision: number | null;
     readonly bytes: Uint8Array;
+}
+
+export interface PsxFirmwareRecord extends BiosImage {
+    readonly format: "psx-runtime-firmware";
+    readonly version: 1;
+    readonly storedAt: string;
 }
 
 export interface PsxStateMetadata {
@@ -153,6 +165,12 @@ export function isPsxMemoryCardSaveConfig(value: unknown): value is PsxMemoryCar
         && (value.expectedRevision === null || (isNonNegativeInteger(value.expectedRevision)
             && value.expectedRevision > 0))
         && isUint8Array(value.bytes) && value.bytes.byteLength === PSX_MEMORY_CARD_BYTES;
+}
+
+export function isPsxFirmwareRecord(value: unknown): value is PsxFirmwareRecord {
+    return isObject(value) && value.format === "psx-runtime-firmware" && value.version === 1
+        && isBiosImage(value) && isPsxRegion(value.region) && typeof value.storedAt === "string"
+        && !Number.isNaN(Date.parse(value.storedAt));
 }
 
 export function isPsxStateMetadata(value: unknown): value is PsxStateMetadata {

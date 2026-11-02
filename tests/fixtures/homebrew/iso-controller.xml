@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<iso_project image_name="controller-test.bin" cue_sheet="controller-test.cue">
+    <track type="data">
+        <identifiers
+            system="PLAYSTATION"
+            volume="PSX_RUNTIME_CONTROLLER"
+            volume_set="PSX_RUNTIME_DIAGNOSTICS"
+            publisher="MASTERGRAY"
+            data_preparer="PSN00BSDK 0.19"
+            application="PLAYSTATION"
+            copyright="LICENSE.TXT;1"
+            creation_date="2000010100000000+0"
+            modification_date="2000010100000000+0"
+        />
+        <directory_tree>
+            <file name="SYSTEM.CNF" type="data" source="diagnostic-system.cnf" />
+            <file name="DIAG.EXE" type="data" source="controller-test.exe" />
+            <file name="LICENSE.TXT" type="data" source="LICENSE" />
+            <dummy sectors="512" />
+        </directory_tree>
+    </track>
+</iso_project>

@@ -67,7 +67,11 @@ const server = createServer((request, response) => {
             const entry = preload.fileEntries[Number(fileMatch[1])];
             if (entry !== undefined) { await stream(response, entry.source); return; }
         }
-        const relative = url.pathname === "/" ? "harness/index.html" : url.pathname.slice(1);
+        const relative = url.pathname === "/"
+            ? "harness/index.html"
+            : url.pathname.startsWith("/harness-build/")
+                ? `dist${url.pathname}`
+                : url.pathname.slice(1);
         if (relative.includes("..")) throw new Error("Unsafe path");
         const path = resolve(root, relative);
         if (path !== root && !path.startsWith(`${root}${sep}`)) throw new Error("Unsafe path");

@@ -48,7 +48,8 @@ stereo Web Audio playback with independent mute/volume and a bounded queue.
 
 M7 adds IndexedDB-backed memory cards with optimistic revisions and a
 recoverable prior version, normalized named-state envelopes with exact
-build/game compatibility, and coalescing periodic card auto-save support.
+build/game compatibility, browser-local firmware storage keyed by region, and
+coalescing periodic card auto-save support.
 
 M8 adds the reusable player lifecycle, the browser-facing console composition
 and a developer harness. Local selections and stored content share the same
@@ -59,6 +60,24 @@ M9 adds content-addressed IndexedDB storage with normalized descriptors,
 original track Blobs, incremental Worker hashing, filename-independent
 deduplication and quota-aware atomic imports. Its package gate allowlists the
 npm tarball and verifies the selected core/toolchain notices.
+
+The browser-facing console also accepts one user-supplied ZIP containing a
+single CUE/BIN disc or an M3U with all referenced discs. It expands the archive
+locally with bounded path and size validation, then sends the resulting files
+through the same audit, storage and Worker mount path as raw or directory
+selections. ZIP bytes and firmware are never uploaded by the runtime.
+Games and firmware are persisted only through explicit browser-local actions
+and can be removed independently.
+
+The harness exposes separate **Check And Store** actions for firmware and game
+content, so either can be validated or replaced without rewriting the other.
+Firmware setup lives under **System**. **Game** and **Library** remain disabled
+until the selected region has firmware stored and validated for the active
+core build.
+
+Firmware may be supplied as a raw image or as a small ZIP. When a ZIP contains
+multiple supported images, the runtime requires exactly one filename that can
+be identified with the selected NTSC-U, NTSC-J or PAL region.
 
 See the [implementation spec](docs/psx-runtime-spec.md) for the architecture,
 public contracts, probe plan, milestones and release gates. Current progress

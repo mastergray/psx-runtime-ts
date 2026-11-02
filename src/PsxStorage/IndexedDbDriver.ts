@@ -1,64 +1,98 @@
-import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";
+// Dependencies:
+import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";    // Normalizes IndexedDB failures into stable storage errors
 
+// Type dependencies:
 import type {
-    PsxIndexedDbFactoryLike,
-    PsxStorageDriverLike,
-    PsxStorageMutation,
-    PsxStorageStore,
+    PsxIndexedDbFactoryLike,       // Injectable browser factory used to open the database
+    PsxStorageDriverLike,          // Storage-driver contract implemented by this class
+    PsxStorageMutation,            // Atomic update decision returned by callers
+    PsxStorageStore,               // Closed set of object stores managed by the schema
 } from "./types.js";
 
-const STORES: ReadonlyArray<PsxStorageStore> = ["cards", "states"];
+const STORES: ReadonlyArray<PsxStorageStore> = ["cards", "states", "firmware"];    // Stores created for the current schema
 
+// METHOD :: STRING, UNKNOWN -> psxRuntimeError
+// Creates a stable storage failure for an IndexedDB boundary error.
 const storageFailed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
     code: PsxRuntimeError.CODE.STORAGE_FAILED,
     message,
     data,
 });
 
-export default class IndexedDbDriver implements PsxStorageDriverLike {
-    static readonly VERSION = 1;
-    readonly #factory: PsxIndexedDbFactoryLike;
-    readonly #name: string;
+/**
+ *
+ * Class
+ *
+ */
 
+// Persists firmware, memory cards, and save states in versioned IndexedDB stores.
+export default class IndexedDbDriver implements PsxStorageDriverLike {
+
+    /* Static Fields */
+    static readonly VERSION = 2;                               // Database schema version owned by this driver
+
+    /* Instance Fields */
+    private readonly _factory: PsxIndexedDbFactoryLike;        // Browser factory used to open the configured database
+    private readonly _name: string;                            // Database name isolating this runtime profile
+
+    // CONSTRUCTOR :: psxIndexedDbFactoryLike, STRING -> indexedDbDriver
+    // Creates a driver for one named IndexedDB database.
     constructor(factory: PsxIndexedDbFactoryLike, name: string) {
-        this.#factory = factory;
-        this.#name = name;
+        this._factory = factory;
+        this._name = name;
     }
 
+    /**
+     *
+     * Instance Methods
+     *
+     */
+
+    // METHOD :: psxStorageStore, STRING -> PROMISE(UNKNOWN)
+    // Reads one value from an exact store and key.
     async read(store: PsxStorageStore, key: string): Promise<unknown> {
-        return this.#request(store, "readonly", (objectStore, complete) => {
+        return this._request(store, "readonly", (objectStore, complete) => {
             const request = objectStore.get(key);
             request.onsuccess = () => complete(request.result);
         });
     }
 
+    // METHOD :: psxStorageStore, STRING, UNKNOWN -> PROMISE(VOID)
+    // Replaces one value atomically.
     async write(store: PsxStorageStore, key: string, value: unknown): Promise<void> {
-        await this.#request(store, "readwrite", (objectStore, complete) => {
+        await this._request(store, "readwrite", (objectStore, complete) => {
             const request = objectStore.put(value, key);
             request.onsuccess = () => complete(undefined);
         });
     }
 
+    // METHOD :: psxStorageStore, STRING -> PROMISE(VOID)
+    // Removes one value from an exact store and key.
     async remove(store: PsxStorageStore, key: string): Promise<void> {
-        await this.#request(store, "readwrite", (objectStore, complete) => {
+        await this._request(store, "readwrite", (objectStore, complete) => {
             const request = objectStore.delete(key);
             request.onsuccess = () => complete(undefined);
         });
     }
 
+    // METHOD :: psxStorageStore -> PROMISE([UNKNOWN])
+    // Lists every value in one store.
     async list(store: PsxStorageStore): Promise<ReadonlyArray<unknown>> {
-        return this.#request(store, "readonly", (objectStore, complete) => {
+        return this._request(store, "readonly", (objectStore, complete) => {
             const request = objectStore.getAll();
             request.onsuccess = () => complete(request.result);
         });
     }
 
+    // METHOD :: psxStorageStore, STRING, (UNKNOWN -> psxStorageMutation<UNKNOWN,T>) -> PROMISE(T)
+    // Atomically applies a caller-defined update or deletion.
+    // NOTE: <T> is the caller-defined mutation result returned after commit.
     async update<T>(
         store: PsxStorageStore,
         key: string,
         updater: (current: unknown) => PsxStorageMutation<unknown, T>,
     ): Promise<T> {
-        return this.#request(store, "readwrite", (objectStore, complete, fail) => {
+        return this._request(store, "readwrite", (objectStore, complete, fail) => {
             const get = objectStore.get(key);
             get.onsuccess = () => {
                 let mutation: PsxStorageMutation<unknown, T>;
@@ -76,7 +110,15 @@ export default class IndexedDbDriver implements PsxStorageDriverLike {
         });
     }
 
-    async #open(): Promise<IDBDatabase> {
+    /**
+     *
+     * Private Methods
+     *
+     */
+
+    // METHOD :: VOID -> PROMISE(idbDatabase)
+    // Opens the database and creates all missing stores during schema upgrade.
+    private async _open(): Promise<IDBDatabase> {
         return new Promise((resolve, reject) => {
             let settled = false;
             let request: IDBOpenDBRequest;
@@ -86,7 +128,7 @@ export default class IndexedDbDriver implements PsxStorageDriverLike {
                 reject(storageFailed(message, data));
             };
             try {
-                request = this.#factory.open(this.#name, IndexedDbDriver.VERSION);
+                request = this._factory.open(this._name, IndexedDbDriver.VERSION);
             } catch (error) {
                 fail("IndexedDB open threw.", error);
                 return;
@@ -114,7 +156,10 @@ export default class IndexedDbDriver implements PsxStorageDriverLike {
         });
     }
 
-    async #request<T>(
+    // METHOD :: psxStorageStore, idbTransactionMode, (idbObjectStore, (T -> VOID), (UNKNOWN -> VOID) -> VOID) -> PROMISE(T)
+    // Runs one transaction and resolves only after both the operation and transaction complete.
+    // NOTE: <T> is the committed operation result.
+    private async _request<T>(
         store: PsxStorageStore,
         mode: IDBTransactionMode,
         operation: (
@@ -123,7 +168,7 @@ export default class IndexedDbDriver implements PsxStorageDriverLike {
             fail: (error: unknown) => void,
         ) => void,
     ): Promise<T> {
-        const database = await this.#open();
+        const database = await this._open();
         try {
             return await new Promise<T>((resolve, reject) => {
                 let settled = false;

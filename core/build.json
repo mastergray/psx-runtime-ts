@@ -33,6 +33,7 @@
     "maximumPages": 8192
   },
   "pthreads": false,
+  "sourceDateEpoch": 946684800,
   "makeArguments": [
     "-f",
     "Makefile.libretro",

@@ -10,7 +10,7 @@ const readJson = async (path: URL): Promise<unknown> =>
 const evidence = await readJson(new URL("../../docs/probes/m0-results.json", import.meta.url));
 const candidates = await readJson(new URL("../../core/probes/candidates.json", import.meta.url));
 const productionSource = await readJson(new URL("../../core/SOURCE.json", import.meta.url));
-const fixtureToolchain = await readJson(new URL("../../fixtures/homebrew/TOOLCHAIN.json", import.meta.url));
+const fixtureToolchain = await readJson(new URL("../fixtures/homebrew/TOOLCHAIN.json", import.meta.url));
 const emsdkVersion = (await readFile(
     new URL("../../core/EMSDK_VERSION", import.meta.url),
     "utf8",

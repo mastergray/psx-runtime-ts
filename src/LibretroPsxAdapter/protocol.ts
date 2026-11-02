@@ -34,6 +34,7 @@ export interface WorkerStartPayload {
     readonly memoryCards: Readonly<Record<ControllerPort, Uint8Array>>;
     readonly gameId: string;
     readonly region: PsxRegion;
+    readonly initialDiscIndex: number;
     readonly controllers: Readonly<Record<ControllerPort, PsxControllerType>>;
     readonly options: Readonly<Record<string, string | number | boolean>>;
 }
@@ -158,6 +159,9 @@ export function isWorkerStartPayload(value: unknown): value is WorkerStartPayloa
         && typeof value.bios.path === "string" && /^\/system\/[^/]+\.bin$/u.test(value.bios.path)
         && isBlobLike(value.bios.blob) && isMemoryCards(value.memoryCards)
         && isNonEmptyString(value.gameId) && isPsxRegion(value.region)
+        && typeof value.initialDiscIndex === "number"
+        && Number.isSafeInteger(value.initialDiscIndex) && value.initialDiscIndex >= 0
+        && value.initialDiscIndex < value.mountPlan.descriptors.filter(({ path }) => path.endsWith(".cue")).length
         && isControllerRecord(value.controllers) && isOptions(value.options);
 }
 

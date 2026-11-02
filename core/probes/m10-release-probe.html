@@ -1,0 +1,122 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>M10 release integration probe</title>
+<script type="importmap">{"imports":{"fflate":"/vendor/fflate.js"}}</script>
+<div id="stage" style="width:640px;height:480px"><canvas id="screen"></canvas></div>
+<script type="module">
+import {
+    LibretroPsxAdapter,
+    PsxConsole,
+    PsxGameStore,
+} from "../../dist/index.js";
+
+const databaseName = "psx-runtime-m10-probe";
+const deleteDatabase = () => new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(databaseName);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("probe database deletion blocked"));
+});
+
+const file = (name, blob) => {
+    const value = new File([blob], name);
+    Object.defineProperty(value, "webkitRelativePath", { value: name });
+    return value;
+};
+
+const frameHash = (frame) => {
+    let hash = 2166136261;
+    for (const byte of frame.rgba) {
+        hash ^= byte;
+        hash = Math.imul(hash, 16777619) >>> 0;
+    }
+    return hash;
+};
+
+const checkpoint = (player) => new Promise((resolve, reject) => {
+    const session = player.session;
+    if (session === null) {
+        reject(new Error("player has no session"));
+        return;
+    }
+    let unsubscribe = () => undefined;
+    unsubscribe = session.onFrame((frame) => {
+        unsubscribe();
+        resolve({
+            hash: frameHash(frame),
+            geometry: [frame.width, frame.height, frame.aspectRatio],
+            machine: session.machine,
+        });
+    });
+});
+
+const run = async () => {
+    let runtime = null;
+    try {
+        await deleteDatabase();
+        const [archive, bios] = await Promise.all([
+            fetch("/tests/fixtures/generated/m0/psx-runtime-diagnostics.zip")
+                .then((response) => response.blob()),
+            fetch("/private/bios").then((response) => response.blob()),
+        ]);
+        const files = [file("psx-runtime-diagnostics.zip", archive)];
+        const adapter = await LibretroPsxAdapter.init({ buildUrl: "/dist/core" });
+        const gameStore = PsxGameStore.init({ indexedDB, databaseName });
+        runtime = PsxConsole.init({
+            adapter,
+            canvas: document.querySelector("#screen"),
+            container: document.querySelector("#stage"),
+            gestureSource: document,
+            gameStore,
+        });
+        const start = {
+            bios: { name: "Firmware", region: "pal", blob: bios },
+            controllers: { 1: "digital", 2: "digital" },
+        };
+        await runtime.startFiles(files, { gameId: "Selected fixture" }, start);
+        const selected = await checkpoint(runtime.player);
+        await runtime.stop();
+        const library = await gameStore.list();
+        await runtime.startStored(library[0].gameId, start);
+        const stored = await checkpoint(runtime.player);
+        await runtime.stop();
+        const comparableMachine = (machine) => ({
+            ...machine,
+            geometry: { ...machine.geometry },
+            controllers: { ...machine.controllers },
+        });
+        const result = {
+            ok: library.length === 1
+                && selected.machine.discCount === 2
+                && selected.machine.gameId === library[0].gameId
+                && stored.machine.gameId === library[0].gameId
+                && selected.hash === stored.hash
+                && JSON.stringify(comparableMachine(selected.machine))
+                    === JSON.stringify(comparableMachine(stored.machine)),
+            gameId: library[0]?.gameId,
+            discCount: selected.machine.discCount,
+            frameHashes: [selected.hash, stored.hash],
+            geometry: [selected.geometry, stored.geometry],
+            machineEqual: JSON.stringify(comparableMachine(selected.machine))
+                === JSON.stringify(comparableMachine(stored.machine)),
+        };
+        await runtime.destroy();
+        runtime = null;
+        await gameStore.delete(library[0].gameId);
+        await deleteDatabase();
+        await fetch("/result", { method: "POST", body: JSON.stringify(result) });
+    } catch (error) {
+        try { await runtime?.destroy(); } catch {}
+        await fetch("/result", {
+            method: "POST",
+            body: JSON.stringify({
+                ok: false,
+                message: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : null,
+            }),
+        });
+    }
+};
+
+void run();
+</script>

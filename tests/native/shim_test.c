@@ -1,4 +1,5 @@
 #include "psx_frontend.h"
+#include "libretro.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -11,12 +12,26 @@ int fake_observed_axis(void);
 unsigned fake_unload_count(void);
 unsigned fake_deinit_count(void);
 unsigned fake_controller_count(void);
+unsigned fake_controller_before_load_count(void);
+unsigned fake_controller_device(unsigned port);
+unsigned fake_initial_image_count(void);
+const char *fake_initial_image_path(void);
 const char *fake_disc_trace(void);
 
 int main(void) {
-    assert(psx_start("/content/index/game.cue", "{}") == 1);
+    assert(psx_start(
+        "/content/index/game.cue",
+        "{\"controllers\":{\"1\":\"dualshock\",\"2\":\"digital\"},"
+        "\"initialDiscIndex\":1,\"initialDiscPath\":\"/content/index/disc-001.cue\"}"
+    ) == 1);
     assert(psx_start("/content/index/game.cue", "{}") == 0);
     assert(fake_controller_count() == 2);
+    assert(fake_controller_before_load_count() == 0);
+    assert(fake_controller_device(0) == (((1u + 1u) << 8) | RETRO_DEVICE_ANALOG));
+    assert(fake_controller_device(1) == RETRO_DEVICE_JOYPAD);
+    assert(fake_initial_image_count() == 1);
+    assert(strcmp(fake_initial_image_path(), "/content/index/disc-001.cue") == 0);
+    assert(psx_disc_index() == 1);
     assert(psx_frames_per_second() == 60.0);
     assert(psx_sample_rate() == 44100.0);
     assert(psx_aspect_ratio() == 2.0f);

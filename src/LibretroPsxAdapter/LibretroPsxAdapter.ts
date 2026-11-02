@@ -1,40 +1,46 @@
-import DiscSetAudit from "../DiscSetAudit/DiscSetAudit.js";
-import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";
+// Dependencies:
+import DiscSetAudit from "../DiscSetAudit/DiscSetAudit.js";              // Validates content and supplies resolved disc metadata
+import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";    // Reports unsupported browser, content, firmware, and core failures
 import {
-    isPsxBuildInfo,
-    isPsxStartConfig,
+    isPsxBuildInfo,      // Validates fetched immutable core-build metadata
+    isPsxStartConfig,    // Validates complete public startup input
 } from "../shared.types.js";
-import { createMountPlan } from "../worker/MountPlan.js";
-import PsxSession from "./PsxSession.js";
-import WorkerClient from "./WorkerClient.js";
+import { createMountPlan } from "../worker/MountPlan.js";    // Resolves audited content into worker mount instructions
+import PsxSession from "./PsxSession.js";                    // Wraps a started worker with the public session contract
+import WorkerClient from "./WorkerClient.js";                // Owns worker messaging, pacing, and response correlation
 import {
-    isLibretroPsxAdapterConfig,
-    isLibretroPsxAdapterInitConfig,
-    isPsxWorker,
+    isLibretroPsxAdapterConfig,        // Validates direct adapter construction dependencies
+    isLibretroPsxAdapterInitConfig,    // Validates high-level browser factory input
+    isPsxWorker,                       // Validates workers returned by an injected factory
 } from "./types.js";
 
+// Type dependencies:
 import type {
-    ControllerPort,
-    FrameScheduler,
-    PsxAdapter,
-    PsxControllerType,
-    PsxSession as PsxSessionContract,
-    PsxStartConfig,
+    ControllerPort,                    // Physical controller and memory-card slot
+    FrameScheduler,                    // Animation-frame boundary used for worker ticks
+    PsxAdapter,                        // Public adapter contract implemented by this class
+    PsxControllerType,                 // Supported digital or DualShock port mode
+    PsxSession as PsxSessionContract,  // Public session contract returned by start()
+    PsxStartConfig,                    // Firmware, content, controller, card, and option input
 } from "../shared.types.js";
-import type { WorkerStartPayload } from "./protocol.js";
+import type { WorkerStartPayload } from "./protocol.js";    // Fully resolved startup request sent to the core worker
 import type {
-    LibretroPsxAdapterConfig,
-    LibretroPsxAdapterInitConfig,
-    PsxClock,
-    WorkerFactory,
+    LibretroPsxAdapterConfig,        // Validated build and injected browser dependencies
+    LibretroPsxAdapterInitConfig,    // Build URL and optional browser overrides
+    PsxClock,                        // Monotonic pacing clock
+    WorkerFactory,                   // Module-worker construction boundary
 } from "./types.js";
 
-const CARD_BYTES = 128 * 1024;
-const REQUIRED_ARTIFACTS = ["psx-core.js", "psx-core.wasm", "core.worker.js"] as const;
+const CARD_BYTES = 128 * 1024;    // Physical PlayStation memory-card byte length
+const REQUIRED_ARTIFACTS = ["psx-core.js", "psx-core.wasm", "core.worker.js"] as const; // Build files required by this adapter
 
+// METHOD :: UNKNOWN, STRING? -> psxRuntimeError
+// Creates one invalid adapter, build, or startup configuration error.
 const invalid = (data: unknown, message = "LibretroPsxAdapter configuration is invalid."): PsxRuntimeError =>
     new PsxRuntimeError({ code: PsxRuntimeError.CODE.INVALID_CONFIG, message, data });
 
+// METHOD :: STRING, STRING -> STRING
+// Resolves one build-relative artifact across URL and path-based deployments.
 const resolveBuildUrl = (buildUrl: string, relative: string): string => {
     if (/^[a-z][a-z\d+.-]*:/iu.test(relative) || relative.startsWith("//") || relative.startsWith("/")) return relative;
     const root = buildUrl.endsWith("/") ? buildUrl : `${buildUrl}/`;
@@ -42,6 +48,8 @@ const resolveBuildUrl = (buildUrl: string, relative: string): string => {
     return `${root}${relative.replace(/^\.\//u, "")}`;
 };
 
+// METHOD :: VOID -> frameScheduler
+// Returns validated browser animation-frame scheduling operations.
 const browserScheduler = (): FrameScheduler => {
     if (typeof globalThis.requestAnimationFrame !== "function"
         || typeof globalThis.cancelAnimationFrame !== "function") {
@@ -56,6 +64,8 @@ const browserScheduler = (): FrameScheduler => {
     };
 };
 
+// METHOD :: VOID -> psxClock
+// Returns the validated browser monotonic clock.
 const browserClock = (): PsxClock => {
     if (typeof globalThis.performance?.now !== "function") throw new PsxRuntimeError({
         code: PsxRuntimeError.CODE.UNSUPPORTED,
@@ -64,6 +74,8 @@ const browserClock = (): PsxClock => {
     return globalThis.performance.now.bind(globalThis.performance);
 };
 
+// METHOD :: VOID -> workerFactory
+// Returns a module-worker factory backed by the browser Worker API.
 const browserWorkerFactory = (): WorkerFactory => (url) => {
     if (typeof globalThis.Worker !== "function") throw new PsxRuntimeError({
         code: PsxRuntimeError.CODE.UNSUPPORTED,
@@ -72,6 +84,8 @@ const browserWorkerFactory = (): WorkerFactory => (url) => {
     return new globalThis.Worker(url, { type: "module" });
 };
 
+// METHOD :: VOID -> (requestInfo, requestInit? -> PROMISE(response))
+// Returns the browser fetch operation or reports missing platform support.
 const browserFetch = (): typeof globalThis.fetch => {
     if (typeof globalThis.fetch !== "function") throw new PsxRuntimeError({
         code: PsxRuntimeError.CODE.UNSUPPORTED,
@@ -80,6 +94,8 @@ const browserFetch = (): typeof globalThis.fetch => {
     return globalThis.fetch.bind(globalThis);
 };
 
+// METHOD :: blob -> PROMISE(STRING)
+// Reads and hashes one firmware blob with browser Web Crypto.
 const sha256 = async (blob: Blob): Promise<string> => {
     if (typeof globalThis.crypto?.subtle?.digest !== "function") throw new PsxRuntimeError({
         code: PsxRuntimeError.CODE.UNSUPPORTED,
@@ -99,6 +115,8 @@ const sha256 = async (blob: Blob): Promise<string> => {
     return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 };
 
+// METHOD :: VOID -> uint8Array
+// Creates a freshly formatted blank PlayStation memory-card image.
 const blankMemoryCard = (): Uint8Array => {
     const bytes = new Uint8Array(CARD_BYTES);
     bytes[0] = 0x4d;
@@ -116,6 +134,8 @@ const blankMemoryCard = (): Uint8Array => {
     return bytes;
 };
 
+// METHOD :: psxStartConfig, [psxControllerType] -> ARRAY<controllerPort, psxControllerType>
+// Applies digital defaults and rejects controller modes unsupported by the build.
 const normalizedControllers = (
     config: PsxStartConfig,
     supported: ReadonlyArray<PsxControllerType>,
@@ -134,6 +154,8 @@ const normalizedControllers = (
     return controllers;
 };
 
+// METHOD :: psxStartConfig -> ARRAY<controllerPort, uint8Array>
+// Copies supplied card images or creates blank formatted cards for both slots.
 const normalizedCards = (
     config: PsxStartConfig,
 ): Readonly<Record<ControllerPort, Uint8Array>> => ({
@@ -141,32 +163,159 @@ const normalizedCards = (
     2: config.memoryCards?.[2]?.slice() ?? blankMemoryCard(),
 });
 
-export default class LibretroPsxAdapter implements PsxAdapter {
-    readonly type = "libretro-psx" as const;
-    readonly #buildUrl: string;
-    readonly #build: LibretroPsxAdapterConfig["build"];
-    readonly #createWorker: WorkerFactory;
-    readonly #scheduler?: FrameScheduler;
-    readonly #clock?: PsxClock;
-    #generation = 0;
+/**
+ *
+ * Class
+ *
+ */
 
+// Validates browser startup input and launches libretro-backed PSX worker sessions.
+export default class LibretroPsxAdapter implements PsxAdapter {
+
+    /* Instance Fields */
+    readonly type = "libretro-psx" as const;                              // Stable adapter discriminant exposed through the public contract
+    private readonly _buildUrl: string;                                   // Root URL used to resolve worker and module artifacts
+    private readonly _build: LibretroPsxAdapterConfig["build"];           // Validated immutable core capabilities and identity
+    private readonly _createWorker: WorkerFactory;                         // Module-worker construction boundary
+    private readonly _scheduler?: FrameScheduler;                          // Optional injected animation-frame boundary
+    private readonly _clock?: PsxClock;                                    // Optional injected monotonic pacing clock
+    private _generation = 0;                                               // Monotonic worker generation used to reject stale events
+
+    // CONSTRUCTOR :: libretroPsxAdapterConfig -> libretroPsxAdapter
+    // Validates build artifacts and retains runtime browser dependencies.
     constructor(config: LibretroPsxAdapterConfig) {
         if (!isLibretroPsxAdapterConfig(config)) throw invalid(config);
         if (config.build.adapter !== "libretro-psx"
             || !REQUIRED_ARTIFACTS.every((artifact) => config.build.artifacts.includes(artifact))) {
             throw invalid(config.build, "build.json does not describe the required PlayStation artifacts.");
         }
-        this.#buildUrl = config.buildUrl;
-        this.#build = config.build;
-        this.#createWorker = config.createWorker;
-        this.#scheduler = config.scheduler;
-        this.#clock = config.clock;
+        this._buildUrl = config.buildUrl;
+        this._build = config.build;
+        this._createWorker = config.createWorker;
+        this._scheduler = config.scheduler;
+        this._clock = config.clock;
     }
 
+    /**
+     *
+     * Properties
+     *
+     */
+
+    // GETTER :: VOID -> psxBuildInfo
+    // Returns validated immutable core-build metadata.
     get build(): LibretroPsxAdapterConfig["build"] {
-        return this.#build;
+        return this._build;
     }
 
+    /**
+     *
+     * Instance Methods
+     *
+     */
+
+    // METHOD :: psxStartConfig -> PROMISE(psxSession)
+    // Audits content and firmware, starts a worker, and returns a restartable session.
+    async start(config: PsxStartConfig): Promise<PsxSessionContract> {
+        if (!isPsxStartConfig(config)) throw invalid(config, "PlayStation start configuration is invalid.");
+        const audit = await DiscSetAudit.audit(config.game);
+        if (!audit.ok) throw new PsxRuntimeError({
+            code: PsxRuntimeError.CODE.DISC_SET_INVALID,
+            message: "The PlayStation disc set failed validation.",
+            data: audit,
+        });
+        const entryType = audit.audit.entry.toLowerCase().endsWith(".m3u") ? "m3u" : "cue";
+        if (!this._build.supportedContent.includes(entryType)) throw new PsxRuntimeError({
+            code: PsxRuntimeError.CODE.UNSUPPORTED,
+            message: "The selected core build does not support the disc-set entry type.",
+            data: entryType,
+        });
+        if (!this._build.firmware.byteLengths.includes(config.bios.blob.size)) throw new PsxRuntimeError({
+            code: PsxRuntimeError.CODE.BIOS_INVALID,
+            message: "The BIOS image has an unsupported byte length.",
+            data: config.bios.blob.size,
+        });
+        const biosHash = await sha256(config.bios.blob);
+        if (config.bios.sha256 !== undefined && biosHash !== config.bios.sha256) throw new PsxRuntimeError({
+            code: PsxRuntimeError.CODE.BIOS_INVALID,
+            message: "The BIOS image does not match its declared SHA-256 digest.",
+            data: null,
+        });
+        if (config.options !== undefined && Object.keys(config.options).length > 0) throw new PsxRuntimeError({
+            code: PsxRuntimeError.CODE.UNSUPPORTED,
+            message: "This v1 core build exposes no caller-selectable core options.",
+            data: Object.keys(config.options),
+        });
+        const initialDiscIndex = config.initialDiscIndex ?? 0;
+        if (initialDiscIndex >= audit.audit.discs.length) throw new PsxRuntimeError({
+            code: PsxRuntimeError.CODE.INVALID_CONFIG,
+            message: "The initial disc index is outside the audited disc set.",
+            data: initialDiscIndex,
+        });
+
+        const controllers = normalizedControllers(config, this._build.controllerTypes);
+        const initialCards = normalizedCards(config);
+        const mountPlan = await createMountPlan(config.game, audit.audit);
+        const scheduler = this._scheduler ?? browserScheduler();
+        const clock = this._clock ?? browserClock();
+        const workerUrl = resolveBuildUrl(this._buildUrl, "core.worker.js");
+        const moduleUrl = resolveBuildUrl(this._buildUrl, "psx-core.js");
+        const biosPath = `/system/${this._build.firmware.systemFilenames[config.bios.region]}`;
+
+        const startWorker = async (
+            cards: Readonly<Record<ControllerPort, Uint8Array>>,
+        ): Promise<{
+            client: WorkerClient;
+            machine: Awaited<ReturnType<WorkerClient["start"]>>;
+            discIndex: number;
+        }> => {
+            const worker = this._createWorker(workerUrl);
+            if (!isPsxWorker(worker)) throw new PsxRuntimeError({
+                code: PsxRuntimeError.CODE.CORE_LOAD_FAILED,
+                message: "The Worker factory returned an invalid Worker boundary.",
+            });
+            const client = new WorkerClient(worker, scheduler, clock, ++this._generation);
+            const payload: WorkerStartPayload = {
+                contentPath: mountPlan.entryPath,
+                moduleUrl,
+                build: this._build,
+                mountPlan,
+                bios: { path: biosPath, blob: config.bios.blob },
+                memoryCards: { 1: cards[1].slice(), 2: cards[2].slice() },
+                gameId: config.game.gameId,
+                region: config.bios.region,
+                initialDiscIndex,
+                controllers,
+                options: config.options ?? {},
+            };
+            try {
+                const machine = await client.start(payload);
+                if (machine.buildId !== this._build.buildId || machine.gameId !== config.game.gameId
+                    || machine.discCount !== audit.audit.discs.length || machine.firmware !== "bios") {
+                    throw new PsxRuntimeError({
+                        code: PsxRuntimeError.CODE.CORE_START_FAILED,
+                        message: "The running core reported incompatible machine metadata.",
+                    });
+                }
+                return { client, machine, discIndex: initialDiscIndex };
+            } catch (error) {
+                client.terminate();
+                throw error;
+            }
+        };
+
+        const worker = await startWorker(initialCards);
+        return new PsxSession(worker, startWorker);
+    }
+
+    /**
+     *
+     * Static Methods
+     *
+     */
+
+    // Static Factory Method :: libretroPsxAdapterInitConfig -> PROMISE(libretroPsxAdapter)
+    // Fetches and validates build metadata before creating a browser adapter.
     static async init(config: LibretroPsxAdapterInitConfig): Promise<LibretroPsxAdapter> {
         if (!isLibretroPsxAdapterInitConfig(config)) throw invalid(config);
         const fetcher = config.fetch ?? browserFetch();
@@ -208,86 +357,5 @@ export default class LibretroPsxAdapter implements PsxAdapter {
             ...(config.scheduler === undefined ? {} : { scheduler: config.scheduler }),
             ...(config.clock === undefined ? {} : { clock: config.clock }),
         });
-    }
-
-    async start(config: PsxStartConfig): Promise<PsxSessionContract> {
-        if (!isPsxStartConfig(config)) throw invalid(config, "PlayStation start configuration is invalid.");
-        const audit = await DiscSetAudit.audit(config.game);
-        if (!audit.ok) throw new PsxRuntimeError({
-            code: PsxRuntimeError.CODE.DISC_SET_INVALID,
-            message: "The PlayStation disc set failed validation.",
-            data: audit,
-        });
-        const entryType = audit.audit.entry.toLowerCase().endsWith(".m3u") ? "m3u" : "cue";
-        if (!this.#build.supportedContent.includes(entryType)) throw new PsxRuntimeError({
-            code: PsxRuntimeError.CODE.UNSUPPORTED,
-            message: "The selected core build does not support the disc-set entry type.",
-            data: entryType,
-        });
-        if (!this.#build.firmware.byteLengths.includes(config.bios.blob.size)) throw new PsxRuntimeError({
-            code: PsxRuntimeError.CODE.BIOS_INVALID,
-            message: "The BIOS image has an unsupported byte length.",
-            data: config.bios.blob.size,
-        });
-        const biosHash = await sha256(config.bios.blob);
-        if (config.bios.sha256 !== undefined && biosHash !== config.bios.sha256) throw new PsxRuntimeError({
-            code: PsxRuntimeError.CODE.BIOS_INVALID,
-            message: "The BIOS image does not match its declared SHA-256 digest.",
-            data: null,
-        });
-        if (config.options !== undefined && Object.keys(config.options).length > 0) throw new PsxRuntimeError({
-            code: PsxRuntimeError.CODE.UNSUPPORTED,
-            message: "This v1 core build exposes no caller-selectable core options.",
-            data: Object.keys(config.options),
-        });
-
-        const controllers = normalizedControllers(config, this.#build.controllerTypes);
-        const initialCards = normalizedCards(config);
-        const mountPlan = await createMountPlan(config.game, audit.audit);
-        const scheduler = this.#scheduler ?? browserScheduler();
-        const clock = this.#clock ?? browserClock();
-        const workerUrl = resolveBuildUrl(this.#buildUrl, "core.worker.js");
-        const moduleUrl = resolveBuildUrl(this.#buildUrl, "psx-core.js");
-        const biosPath = `/system/${this.#build.firmware.systemFilenames[config.bios.region]}`;
-
-        const startWorker = async (
-            cards: Readonly<Record<ControllerPort, Uint8Array>>,
-        ): Promise<{ client: WorkerClient; machine: Awaited<ReturnType<WorkerClient["start"]>> }> => {
-            const worker = this.#createWorker(workerUrl);
-            if (!isPsxWorker(worker)) throw new PsxRuntimeError({
-                code: PsxRuntimeError.CODE.CORE_LOAD_FAILED,
-                message: "The Worker factory returned an invalid Worker boundary.",
-            });
-            const client = new WorkerClient(worker, scheduler, clock, ++this.#generation);
-            const payload: WorkerStartPayload = {
-                contentPath: mountPlan.entryPath,
-                moduleUrl,
-                build: this.#build,
-                mountPlan,
-                bios: { path: biosPath, blob: config.bios.blob },
-                memoryCards: { 1: cards[1].slice(), 2: cards[2].slice() },
-                gameId: config.game.gameId,
-                region: config.bios.region,
-                controllers,
-                options: config.options ?? {},
-            };
-            try {
-                const machine = await client.start(payload);
-                if (machine.buildId !== this.#build.buildId || machine.gameId !== config.game.gameId
-                    || machine.discCount !== audit.audit.discs.length || machine.firmware !== "bios") {
-                    throw new PsxRuntimeError({
-                        code: PsxRuntimeError.CODE.CORE_START_FAILED,
-                        message: "The running core reported incompatible machine metadata.",
-                    });
-                }
-                return { client, machine };
-            } catch (error) {
-                client.terminate();
-                throw error;
-            }
-        };
-
-        const worker = await startWorker(initialCards);
-        return new PsxSession(worker, startWorker);
     }
 }

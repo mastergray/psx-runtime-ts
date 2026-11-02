@@ -1,58 +1,92 @@
-import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";
+// Dependencies:
+import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";    // Normalizes IndexedDB failures into stable storage errors
 
-import type { PsxGameStoreDriverLike } from "./types.js";
+// Type dependencies:
+import type { PsxGameStoreDriverLike } from "./types.js";              // Storage-driver contract implemented for game records
 
-const STORE = "games";
+const STORE = "games";                                                 // IndexedDB object store containing complete game records
 
+// METHOD :: STRING, UNKNOWN -> psxRuntimeError
+// Creates a stable storage failure for an IndexedDB boundary error.
 const failed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
     code: PsxRuntimeError.CODE.STORAGE_FAILED,
     message,
     data,
 });
 
-export default class IndexedDbGameDriver implements PsxGameStoreDriverLike {
-    static readonly VERSION = 1;
-    readonly #factory: IDBFactory;
-    readonly #name: string;
+/**
+ *
+ * Class
+ *
+ */
 
+// Persists complete game-library records in one dedicated IndexedDB store.
+export default class IndexedDbGameDriver implements PsxGameStoreDriverLike {
+
+    /* Static Fields */
+    static readonly VERSION = 1;                    // Database schema version owned by this driver
+
+    /* Instance Fields */
+    private readonly _factory: IDBFactory;          // Browser factory used to open the configured database
+    private readonly _name: string;                 // Database name isolating this game library
+
+    // CONSTRUCTOR :: idbFactory, STRING -> indexedDbGameDriver
+    // Creates a driver for one named IndexedDB database.
     constructor(factory: IDBFactory, name: string) {
-        this.#factory = factory;
-        this.#name = name;
+        this._factory = factory;
+        this._name = name;
     }
 
+    /**
+     *
+     * Instance Methods
+     *
+     */
+
+    // METHOD :: STRING -> PROMISE(UNKNOWN)
+    // Reads one stored game record by exact content identity.
     read(gameId: string): Promise<unknown> {
-        return this.#request("readonly", (store, complete) => {
+        return this._request("readonly", (store, complete) => {
             const request = store.get(gameId);
             request.onsuccess = () => complete(request.result);
         });
     }
 
+    // METHOD :: VOID -> PROMISE([UNKNOWN])
+    // Lists every stored game record.
     list(): Promise<ReadonlyArray<unknown>> {
-        return this.#request("readonly", (store, complete) => {
+        return this._request("readonly", (store, complete) => {
             const request = store.getAll();
             request.onsuccess = () => complete(request.result);
         });
     }
 
+    // METHOD :: STRING, UNKNOWN -> PROMISE(VOID)
+    // Replaces one stored game record atomically.
     async write(gameId: string, value: unknown): Promise<void> {
-        await this.#request("readwrite", (store, complete) => {
+        await this._request("readwrite", (store, complete) => {
             const request = store.put(value, gameId);
             request.onsuccess = () => complete(undefined);
         });
     }
 
+    // METHOD :: STRING -> PROMISE(VOID)
+    // Removes one stored game record by exact identity.
     async remove(gameId: string): Promise<void> {
-        await this.#request("readwrite", (store, complete) => {
+        await this._request("readwrite", (store, complete) => {
             const request = store.delete(gameId);
             request.onsuccess = () => complete(undefined);
         });
     }
 
+    // METHOD :: STRING, (UNKNOWN -> {value:UNKNOWN, result:T}) -> PROMISE(T)
+    // Atomically derives and stores a new record from the current value.
+    // NOTE: <T> is the caller-defined mutation result returned after commit.
     update<T>(gameId: string, updater: (current: unknown) => {
         readonly value: unknown;
         readonly result: T;
     }): Promise<T> {
-        return this.#request("readwrite", (store, complete, fail) => {
+        return this._request("readwrite", (store, complete, fail) => {
             const read = store.get(gameId);
             read.onsuccess = () => {
                 let mutation: { readonly value: unknown; readonly result: T };
@@ -68,7 +102,15 @@ export default class IndexedDbGameDriver implements PsxGameStoreDriverLike {
         });
     }
 
-    async #open(): Promise<IDBDatabase> {
+    /**
+     *
+     * Private Methods
+     *
+     */
+
+    // METHOD :: VOID -> PROMISE(idbDatabase)
+    // Opens the database and creates the game store during schema upgrade.
+    private async _open(): Promise<IDBDatabase> {
         return new Promise((resolve, reject) => {
             let settled = false;
             let request: IDBOpenDBRequest;
@@ -78,7 +120,7 @@ export default class IndexedDbGameDriver implements PsxGameStoreDriverLike {
                 reject(failed(message, data));
             };
             try {
-                request = this.#factory.open(this.#name, IndexedDbGameDriver.VERSION);
+                request = this._factory.open(this._name, IndexedDbGameDriver.VERSION);
             } catch (error) {
                 rejectOnce("IndexedDB game-library open threw.", error);
                 return;
@@ -106,12 +148,15 @@ export default class IndexedDbGameDriver implements PsxGameStoreDriverLike {
         });
     }
 
-    async #request<T>(mode: IDBTransactionMode, operation: (
+    // METHOD :: idbTransactionMode, (idbObjectStore, (T -> VOID), (UNKNOWN -> VOID) -> VOID) -> PROMISE(T)
+    // Runs one transaction and resolves only after both the operation and transaction complete.
+    // NOTE: <T> is the committed operation result.
+    private async _request<T>(mode: IDBTransactionMode, operation: (
         store: IDBObjectStore,
         complete: (result: T) => void,
         fail: (error: unknown) => void,
     ) => void): Promise<T> {
-        const database = await this.#open();
+        const database = await this._open();
         try {
             return await new Promise<T>((resolve, reject) => {
                 let settled = false;
