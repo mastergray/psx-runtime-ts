@@ -8,6 +8,7 @@ import TransferBufferPool from "../../src/worker/TransferBufferPool.ts";
 import WorkerEndpoint from "../../src/worker/WorkerEndpoint.ts";
 import WorkerRuntime from "../../src/worker/WorkerRuntime.ts";
 import { convertAudioSamples, convertVideoFrame } from "../../src/worker/av.ts";
+import { LIBRETRO_BUTTON_IDS } from "../../src/worker/CoreBridge.ts";
 
 import type {
     WorkerCommand,
@@ -167,6 +168,17 @@ const frameOf = (outputs: WorkerOutput[]): Extract<WorkerOutput, { type: "frame"
 const testFile: TestFile = {
     label: "M2 Worker foundation",
     cases: [
+        {
+            label: "the worker bridge maps PlayStation face buttons to their libretro positions",
+            run: () => CTGTest.init("libretro face buttons")
+                .assert("button identifiers", () => ({
+                    cross: LIBRETRO_BUTTON_IDS.cross,
+                    square: LIBRETRO_BUTTON_IDS.square,
+                    circle: LIBRETRO_BUTTON_IDS.circle,
+                    triangle: LIBRETRO_BUTTON_IDS.triangle,
+                }), P.equals<unknown>({ cross: 0, square: 1, circle: 8, triangle: 9 }))
+                .start(undefined),
+        },
         {
             label: "the protocol rejects malformed envelopes and validates every output family",
             run: () => CTGTest.init("protocol")

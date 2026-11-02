@@ -135,7 +135,14 @@ let pendingDiscCount: number | null = null;
 let pendingStoredGameId: string | null = null;
 let screenMessageRevision = 0;
 let generatedGameTitle = "";
-const gamepadAssignments: Record<ControllerPort, number | null> = { 1: 0, 2: 1 };
+
+interface GamepadAssignment {
+    readonly index: number;
+    readonly id: string;
+}
+
+const gamepadAssignments: Record<ControllerPort, GamepadAssignment | null> = { 1: null, 2: null };
+const gamepadPortPreferences: Record<string, ControllerPort> = Object.create(null) as Record<string, ControllerPort>;
 const gamepadButtonMaps: Record<string, GamepadButtonMap> = Object.create(null) as Record<string, GamepadButtonMap>;
 const leftStickDpad: Record<ControllerPort, boolean> = { 1: false, 2: false };
 
@@ -188,6 +195,7 @@ interface StoredControlProfile {
     readonly version: 1;
     readonly keyboard: KeyboardMap;
     readonly gamepads: GamepadButtonMaps;
+    readonly gamepadPorts?: Readonly<Record<string, ControllerPort>>;
     readonly leftStickDpad?: Readonly<Record<ControllerPort, boolean>>;
 }
 
@@ -206,6 +214,12 @@ const isStoredLeftStickDpad = (value: unknown): value is Readonly<Record<Control
         && typeof map[1] === "boolean" && typeof map[2] === "boolean";
 };
 
+const isStoredGamepadPorts = (value: unknown): value is Readonly<Record<string, ControllerPort>> => {
+    const map = record(value);
+    return map !== null && Object.entries(map).every(([id, port]) => id.trim().length > 0
+        && (port === 1 || port === 2));
+};
+
 const loadControlProfile = (): ControlProfileLoadStatus => {
     let source: string | null;
     try {
@@ -218,11 +232,16 @@ const loadControlProfile = (): ControlProfileLoadStatus => {
         const profile = record(JSON.parse(source));
         if (profile?.version !== 1 || !isKeyboardMap(profile.keyboard)
             || !isGamepadButtonMaps(profile.gamepads)
+            || (profile.gamepadPorts !== undefined
+                && !isStoredGamepadPorts(profile.gamepadPorts))
             || (profile.leftStickDpad !== undefined
                 && !isStoredLeftStickDpad(profile.leftStickDpad))) return "invalid";
         keyboardMap = frozenKeyboardMap(profile.keyboard);
         for (const [id, map] of Object.entries(profile.gamepads)) {
             gamepadButtonMaps[id] = Object.freeze({ ...map });
+        }
+        if (isStoredGamepadPorts(profile.gamepadPorts)) {
+            Object.assign(gamepadPortPreferences, profile.gamepadPorts);
         }
         if (isStoredLeftStickDpad(profile.leftStickDpad)) {
             leftStickDpad[1] = profile.leftStickDpad[1];
@@ -239,6 +258,7 @@ const persistControlProfile = (): boolean => {
         version: 1,
         keyboard: keyboardMap,
         gamepads: gamepadButtonMaps,
+        gamepadPorts: gamepadPortPreferences,
         leftStickDpad: { ...leftStickDpad },
     };
     try {
@@ -311,11 +331,69 @@ const gamepadButtonLabel = (index: number | null): string => index === null
 const keyboardCodeFor = (port: ControllerPort, button: PsxButton): string | null =>
     Object.entries(keyboardMap).find(([, control]) => control.port === port && control.button === button)?.[0] ?? null;
 
+const sameGamepadAssignment = (
+    left: GamepadAssignment | null,
+    right: GamepadAssignment | null,
+): boolean => left?.index === right?.index && left?.id === right?.id;
+
+const applyGamepadAssignments = (
+    next: Readonly<Record<ControllerPort, GamepadAssignment | null>>,
+): void => {
+    const previous: Readonly<Record<ControllerPort, GamepadAssignment | null>> = {
+        1: gamepadAssignments[1],
+        2: gamepadAssignments[2],
+    };
+    for (const port of [1, 2] as const) {
+        const assignment = previous[port];
+        if (!sameGamepadAssignment(assignment, next[port]) && assignment !== null) {
+            runtime?.bindGamepad(assignment.index, null);
+        }
+    }
+    for (const port of [1, 2] as const) gamepadAssignments[port] = next[port];
+    for (const port of [1, 2] as const) {
+        const assignment = next[port];
+        if (!sameGamepadAssignment(previous[port], assignment) && assignment !== null) {
+            runtime?.bindGamepad(assignment.index, port);
+        }
+    }
+};
+
+const syncGamepadAssignments = (): void => {
+    const pads = connectedStandardGamepads();
+    const next: Record<ControllerPort, GamepadAssignment | null> = { 1: null, 2: null };
+    const claimedIndices = new Set<number>();
+    for (const pad of pads) {
+        const preferredPort = gamepadPortPreferences[pad.id];
+        if (preferredPort === undefined || next[preferredPort] !== null) continue;
+        next[preferredPort] = { index: pad.index, id: pad.id };
+        claimedIndices.add(pad.index);
+    }
+    for (const port of [1, 2] as const) {
+        const current = gamepadAssignments[port];
+        if (next[port] !== null || current === null || claimedIndices.has(current.index)) continue;
+        const pad = pads.find((candidate) => candidate.index === current.index && candidate.id === current.id);
+        if (pad === undefined) continue;
+        next[port] = current;
+        claimedIndices.add(current.index);
+    }
+    for (const pad of pads) {
+        if (claimedIndices.has(pad.index)) continue;
+        const port = ([1, 2] as const).find((candidate) => next[candidate] === null);
+        if (port === undefined) break;
+        next[port] = { index: pad.index, id: pad.id };
+        claimedIndices.add(pad.index);
+    }
+    const changed = ([1, 2] as const).some((port) => !sameGamepadAssignment(gamepadAssignments[port], next[port]));
+    if (!changed) return;
+    applyGamepadAssignments(next);
+    renderBindings();
+};
+
 const assignedPad = (port: ControllerPort): Gamepad | null => {
-    const index = gamepadAssignments[port];
-    if (index === null) return null;
-    const pad = navigator.getGamepads()[index] ?? null;
-    return pad !== null && pad.connected && pad.mapping === "standard" ? pad : null;
+    const assignment = gamepadAssignments[port];
+    if (assignment === null) return null;
+    const pad = navigator.getGamepads()[assignment.index] ?? null;
+    return pad !== null && pad.connected && pad.mapping === "standard" && pad.id === assignment.id ? pad : null;
 };
 
 const gamepadButtonFor = (padId: string | null, button: PsxButton): number | null => {
@@ -382,13 +460,22 @@ const finishBindingCapture = (message?: string): void => {
     if (message !== undefined) bindingStatuses[capture.port].textContent = message;
 };
 
-const assignGamepadToPort = (port: ControllerPort, index: number): void => {
-    const previous = gamepadAssignments[port];
+const assignGamepadToPort = (port: ControllerPort, pad: Gamepad): void => {
     const otherPort: ControllerPort = port === 1 ? 2 : 1;
-    const changed = previous !== index || gamepadAssignments[otherPort] === index;
-    if (gamepadAssignments[otherPort] === index) gamepadAssignments[otherPort] = null;
-    gamepadAssignments[port] = index;
-    if (changed) runtime?.bindGamepad(index, port);
+    const previous = gamepadAssignments[port];
+    const other = gamepadAssignments[otherPort];
+    const selected = { index: pad.index, id: pad.id };
+    const selectedWasOther = other?.index === pad.index && other.id === pad.id;
+    const next: Record<ControllerPort, GamepadAssignment | null> = {
+        1: gamepadAssignments[1],
+        2: gamepadAssignments[2],
+    };
+    next[port] = selected;
+    if (selectedWasOther) next[otherPort] = previous;
+    gamepadPortPreferences[pad.id] = port;
+    if (selectedWasOther && previous !== null) gamepadPortPreferences[previous.id] = otherPort;
+    applyGamepadAssignments(next);
+    renderBindings();
 };
 
 const moveKeyboardBinding = (port: ControllerPort, button: PsxButton, code: string): void => {
@@ -410,7 +497,7 @@ const moveGamepadBinding = (port: ControllerPort, button: PsxButton, pad: Gamepa
     next[button] = index;
     gamepadButtonMaps[pad.id] = Object.freeze(next);
     runtime?.setGamepadButtonMap(pad.id, gamepadButtonMaps[pad.id]!);
-    assignGamepadToPort(port, pad.index);
+    assignGamepadToPort(port, pad);
     persistControlProfile();
     finishBindingCapture(`${gamepadButtonLabel(index)} on ${gamepadName(pad)} assigned to ${CONTROL_DEFINITIONS.find((control) => control.button === button)!.label}.`);
 };
@@ -424,6 +511,9 @@ const restoreDefaultBindings = (): void => {
         delete gamepadButtonMaps[id];
         runtime?.setGamepadButtonMap(id, null);
     }
+    for (const id of Object.keys(gamepadPortPreferences)) delete gamepadPortPreferences[id];
+    applyGamepadAssignments({ 1: null, 2: null });
+    syncGamepadAssignments();
     for (const port of [1, 2] as const) {
         leftStickDpad[port] = false;
         runtime?.setLeftStickDpad(port, false);
@@ -626,8 +716,8 @@ window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") finishBindingCapture("Binding change cancelled.");
     else if (event.code.length > 0) moveKeyboardBinding(capture.port, capture.button, event.code);
 }, true);
-window.addEventListener("gamepadconnected", renderBindings);
-window.addEventListener("gamepaddisconnected", renderBindings);
+window.addEventListener("gamepadconnected", syncGamepadAssignments);
+window.addEventListener("gamepaddisconnected", syncGamepadAssignments);
 for (const port of [1, 2] as const) {
     leftStickDpadInputs[port].addEventListener("change", () => {
         const enabled = leftStickDpadInputs[port].checked;
@@ -859,9 +949,10 @@ const ensureRuntime = async (): Promise<PsxConsole> => {
         },
         gameStore,
     });
+    syncGamepadAssignments();
     for (const port of [1, 2] as const) {
-        const index = gamepadAssignments[port];
-        if (index !== null) runtime.bindGamepad(index, port);
+        const assignment = gamepadAssignments[port];
+        if (assignment !== null) runtime.bindGamepad(assignment.index, port);
     }
     player = runtime.player as PsxPlayer;
     player.on("status", (status) => {
@@ -1258,6 +1349,7 @@ controlStorageStatus.textContent = controlProfileLoadStatus === "loaded"
 renderFirmwareStatus();
 initializeBindingTables();
 selectControllerTab(1);
+syncGamepadAssignments();
 renderBindings();
 void initialize().catch(report);
 requestAnimationFrame(updateDiagnostics);

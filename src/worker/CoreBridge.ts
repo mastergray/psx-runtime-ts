@@ -89,8 +89,8 @@ export type EmscriptenPsxFactory = (
 // Injectable dynamic-import boundary for generated module code.
 export type CoreModuleLoader = (url: string) => Promise<EmscriptenPsxFactory>;
 
-const BUTTON_IDS: Readonly<Record<PsxButton, number>> = {    // Public button names to libretro joypad identifiers
-    circle: 0,
+export const LIBRETRO_BUTTON_IDS: Readonly<Record<PsxButton, number>> = { // Public button names to libretro joypad identifiers
+    cross: 0,
     square: 1,
     select: 2,
     start: 3,
@@ -98,7 +98,7 @@ const BUTTON_IDS: Readonly<Record<PsxButton, number>> = {    // Public button na
     down: 5,
     left: 6,
     right: 7,
-    cross: 8,
+    circle: 8,
     triangle: 9,
     l1: 10,
     r1: 11,
@@ -266,7 +266,7 @@ export default class EmscriptenPsxCore implements WorkerCore {
     // METHOD :: controllerPort, psxButton, BOOLEAN -> VOID
     // Converts and forwards one digital controller state.
     setButton(port: ControllerPort, button: PsxButton, pressed: boolean): void {
-        this._liveModule()._psx_set_button(port - 1, BUTTON_IDS[button], pressed ? 1 : 0);
+        this._liveModule()._psx_set_button(port - 1, LIBRETRO_BUTTON_IDS[button], pressed ? 1 : 0);
     }
 
     // METHOD :: controllerPort, psxAxis, NUMBER -> VOID

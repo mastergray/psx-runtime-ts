@@ -982,9 +982,10 @@ The harness is a consumer of the package, not a second runtime. It provides:
 - an optional per-port left-stick-to-D-pad compatibility mapping for games
   that predate native analog-controller support;
 - a validated browser-wide control profile in `localStorage`; keyboard maps
-  device-ID-keyed gamepad button maps and left-stick compatibility choices
-  survive reload, while transient browser gamepad indices do not, and the
-  user can restore defaults;
+  device-ID-keyed gamepad button maps, player preferences and left-stick
+  compatibility choices survive reload, while transient browser gamepad
+  indices are resolved again whenever devices connect, and the user can
+  restore defaults;
 - controller type selection before start;
 - pause/resume, soft/hard reset, disc selection and fullscreen;
 - two card selectors, import/export and auto-save status;

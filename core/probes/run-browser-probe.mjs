@@ -251,7 +251,7 @@ try {
                 get value() { return state.pressed ? 1 : 0; },
             };
             const pad = {
-                index: 0,
+                index: 3,
                 id: "M8 Test Gamepad",
                 connected: true,
                 mapping: "standard",
@@ -261,7 +261,7 @@ try {
             };
             Object.defineProperty(navigator, "getGamepads", {
                 configurable: true,
-                value: () => [pad],
+                value: () => [null, null, null, pad],
             });
             globalThis.__m8GamepadState = state;
         });
@@ -304,6 +304,12 @@ try {
             };
         });
         await page.click("[data-open-dialog='controllers-dialog']");
+        await page.waitForFunction(() => document.querySelector("#pad-label-1")?.textContent === "M8 Test Gamepad"
+            && document.querySelector("#pad-label-2")?.textContent === "not connected");
+        const automaticallyAssigned = await page.evaluate(() => ({
+            playerOnePad: document.querySelector("#pad-label-1")?.textContent,
+            playerTwoPad: document.querySelector("#pad-label-2")?.textContent,
+        }));
         await page.click("#player-tab-2");
         const tabSelected = await page.getAttribute("#player-tab-2", "aria-selected");
         const playerOneHidden = await page.getAttribute("#player-panel-1", "hidden");
@@ -331,15 +337,18 @@ try {
         }));
         await page.reload({ waitUntil: "domcontentloaded" });
         await page.waitForFunction(() => document.querySelector("#keyboard-2-up")?.textContent === "G"
-            && document.querySelector("#gamepad-1-circle")?.textContent === "A"
-            && document.querySelector("#gamepad-1-cross")?.textContent === "unbound"
+            && document.querySelector("#pad-label-2")?.textContent === "M8 Test Gamepad"
+            && document.querySelector("#pad-label-1")?.textContent === "not connected"
+            && document.querySelector("#gamepad-2-circle")?.textContent === "A"
+            && document.querySelector("#gamepad-2-cross")?.textContent === "unbound"
             && document.querySelector("#left-stick-dpad-2")?.checked === true);
         await page.click("[data-open-dialog='controllers-dialog']");
         const persisted = await page.evaluate(() => ({
             playerOnePad: document.querySelector("#pad-label-1")?.textContent,
+            playerTwoPad: document.querySelector("#pad-label-2")?.textContent,
             playerTwoUpKey: document.querySelector("#keyboard-2-up")?.textContent,
-            playerOneCircleButton: document.querySelector("#gamepad-1-circle")?.textContent,
-            playerOneCrossButton: document.querySelector("#gamepad-1-cross")?.textContent,
+            playerTwoCircleButton: document.querySelector("#gamepad-2-circle")?.textContent,
+            playerTwoCrossButton: document.querySelector("#gamepad-2-cross")?.textContent,
             playerTwoStickDpad: document.querySelector("#left-stick-dpad-2")?.checked,
             storageStatus: document.querySelector("#control-storage-status")?.textContent,
         }));
@@ -384,11 +393,14 @@ try {
                 && tabSelected === "true" && playerOneHidden === "" && playerTwoHidden === null
                 && keyboardListening === "Press a key or button…"
                 && gamepadListening === "Press a key or button…"
+                && automaticallyAssigned.playerOnePad === "M8 Test Gamepad"
+                && automaticallyAssigned.playerTwoPad === "not connected"
                 && captured.playerOnePad === "not connected" && captured.playerTwoPad === "M8 Test Gamepad"
                 && captured.playerTwoUpKey === "G" && captured.playerTwoCircleButton === "A"
                 && captured.playerTwoCrossButton === "unbound" && captured.playerTwoStickDpad && captured.stored
-                && persisted.playerOnePad === "M8 Test Gamepad" && persisted.playerTwoUpKey === "G"
-                && persisted.playerOneCircleButton === "A" && persisted.playerOneCrossButton === "unbound"
+                && persisted.playerOnePad === "not connected" && persisted.playerTwoPad === "M8 Test Gamepad"
+                && persisted.playerTwoUpKey === "G"
+                && persisted.playerTwoCircleButton === "A" && persisted.playerTwoCrossButton === "unbound"
                 && persisted.playerTwoStickDpad
                 && persisted.storageStatus === "Stored control bindings loaded from this browser."
                 && restored.playerTwoUpKey === "I" && restored.playerOneCrossButton === "A"
@@ -398,6 +410,7 @@ try {
                 && pageErrors.length === 0,
             ...harness,
             gameDrop,
+            automaticallyAssigned,
             captured,
             persisted,
             restored,
