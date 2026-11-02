@@ -389,10 +389,18 @@ try {
                 && document.querySelector("#fullscreen-stretch")?.textContent === "Fullscreen (Stretch)",
             deleteConfirmation: document.querySelector("#delete-stored") !== null
                 && document.querySelector("#delete-game-dialog #confirm-delete-stored")?.textContent === "Remove game",
+            stateManager: document.querySelector("#states-menu")?.getAttribute("aria-controls") === "states-dialog"
+                && document.querySelector("#state-list") !== null
+                && document.querySelector("#save-new-state")?.textContent === "Save new state"
+                && document.querySelector("#state-confirm-dialog #confirm-state-action") !== null
+                && document.querySelector("#notice-toast")?.getAttribute("popover") === "manual",
+            pauseOverlay: document.querySelector("#pause-overlay")?.textContent === "Paused"
+                && document.querySelector("#pause-overlay")?.hasAttribute("hidden") === true,
         }));
         resolveResult({
             ok: harness.canvas && harness.buttons >= 10 && harness.status === "idle"
                 && harness.topLevelSessionControls && harness.viewControls && harness.deleteConfirmation
+                && harness.stateManager && harness.pauseOverlay
                 && gameDrop.accepted && gameDrop.highlighted === "true"
                 && gameDrop.dialog === "game-dialog" && gameDrop.state === "selected"
                 && gameDrop.dragging === "false" && gameDrop.selection === "Selected: Dragged Game.zip"

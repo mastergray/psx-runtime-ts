@@ -24,6 +24,7 @@ import type {
     PsxPlayer,
     PsxRegion,
     PsxScalingMode,
+    PsxStateRecord,
 } from "../src/index.js";
 
 interface PreloadManifest {
@@ -37,6 +38,7 @@ interface PreloadManifest {
 
 const DEFAULT_FIRMWARE_REGION: PsxRegion = "ntsc-u";
 const CONTROL_PROFILE_STORAGE_KEY = "psx-runtime:ui:controls";
+const HARNESS_PROFILE_ID = "harness";
 
 const element = <T extends HTMLElement>(id: string): T => {
     const value = document.querySelector(`#${id}`);
@@ -49,13 +51,18 @@ const statusElement = element<HTMLElement>("status");
 const statusStrip = element<HTMLElement>("status-strip");
 const statusDetail = element<HTMLElement>("status-detail");
 const screenMessage = element<HTMLElement>("screen-message");
+const pauseOverlay = element<HTMLElement>("pause-overlay");
+const noticeToast = element<HTMLDivElement>("notice-toast");
 const gameMenuButton = element<HTMLButtonElement>("game-menu");
 const libraryMenuButton = element<HTMLButtonElement>("library-menu");
+const statesMenuButton = element<HTMLButtonElement>("states-menu");
 const gameDialog = element<HTMLDialogElement>("game-dialog");
 const libraryDialog = element<HTMLDialogElement>("library-dialog");
 const deleteGameDialog = element<HTMLDialogElement>("delete-game-dialog");
 const viewDialog = element<HTMLDialogElement>("view-dialog");
 const sessionDialog = element<HTMLDialogElement>("session-dialog");
+const statesDialog = element<HTMLDialogElement>("states-dialog");
+const stateConfirmDialog = element<HTMLDialogElement>("state-confirm-dialog");
 const canvas = element<HTMLCanvasElement>("screen");
 const container = element<HTMLDivElement>("screen-stage");
 const buildUrlInput = element<HTMLInputElement>("build-url");
@@ -132,6 +139,14 @@ const deleteFirmwareButton = element<HTMLButtonElement>("delete-firmware");
 const pauseButton = element<HTMLButtonElement>("pause");
 const resetButton = element<HTMLButtonElement>("soft-reset");
 const muteAudioButton = element<HTMLButtonElement>("mute-audio");
+const newStateNameInput = element<HTMLInputElement>("new-state-name");
+const saveNewStateButton = element<HTMLButtonElement>("save-new-state");
+const stateGame = element<HTMLElement>("state-game");
+const stateFeedback = element<HTMLElement>("state-feedback");
+const stateList = element<HTMLTableSectionElement>("state-list");
+const stateConfirmTitle = element<HTMLElement>("state-confirm-title");
+const stateConfirmMessage = element<HTMLElement>("state-confirm-message");
+const confirmStateActionButton = element<HTMLButtonElement>("confirm-state-action");
 const fullscreenButtons: Readonly<Record<"fit" | "stretch", HTMLButtonElement>> = {
     fit: element<HTMLButtonElement>("fullscreen-fit"),
     stretch: element<HTMLButtonElement>("fullscreen-stretch"),
@@ -154,6 +169,11 @@ let pendingDeleteGameId: string | null = null;
 let screenMessageRevision = 0;
 let generatedGameTitle = "";
 let fullscreenExitChordHeld = false;
+let stateRecords: ReadonlyArray<PsxStateRecord> = [];
+let pendingStateAction: { readonly kind: "overwrite" | "delete"; readonly name: string } | null = null;
+let modalPauseOwner: PsxPlayer | null = null;
+let modalPauseTask: Promise<void> | null = null;
+let noticeRevision = 0;
 const storedGameTitles = new Map<string, string>();
 
 interface GamepadAssignment {
@@ -596,6 +616,18 @@ const setTimedScreenMessage = (message: string, milliseconds: number): void => {
     }, milliseconds);
 };
 
+const showNotice = (message: string, milliseconds = 3_000): void => {
+    noticeRevision++;
+    const revision = noticeRevision;
+    write(message);
+    noticeToast.textContent = message;
+    if (noticeToast.matches(":popover-open")) noticeToast.hidePopover();
+    noticeToast.showPopover();
+    setTimeout(() => {
+        if (noticeRevision === revision && noticeToast.matches(":popover-open")) noticeToast.hidePopover();
+    }, milliseconds);
+};
+
 const setGameFeedback = (message: string, state: "idle" | "working" | "success" | "error"): void => {
     gameFeedback.textContent = message;
     gameFeedback.dataset.state = state;
@@ -608,28 +640,36 @@ const setDiscFeedback = (message: string, state: "idle" | "working" | "success" 
 
 const renderDiscControls = (): void => {
     const session = player?.session;
+    const pendingCount = pendingDiscCount;
+    const pendingGameId = pendingStoredGameId;
+    const pendingGameReady = pendingCount !== null && pendingGameId !== null
+        && (session === null || session === undefined || pendingGameId !== session.machine.gameId);
+    if (pendingGameReady) {
+        const selected = Number(discSelect.value);
+        discSelect.replaceChildren(...Array.from({ length: pendingCount }, (_, index) =>
+            new Option(`Disc ${index + 1}`, String(index))));
+        discSelect.value = Number.isSafeInteger(selected) && selected >= 0 && selected < pendingCount
+            ? String(selected)
+            : "0";
+        discSelect.disabled = pendingCount < 2;
+        startButton.textContent = session === null || session === undefined ? "Start" : "Switch game";
+        startButton.disabled = false;
+        setDiscFeedback(
+            `Disc ${Number(discSelect.value) + 1} of ${pendingCount} will be used when ${startButton.textContent} is chosen.`,
+            "idle",
+        );
+        gameMenuButton.textContent = session === null || session === undefined ? "Game" : "Game · New game ready";
+        gameMenuButton.title = session === null || session === undefined
+            ? ""
+            : "A checked game is ready to replace the active session.";
+        return;
+    }
     if (session === null || session === undefined) {
-        if (pendingDiscCount !== null && pendingStoredGameId !== null) {
-            const selected = Number(discSelect.value);
-            discSelect.replaceChildren(...Array.from({ length: pendingDiscCount }, (_, index) =>
-                new Option(`Disc ${index + 1}`, String(index))));
-            discSelect.value = Number.isSafeInteger(selected) && selected >= 0 && selected < pendingDiscCount
-                ? String(selected)
-                : "0";
-            discSelect.disabled = pendingDiscCount < 2;
-            startButton.textContent = "Start";
-            startButton.disabled = false;
-            setDiscFeedback(
-                `Disc ${Number(discSelect.value) + 1} of ${pendingDiscCount} will be used when Start is chosen.`,
-                "idle",
-            );
-        } else {
-            discSelect.replaceChildren(new Option("No checked game", ""));
-            discSelect.disabled = true;
-            startButton.textContent = "Start";
-            startButton.disabled = true;
-            setDiscFeedback("Check and store a game to select its starting disc.", "idle");
-        }
+        discSelect.replaceChildren(new Option("No checked game", ""));
+        discSelect.disabled = true;
+        startButton.textContent = "Start";
+        startButton.disabled = true;
+        setDiscFeedback("Check and store a game to select its starting disc.", "idle");
         gameMenuButton.textContent = "Game";
         gameMenuButton.title = "";
         return;
@@ -690,6 +730,40 @@ const report = (error: unknown): void => {
     }
 };
 
+const hasOpenDialog = (): boolean => document.querySelector("dialog[open]") !== null;
+
+const releaseModalPause = (): void => {
+    if (hasOpenDialog()) return;
+    const task = modalPauseTask;
+    if (task !== null) {
+        void task.then(releaseModalPause, releaseModalPause);
+        return;
+    }
+    const owner = modalPauseOwner;
+    modalPauseOwner = null;
+    if (owner === null || owner !== player || owner.status !== "paused") return;
+    try {
+        owner.resume();
+    } catch (error) {
+        report(error);
+    }
+};
+
+const pauseForModal = (): void => {
+    const owner = player;
+    if (owner === null || owner.status !== "running" || modalPauseOwner !== null) return;
+    modalPauseOwner = owner;
+    const task = owner.pause();
+    modalPauseTask = task;
+    void task.catch((error) => {
+        if (modalPauseOwner === owner) modalPauseOwner = null;
+        report(error);
+    }).finally(() => {
+        if (modalPauseTask === task) modalPauseTask = null;
+        releaseModalPause();
+    });
+};
+
 document.querySelectorAll<HTMLButtonElement>("[data-open-dialog]").forEach((button) => {
     button.addEventListener("click", () => {
         const dialogId = button.dataset.openDialog;
@@ -698,6 +772,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-open-dialog]").forEach((butt
         if (!dialog.open) {
             dialog.showModal();
             button.setAttribute("aria-expanded", "true");
+            pauseForModal();
         }
     });
 });
@@ -714,6 +789,7 @@ document.querySelectorAll<HTMLDialogElement>("dialog").forEach((dialog) => {
         if (dialog === controllersDialog) finishBindingCapture();
         document.querySelectorAll<HTMLButtonElement>(`[data-open-dialog="${dialog.id}"]`)
             .forEach((button) => button.setAttribute("aria-expanded", "false"));
+        releaseModalPause();
     });
 });
 
@@ -954,7 +1030,7 @@ const ensureRuntime = async (): Promise<PsxConsole> => {
         container,
         gestureSource: document,
         storage,
-        profileId: "harness",
+        profileId: HARNESS_PROFILE_ID,
         memoryCardIds: { 1: "card-1", 2: "card-2" },
         keyboard: { target: window, map: keyboardMap },
         gamepad: {
@@ -978,6 +1054,7 @@ const ensureRuntime = async (): Promise<PsxConsole> => {
     player.on("status", (status) => {
         statusElement.textContent = status;
         statusStrip.dataset.state = status;
+        pauseOverlay.hidden = status !== "paused";
     });
     player.on("error", report);
     activeBuildUrl = buildUrl;
@@ -997,7 +1074,131 @@ const localConfig = () => {
 };
 
 const run = (action: () => Promise<unknown> | unknown): void => {
-    void Promise.resolve().then(action).catch(report);
+    void Promise.resolve().then(async () => {
+        const pauseTask = modalPauseTask;
+        if (pauseTask !== null) await pauseTask;
+        return action();
+    }).catch(report);
+};
+
+const setStateFeedback = (message: string, state: "idle" | "working" | "success" | "error"): void => {
+    stateFeedback.textContent = message;
+    stateFeedback.dataset.state = state;
+};
+
+const requireStatePlayer = (): PsxPlayer => {
+    const current = player;
+    if (current === null || current.session === null) throw new Error("Start a game before managing save states.");
+    return current;
+};
+
+const runStateAction = (action: () => Promise<void>): void => run(async () => {
+    try {
+        await action();
+    } catch (error) {
+        setStateFeedback(`Save-state operation failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+        throw error;
+    }
+});
+
+const stateIsCompatible = (record: PsxStateRecord): boolean => {
+    const machine = player?.session?.machine;
+    return machine !== undefined && record.metadata.gameId === machine.gameId
+        && record.metadata.buildId === machine.buildId && record.metadata.core === machine.core
+        && record.metadata.coreVersion === machine.coreVersion;
+};
+
+const stateActionButton = (
+    label: string,
+    action: () => void,
+    disabled = false,
+): HTMLButtonElement => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.disabled = disabled;
+    button.addEventListener("click", action);
+    return button;
+};
+
+const openStateConfirmation = (kind: "overwrite" | "delete", name: string): void => {
+    pendingStateAction = { kind, name };
+    const overwrite = kind === "overwrite";
+    stateConfirmTitle.textContent = overwrite ? "Overwrite save state?" : "Delete save state?";
+    stateConfirmMessage.textContent = overwrite
+        ? `Replace “${name}” with the game’s current state? The previous state cannot be recovered.`
+        : `Delete “${name}” from this browser? This cannot be undone.`;
+    confirmStateActionButton.textContent = overwrite ? "Overwrite state" : "Delete state";
+    if (!stateConfirmDialog.open) stateConfirmDialog.showModal();
+};
+
+const renderStateManager = (): void => {
+    const session = player?.session;
+    if (session === null || session === undefined) {
+        stateGame.textContent = "Start a game to manage its save states.";
+        saveNewStateButton.disabled = true;
+        newStateNameInput.disabled = true;
+        const cell = document.createElement("td");
+        cell.colSpan = 5;
+        cell.className = "state-empty";
+        cell.textContent = "Start a game to view its states.";
+        const row = document.createElement("tr");
+        row.append(cell);
+        stateList.replaceChildren(row);
+        return;
+    }
+    const title = storedGameTitles.get(session.machine.gameId) ?? "Active game";
+    stateGame.textContent = `${title} · ${stateRecords.length} saved state${stateRecords.length === 1 ? "" : "s"}`;
+    saveNewStateButton.disabled = false;
+    newStateNameInput.disabled = false;
+    if (stateRecords.length === 0) {
+        const cell = document.createElement("td");
+        cell.colSpan = 5;
+        cell.className = "state-empty";
+        cell.textContent = "No save states for this game.";
+        const row = document.createElement("tr");
+        row.append(cell);
+        stateList.replaceChildren(row);
+        return;
+    }
+    stateList.replaceChildren(...stateRecords.map((record) => {
+        const compatible = stateIsCompatible(record);
+        const row = document.createElement("tr");
+        const name = document.createElement("td");
+        name.textContent = record.name;
+        const saved = document.createElement("td");
+        saved.textContent = new Date(record.metadata.createdAt).toLocaleString();
+        const disc = document.createElement("td");
+        disc.textContent = String(record.metadata.discIndex + 1);
+        const compatibility = document.createElement("td");
+        compatibility.textContent = compatible ? "Ready" : "Different core build";
+        const actions = document.createElement("td");
+        const controls = document.createElement("div");
+        controls.className = "state-actions";
+        controls.append(
+            stateActionButton("Load", () => runStateAction(async () => {
+                setStateFeedback(`Loading “${record.name}”…`, "working");
+                await requireStatePlayer().loadState(record.name);
+                renderDiscControls();
+                setStateFeedback(`Loaded “${record.name}”.`, "success");
+                statesDialog.close();
+                showNotice(`Loaded save state “${record.name}”.`);
+            }), !compatible),
+            stateActionButton("Overwrite", () => openStateConfirmation("overwrite", record.name)),
+            stateActionButton("Delete", () => openStateConfirmation("delete", record.name)),
+        );
+        actions.append(controls);
+        row.append(name, saved, disc, compatibility, actions);
+        return row;
+    }));
+};
+
+const refreshStates = async (): Promise<void> => {
+    const session = player?.session;
+    stateRecords = session === null || session === undefined
+        ? []
+        : await storage.listStates(HARNESS_PROFILE_ID, session.machine.gameId);
+    renderStateManager();
 };
 
 interface HarnessDisplay {
@@ -1075,6 +1276,7 @@ const updateDiagnostics = (): void => {
     pauseButton.disabled = sessionStatus !== "running" && sessionStatus !== "paused";
     pauseButton.textContent = sessionStatus === "paused" ? "Resume" : "Pause";
     resetButton.disabled = !sessionActive;
+    statesMenuButton.disabled = !sessionActive;
     fullscreenButtons.fit.disabled = !sessionActive || display === null;
     fullscreenButtons.stretch.disabled = !sessionActive || display === null;
     controllerOneInput.disabled = sessionActive;
@@ -1181,6 +1383,37 @@ auditButton.addEventListener("click", () => run(async () => {
 
 startButton.addEventListener("click", () => run(async () => {
     const activeSession = player?.session;
+    const gameId = pendingStoredGameId;
+    const startsPendingGame = gameId !== null && pendingDiscCount !== null
+        && (activeSession === null || activeSession === undefined || gameId !== activeSession.machine.gameId);
+    if (startsPendingGame) {
+        const switching = activeSession !== null && activeSession !== undefined;
+        launchInProgress = true;
+        stopWatchingForVisibleFrame();
+        startButton.disabled = true;
+        startButton.textContent = switching ? "Switching…" : "Starting…";
+        setGameFeedback(switching ? "Switching sessions…" : "Starting session…", "working");
+        setScreenMessage(switching ? "Switching PlayStation games…" : "Starting PlayStation…");
+        write(switching
+            ? "Switching sessions; the first image may take a few seconds."
+            : "Starting session; the first image may take a few seconds.");
+        const console = await ensureRuntime();
+        const bios = await selectedBios();
+        await console.startStored(gameId, startConfig(bios, Number(discSelect.value)));
+        await prepareSessionAudio();
+        pendingDiscCount = player?.session?.machine.discCount ?? pendingDiscCount;
+        renderDiscControls();
+        setScreenMessage("Session is running; waiting for video…");
+        watchForVisibleFrame();
+        gameDialog.close();
+        launchInProgress = false;
+        setGameFeedback(
+            switching ? "The active game was replaced." : "Session started. The game is stored in this browser.",
+            "success",
+        );
+        write(switching ? "The active session was replaced." : "Session started; game stored in browser library.");
+        return;
+    }
     if (activeSession !== null && activeSession !== undefined) {
         const index = Number(discSelect.value);
         startButton.disabled = true;
@@ -1202,25 +1435,7 @@ startButton.addEventListener("click", () => run(async () => {
         }
         return;
     }
-    launchInProgress = true;
-    startButton.disabled = true;
-    startButton.textContent = "Starting…";
-    setGameFeedback("Starting session…", "working");
-    setScreenMessage("Starting PlayStation…");
-    write("Starting session; the first image may take a few seconds.");
-    const gameId = pendingStoredGameId;
-    if (gameId === null) throw new Error("Check and store the selected game before starting it.");
-    const console = await ensureRuntime();
-    const bios = await selectedBios();
-    await console.startStored(gameId, startConfig(bios, Number(discSelect.value)));
-    await prepareSessionAudio();
-    renderDiscControls();
-    setScreenMessage("Session is running; waiting for video…");
-    watchForVisibleFrame();
-    gameDialog.close();
-    launchInProgress = false;
-    setGameFeedback("Session started. The game is stored in this browser.", "success");
-    write("Session started; game stored in browser library.");
+    throw new Error("Check and store the selected game before starting it.");
 }));
 
 const selectedStoredGame = (): string => {
@@ -1255,7 +1470,8 @@ const refreshGames = async (): Promise<void> => {
     renderStoredGameSelection();
 };
 
-element("refresh-games").addEventListener("click", () => run(refreshGames));
+libraryMenuButton.addEventListener("click", () => run(refreshGames));
+statesMenuButton.addEventListener("click", () => run(refreshStates));
 storedGameInput.addEventListener("change", renderStoredGameSelection);
 startStoredButton.addEventListener("click", () => run(async () => {
     const gameId = selectedStoredGame();
@@ -1267,6 +1483,8 @@ startStoredButton.addEventListener("click", () => run(async () => {
     const bios = await selectedBios();
     await console.startStored(gameId, startConfig(bios));
     await prepareSessionAudio();
+    pendingStoredGameId = gameId;
+    pendingDiscCount = player?.session?.machine.discCount ?? null;
     renderDiscControls();
     setScreenMessage("Session is running; waiting for video…");
     watchForVisibleFrame();
@@ -1329,6 +1547,15 @@ element("hard-reset").addEventListener("click", () => run(async () => { await pl
 discSelect.addEventListener("change", () => {
     const session = player?.session;
     const index = Number(discSelect.value);
+    const selectsPendingGame = pendingStoredGameId !== null && pendingDiscCount !== null
+        && (session === null || session === undefined || pendingStoredGameId !== session.machine.gameId);
+    if (selectsPendingGame) {
+        setDiscFeedback(
+            `Disc ${index + 1} of ${pendingDiscCount} will be used when ${session === null || session === undefined ? "Start" : "Switch game"} is chosen.`,
+            "idle",
+        );
+        return;
+    }
     if (session === null || session === undefined) {
         if (pendingDiscCount !== null) {
             setDiscFeedback(
@@ -1365,13 +1592,58 @@ element("audio-volume").addEventListener("input", () => run(() => {
 fullscreenButtons.fit.addEventListener("click", () => run(() => enterFullscreen("fit")));
 fullscreenButtons.stretch.addEventListener("click", () => run(() => enterFullscreen("stretch")));
 
-const stateName = (): string => element<HTMLInputElement>("state-name").value;
-element("save-state").addEventListener("click", () => run(async () => { await player?.saveState(stateName()); }));
-element("load-state").addEventListener("click", () => run(async () => {
-    await player?.loadState(stateName());
-    renderDiscControls();
+saveNewStateButton.addEventListener("click", () => runStateAction(async () => {
+    const name = newStateNameInput.value.trim().normalize("NFC");
+    if (name.length === 0) {
+        setStateFeedback("Enter a name for the new state.", "error");
+        newStateNameInput.focus();
+        return;
+    }
+    if (stateRecords.some((record) => record.name === name)) {
+        setStateFeedback(`“${name}” already exists. Use its Overwrite action to replace it.`, "error");
+        return;
+    }
+    setStateFeedback(`Saving “${name}”…`, "working");
+    await requireStatePlayer().saveState(name);
+    newStateNameInput.value = "";
+    await refreshStates();
+    setStateFeedback(`Saved “${name}”.`, "success");
+    showNotice(`Saved new state “${name}”.`);
 }));
-element("delete-state").addEventListener("click", () => run(async () => { await player?.deleteState(stateName()); }));
+newStateNameInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    saveNewStateButton.click();
+});
+confirmStateActionButton.addEventListener("click", () => runStateAction(async () => {
+    const action = pendingStateAction;
+    if (action === null) throw new Error("No save-state change is awaiting confirmation.");
+    confirmStateActionButton.disabled = true;
+    try {
+        if (action.kind === "overwrite") {
+            setStateFeedback(`Overwriting “${action.name}”…`, "working");
+            await requireStatePlayer().saveState(action.name);
+        } else {
+            setStateFeedback(`Deleting “${action.name}”…`, "working");
+            await requireStatePlayer().deleteState(action.name);
+        }
+        await refreshStates();
+        stateConfirmDialog.close();
+        const message = action.kind === "overwrite"
+            ? `Overwrote save state “${action.name}”.`
+            : `Deleted save state “${action.name}”.`;
+        setStateFeedback(message, "success");
+        showNotice(message);
+    } finally {
+        confirmStateActionButton.disabled = false;
+    }
+}));
+stateConfirmDialog.addEventListener("close", () => {
+    pendingStateAction = null;
+    stateConfirmTitle.textContent = "Confirm state change";
+    stateConfirmMessage.textContent = "Confirm this save-state change.";
+    confirmStateActionButton.textContent = "Confirm";
+});
 
 for (const port of [1, 2] as const) {
     element(`download-card-${port}`).addEventListener("click", () => run(async () => {

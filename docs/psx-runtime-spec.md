@@ -999,14 +999,26 @@ The harness is a consumer of the package, not a second runtime. It provides:
   restore defaults;
 - controller type selection before start;
 - top-level pause/resume, soft reset and mute/unmute controls, with remaining
-  session operations grouped in the Session surface;
+  session operations grouped in the Session surface; pausing retains the last
+  game frame beneath a translucent full-canvas overlay until the session
+  resumes;
+- modal-owned pause semantics: opening the first modal pauses a running game,
+  nested modals retain that pause, and closing the last modal resumes only when
+  the UI initiated the pause;
 - a View surface with aspect-preserving and stretched fullscreen choices;
   Escape or a same-player L3 + R3 chord exits fullscreen;
 - Library starts that replace an active session after its persistent state has
   been flushed;
+- a checked Game start that likewise replaces an active session when the
+  checked content differs from the running game, while Start remains the disc
+  change action for the active multi-disc game;
+- automatic Library refresh whenever its surface opens;
 - hard reset and disc selection;
 - two card selectors, import/export and auto-save status;
-- named state create/load/delete;
+- a per-game save-state manager that lists every named state with its capture
+  time, disc and active-build compatibility, and provides explicit create,
+  load, confirmed overwrite and confirmed delete actions; successful save,
+  load, overwrite and deletion operations produce visible transient notices;
 - sanitized core logs and timing/audio/video counters; and
 - optional private BIOS/content preload config for local browser tests.
 
