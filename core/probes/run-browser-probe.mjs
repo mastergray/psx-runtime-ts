@@ -104,6 +104,7 @@ const routes = new Map([
     ["/core/probes/m9-game-store-probe.html", ["core/probes/m9-game-store-probe.html", "text/html; charset=utf-8"]],
     ["/core/probes/m10-release-probe.html", ["core/probes/m10-release-probe.html", "text/html; charset=utf-8"]],
     ["/vendor/fflate.js", ["node_modules/fflate/esm/browser.js", "text/javascript; charset=utf-8"]],
+    ["/node_modules/fflate/esm/browser.js", ["node_modules/fflate/esm/browser.js", "text/javascript; charset=utf-8"]],
     ["/harness/index.html", ["harness/index.html", "text/html; charset=utf-8"]],
     ["/dist/probes/workerfs-module.mjs", ["dist/probes/workerfs-module.mjs", "text/javascript; charset=utf-8"]],
     ["/dist/probes/workerfs-module.wasm", ["dist/probes/workerfs-module.wasm", "application/wasm"]],
@@ -273,11 +274,15 @@ try {
     if (probe === "m8") {
         await page.waitForFunction(() => document.querySelector("#screen") !== null
             && document.querySelectorAll("button").length >= 10);
-        const gameDrop = await page.evaluate(() => {
+        const gameDrop = await page.evaluate(async () => {
             const zone = document.querySelector("#game-drop-zone");
             if (!(zone instanceof HTMLElement)) throw new Error("Missing game ZIP drop zone");
+            const { strToU8, zipSync } = await import("fflate");
             const transfer = new DataTransfer();
-            transfer.items.add(new File([new Uint8Array([1, 2, 3])], "Dragged Game.zip", {
+            transfer.items.add(new File([zipSync({
+                "game.cue": strToU8("FILE \"game.bin\" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\n"),
+                "game.bin": new Uint8Array(2352),
+            })], "Dragged Game.zip", {
                 type: "application/zip",
             }));
             const dragover = new DragEvent("dragover", {
@@ -292,6 +297,9 @@ try {
                 cancelable: true,
                 dataTransfer: transfer,
             }));
+            while (document.querySelector("#game-feedback")?.textContent === "Inspecting game ZIP…") {
+                await new Promise((resolve) => requestAnimationFrame(resolve));
+            }
             return {
                 accepted,
                 highlighted,
@@ -300,7 +308,35 @@ try {
                 dragging: zone.dataset.dragging,
                 selection: document.querySelector("#game-selection")?.textContent,
                 feedback: document.querySelector("#game-feedback")?.textContent,
-                title: document.querySelector("#game-id")?.value,
+                titleRemoved: document.querySelector("#game-id") === null,
+                overrideRemoved: document.querySelector("#entry") === null,
+                conditionalEntryHidden: document.querySelector("#entry-choice")?.hasAttribute("hidden"),
+            };
+        });
+        const ambiguousEntry = await page.evaluate(async () => {
+            const zone = document.querySelector("#game-drop-zone");
+            if (!(zone instanceof HTMLElement)) throw new Error("Missing game ZIP drop zone");
+            const { strToU8, zipSync } = await import("fflate");
+            const cue = (track) => strToU8(`FILE "${track}" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\n`);
+            const transfer = new DataTransfer();
+            transfer.items.add(new File([zipSync({
+                "disc-a.cue": cue("disc-a.bin"),
+                "disc-a.bin": new Uint8Array(2352),
+                "disc-b.cue": cue("disc-b.bin"),
+                "disc-b.bin": new Uint8Array(2352),
+            })], "Ambiguous.zip", { type: "application/zip" }));
+            zone.dispatchEvent(new DragEvent("drop", {
+                bubbles: true,
+                cancelable: true,
+                dataTransfer: transfer,
+            }));
+            while (document.querySelector("#game-feedback")?.textContent === "Inspecting game ZIP…") {
+                await new Promise((resolve) => requestAnimationFrame(resolve));
+            }
+            return {
+                visible: document.querySelector("#entry-choice")?.hasAttribute("hidden") === false,
+                entries: [...document.querySelectorAll("#entry-select option")].map((option) => option.textContent),
+                feedback: document.querySelector("#game-feedback")?.textContent,
             };
         });
         await page.click("[data-open-dialog='controllers-dialog']");
@@ -396,16 +432,20 @@ try {
                 && document.querySelector("#notice-toast")?.getAttribute("popover") === "manual",
             pauseOverlay: document.querySelector("#pause-overlay")?.textContent === "Paused"
                 && document.querySelector("#pause-overlay")?.hasAttribute("hidden") === true,
+            libraryStorage: document.querySelector("#library-summary")?.textContent === "No games stored."
+                && document.querySelector("#stored-game-details") !== null,
         }));
         resolveResult({
             ok: harness.canvas && harness.buttons >= 10 && harness.status === "idle"
                 && harness.topLevelSessionControls && harness.viewControls && harness.deleteConfirmation
-                && harness.stateManager && harness.pauseOverlay
+                && harness.stateManager && harness.pauseOverlay && harness.libraryStorage
                 && gameDrop.accepted && gameDrop.highlighted === "true"
                 && gameDrop.dialog === "game-dialog" && gameDrop.state === "selected"
                 && gameDrop.dragging === "false" && gameDrop.selection === "Selected: Dragged Game.zip"
                 && gameDrop.feedback === "Game ZIP selected. Ready to check and store."
-                && gameDrop.title === "Dragged Game"
+                && gameDrop.titleRemoved && gameDrop.overrideRemoved && gameDrop.conditionalEntryHidden
+                && ambiguousEntry.visible && ambiguousEntry.entries.join(",") === "disc-a.cue,disc-b.cue"
+                && ambiguousEntry.feedback === "This ZIP has multiple possible entries. Choose one, then run Check And Store."
                 && tabSelected === "true" && playerOneHidden === "" && playerTwoHidden === null
                 && keyboardListening === "Press a key or button…"
                 && gamepadListening === "Press a key or button…"
@@ -426,6 +466,7 @@ try {
                 && pageErrors.length === 0,
             ...harness,
             gameDrop,
+            ambiguousEntry,
             automaticallyAssigned,
             captured,
             persisted,

@@ -6,6 +6,7 @@ import {
     PsxGameStore,
     PsxRuntimeError,
     PsxStorage,
+    ZipDiscSource,
     ZipFirmwareSource,
     isGamepadButtonMaps,
     isKeyboardMap,
@@ -25,12 +26,12 @@ import type {
     PsxRegion,
     PsxScalingMode,
     PsxStateRecord,
+    PsxStoredGame,
 } from "../src/index.js";
 
 interface PreloadManifest {
     readonly available: boolean;
     readonly buildUrl?: string;
-    readonly gameId?: string;
     readonly entry?: string;
     readonly bios?: { readonly name: string; readonly url: string; readonly region: "ntsc-u" | "ntsc-j" | "pal" };
     readonly files?: ReadonlyArray<{ readonly name: string; readonly path: string; readonly url: string }>;
@@ -72,7 +73,8 @@ biosRegionInput.value = DEFAULT_FIRMWARE_REGION;
 const filesInput = element<HTMLInputElement>("game-files");
 const gameDropZone = element<HTMLElement>("game-drop-zone");
 const gameSelection = element<HTMLElement>("game-selection");
-const gameTitleInput = element<HTMLInputElement>("game-id");
+const entryChoice = element<HTMLElement>("entry-choice");
+const entrySelect = element<HTMLSelectElement>("entry-select");
 const controllerOneInput = element<HTMLSelectElement>("controller-1");
 const controllerTwoInput = element<HTMLSelectElement>("controller-2");
 const leftStickDpadInputs: Record<ControllerPort, HTMLInputElement> = {
@@ -127,6 +129,8 @@ const discFeedback = element<HTMLElement>("disc-feedback");
 const discSelect = element<HTMLSelectElement>("disc-index");
 const storedGameInput = element<HTMLSelectElement>("stored-game");
 const storedTitleInput = element<HTMLInputElement>("stored-title");
+const librarySummary = element<HTMLElement>("library-summary");
+const storedGameDetails = element<HTMLElement>("stored-game-details");
 const startStoredButton = element<HTMLButtonElement>("start-stored");
 const renameStoredButton = element<HTMLButtonElement>("rename-stored");
 const deleteStoredButton = element<HTMLButtonElement>("delete-stored");
@@ -167,7 +171,7 @@ let pendingDiscCount: number | null = null;
 let pendingStoredGameId: string | null = null;
 let pendingDeleteGameId: string | null = null;
 let screenMessageRevision = 0;
-let generatedGameTitle = "";
+let entryInspectionRevision = 0;
 let fullscreenExitChordHeld = false;
 let stateRecords: ReadonlyArray<PsxStateRecord> = [];
 let pendingStateAction: { readonly kind: "overwrite" | "delete"; readonly name: string } | null = null;
@@ -175,6 +179,7 @@ let modalPauseOwner: PsxPlayer | null = null;
 let modalPauseTask: Promise<void> | null = null;
 let noticeRevision = 0;
 const storedGameTitles = new Map<string, string>();
+const storedGames = new Map<string, PsxStoredGame>();
 
 interface GamepadAssignment {
     readonly index: number;
@@ -849,30 +854,79 @@ const selectedFiles = (): PsxFileListLike => {
 const titleFromFile = (file: { readonly name: string }): string =>
     file.name.replace(/\.zip$/iu, "").trim() || "Local game";
 
-const setGeneratedGameTitle = (file: File | undefined): void => {
-    if (file === undefined) return;
-    if (gameTitleInput.value.trim().length === 0 || gameTitleInput.value === generatedGameTitle) {
-        generatedGameTitle = titleFromFile(file);
-        gameTitleInput.value = generatedGameTitle;
+const formatBytes = (bytes: number): string => {
+    const units = ["B", "KiB", "MiB", "GiB", "TiB"] as const;
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit++;
+    }
+    const digits = unit === 0 || value >= 100 ? 0 : value >= 10 ? 1 : 2;
+    return `${value.toFixed(digits)} ${units[unit]}`;
+};
+
+const ambiguousDescriptors = (descriptors: ReadonlyArray<string>): ReadonlyArray<string> => {
+    const playlists = descriptors.filter((path) => path.toLowerCase().endsWith(".m3u"));
+    if (playlists.length > 1) return playlists;
+    if (playlists.length === 1) return [];
+    const cues = descriptors.filter((path) => path.toLowerCase().endsWith(".cue"));
+    return cues.length > 1 ? cues : [];
+};
+
+const inspectGameEntry = async (
+    file: File,
+    revision: number,
+    preferredEntry?: string,
+): Promise<void> => {
+    try {
+        const choices = ambiguousDescriptors(await ZipDiscSource.listDescriptors(file));
+        if (entryInspectionRevision !== revision) return;
+        entrySelect.replaceChildren(...choices.map((path) => new Option(path, path)));
+        entryChoice.hidden = choices.length === 0;
+        if (preferredEntry !== undefined && choices.includes(preferredEntry)) entrySelect.value = preferredEntry;
+        setGameFeedback(
+            choices.length === 0
+                ? "Game ZIP selected. Ready to check and store."
+                : "This ZIP has multiple possible entries. Choose one, then run Check And Store.",
+            "idle",
+        );
+        auditButton.disabled = false;
+    } catch (error) {
+        if (entryInspectionRevision !== revision) return;
+        const message = error instanceof Error ? error.message : String(error);
+        entryChoice.hidden = true;
+        entrySelect.replaceChildren();
+        setGameFeedback(`Game ZIP inspection failed: ${message}`, "error");
+        auditButton.disabled = true;
+        report(error);
     }
 };
 
-const selectGameFiles = (files: ReadonlyArray<File>, source: "drop" | "picker"): File | null => {
+const selectGameFiles = (
+    files: ReadonlyArray<File>,
+    source: "drop" | "picker" | "preload",
+    preferredEntry?: string,
+): File | null => {
     const file = files.length === 1 && /\.zip$/iu.test(files[0]!.name) ? files[0]! : null;
     if (source === "drop") {
         filesInput.value = "";
         droppedFiles = file === null ? null : [file];
-    } else {
+    } else if (source === "picker") {
         droppedFiles = null;
     }
-    setGeneratedGameTitle(file ?? undefined);
+    const revision = ++entryInspectionRevision;
+    entryChoice.hidden = true;
+    entrySelect.replaceChildren();
     pendingDiscCount = null;
     pendingStoredGameId = null;
     renderDiscControls();
     if (file !== null) {
         gameDropZone.dataset.state = "selected";
         gameSelection.textContent = `Selected: ${file.name}`;
-        setGameFeedback("Game ZIP selected. Ready to check and store.", "idle");
+        setGameFeedback("Inspecting game ZIP…", "working");
+        auditButton.disabled = true;
+        void inspectGameEntry(file, revision, preferredEntry);
         return file;
     }
     const empty = files.length === 0;
@@ -882,6 +936,7 @@ const selectGameFiles = (files: ReadonlyArray<File>, source: "drop" | "picker"):
         empty ? "Choose a game ZIP, then run Check And Store." : "Choose exactly one game ZIP.",
         empty ? "idle" : "error",
     );
+    auditButton.disabled = true;
     return null;
 };
 
@@ -1064,12 +1119,9 @@ const ensureRuntime = async (): Promise<PsxConsole> => {
 const localConfig = () => {
     const files = selectedFiles();
     const first = typeof files.item === "function" ? files.item(0) : files[0];
-    const title = gameTitleInput.value.trim();
     return {
-        gameId: title.length > 0 ? title : titleFromFile(first!),
-        ...(element<HTMLInputElement>("entry").value.trim().length === 0
-        ? {}
-        : { entry: element<HTMLInputElement>("entry").value.trim() }),
+        gameId: titleFromFile(first!),
+        ...(entryChoice.hidden || entrySelect.value.length === 0 ? {} : { entry: entrySelect.value }),
     };
 };
 
@@ -1446,24 +1498,38 @@ const selectedStoredGame = (): string => {
 
 const renderStoredGameSelection = (): void => {
     const gameId = storedGameInput.value;
-    const hasSelection = gameId.length > 0 && storedGameTitles.has(gameId);
+    const game = storedGames.get(gameId);
+    const hasSelection = game !== undefined;
     startStoredButton.disabled = !hasSelection;
     renameStoredButton.disabled = !hasSelection;
     deleteStoredButton.disabled = !hasSelection;
     storedTitleInput.disabled = !hasSelection;
-    if (hasSelection) storedTitleInput.value = storedGameTitles.get(gameId)!;
-    else storedTitleInput.value = "";
+    if (game !== undefined) {
+        storedTitleInput.value = game.displayTitle;
+        storedGameDetails.textContent = `${formatBytes(game.totalBytes)} · ${game.fileCount} file${game.fileCount === 1 ? "" : "s"} · ${game.discCount} disc${game.discCount === 1 ? "" : "s"} · imported ${new Date(game.importedAt).toLocaleString()}`;
+    } else {
+        storedTitleInput.value = "";
+        storedGameDetails.textContent = "Select a stored game to view its storage details.";
+    }
 };
 
 const refreshGames = async (): Promise<void> => {
     const previous = storedGameInput.value;
     const games = await gameStore.list();
     storedGameTitles.clear();
-    games.forEach((game) => storedGameTitles.set(game.gameId, game.displayTitle));
+    storedGames.clear();
+    games.forEach((game) => {
+        storedGameTitles.set(game.gameId, game.displayTitle);
+        storedGames.set(game.gameId, game);
+    });
+    const totalBytes = games.reduce((total, game) => total + game.totalBytes, 0);
+    librarySummary.textContent = games.length === 0
+        ? "No games stored."
+        : `${games.length} game${games.length === 1 ? "" : "s"} · ${formatBytes(totalBytes)} of game content stored`;
     storedGameInput.replaceChildren(...games.map((game) => {
         const option = document.createElement("option");
         option.value = game.gameId;
-        option.textContent = `${game.displayTitle} (${game.discCount} disc${game.discCount === 1 ? "" : "s"})`;
+        option.textContent = `${game.displayTitle} · ${formatBytes(game.totalBytes)} · ${game.discCount} disc${game.discCount === 1 ? "" : "s"}`;
         return option;
     }));
     if (games.some(({ gameId }) => gameId === previous)) storedGameInput.value = previous;
@@ -1696,8 +1762,6 @@ const loadPreload = async (): Promise<void> => {
     const manifest = await response.json() as PreloadManifest;
     if (!manifest.available) return;
     if (manifest.buildUrl !== undefined) buildUrlInput.value = manifest.buildUrl;
-    if (manifest.gameId !== undefined) gameTitleInput.value = manifest.gameId;
-    if (manifest.entry !== undefined) element<HTMLInputElement>("entry").value = manifest.entry;
     if (manifest.bios !== undefined) {
         const blob = await (await fetch(manifest.bios.url)).blob();
         preloadBios = new File([blob], manifest.bios.name);
@@ -1711,7 +1775,7 @@ const loadPreload = async (): Promise<void> => {
             Object.defineProperty(loaded, "webkitRelativePath", { value: item.path });
             return loaded;
         }));
-        if (manifest.gameId === undefined) setGeneratedGameTitle(preloadFiles[0]);
+        selectGameFiles(preloadFiles, "preload", manifest.entry);
     }
     write("Private preload is ready.");
 };

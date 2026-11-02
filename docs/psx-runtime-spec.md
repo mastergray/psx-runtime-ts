@@ -681,6 +681,9 @@ files. The core never receives or interprets the archive.
 Extraction resolves exact entry ranges from the classic or ZIP64 central
 directory, then streams each stored/deflate payload. Data descriptors are
 supported without scanning compressed bytes for ambiguous signatures. The
+source can list validated CUE/M3U paths from central metadata without
+expanding track content, allowing a page to request an entry only when
+inference is ambiguous. The
 reader rejects malformed or encrypted ZIPs, other compression methods, unsafe
 or case-ambiguous paths, more than 64 files, an entry larger than 1 GiB, or
 more than 8 GiB total compressed or expanded data. A ZIP may contain one
@@ -980,7 +983,10 @@ them.
 
 The harness is a consumer of the package, not a second runtime. It provides:
 
-- a single-ZIP game picker plus drag/drop for the release-test workflow;
+- a single-ZIP game picker plus drag/drop for the release-test workflow; the
+  initial Library title is derived from the ZIP filename, while archives with
+  ambiguous descriptors reveal a contextual CUE/M3U chooser instead of a
+  permanent entry-override field;
 - an audit panel showing every missing/invalid reference;
 - separate browser-local **Check And Store** actions for firmware and games,
   with independent removal and explicit confirmation before a stored game is
@@ -1012,7 +1018,9 @@ The harness is a consumer of the package, not a second runtime. It provides:
 - a checked Game start that likewise replaces an active session when the
   checked content differs from the running game, while Start remains the disc
   change action for the active multi-disc game;
-- automatic Library refresh whenever its surface opens;
+- automatic Library refresh whenever its surface opens, with each game's
+  content payload size and an aggregate stored-game total; mutable display
+  titles remain a Library-only concern;
 - hard reset and disc selection;
 - two card selectors, import/export and auto-save status;
 - a per-game save-state manager that lists every named state with its capture

@@ -173,13 +173,14 @@
         <label>Or choose a ZIP <input id="game-files" type="file" accept=".zip,application/zip"></label>
       </div>
       <p><small>Game Check And Store validates this ZIP before adding it to the browser library.</small></p>
-      <label>Game title <input id="game-id" placeholder="Derived from the ZIP filename"></label>
-      <p><small>This is the title shown in Library. Content identity is generated automatically.</small></p>
-      <details><summary>Advanced</summary><label>Entry file override <input id="entry" placeholder="Optional CUE or M3U path"></label><p><small>Only needed when the ZIP has multiple possible entry files.</small></p></details>
+      <div id="entry-choice" hidden>
+        <label>Disc-set entry <select id="entry-select"></select></label>
+        <p><small>This archive contains more than one possible entry. Choose the CUE or M3U that should start the game.</small></p>
+      </div>
       <div id="game-feedback" class="feedback" data-state="idle" role="status" aria-live="polite">Choose a game ZIP, then run Check And Store.</div>
       <label>Disc <select id="disc-index" disabled><option>No checked game</option></select></label>
       <div id="disc-feedback" class="feedback" data-state="idle" role="status" aria-live="polite">Check and store a game to select its starting disc.</div>
-      <div class="buttons"><button id="audit" aria-label="Check and store game">Check And Store</button><button id="start" class="primary" disabled>Start</button></div>
+      <div class="buttons"><button id="audit" aria-label="Check and store game" disabled>Check And Store</button><button id="start" class="primary" disabled>Start</button></div>
     </fieldset>
     </div>
   </div>
@@ -191,12 +192,15 @@
     <div class="dialog-body">
     <fieldset>
       <legend>Browser game library</legend>
+      <p id="library-summary" role="status" aria-live="polite">No games stored.</p>
       <label>Stored game <select id="stored-game"></select></label>
+      <p id="stored-game-details"><small>Select a stored game to view its storage details.</small></p>
       <label>Display title <input id="stored-title" value="Local test"></label>
       <div class="buttons">
         <button id="start-stored">Start stored</button><button id="rename-stored">Rename</button>
         <button id="delete-stored">Delete</button>
       </div>
+      <p><small>Game sizes are content payload totals and do not include IndexedDB metadata overhead.</small></p>
     </fieldset>
     </div>
   </div>

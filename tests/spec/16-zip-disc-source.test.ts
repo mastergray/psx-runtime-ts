@@ -124,9 +124,12 @@ const testFile: TestFile = {
             label: "a ZIP containing an M3U and two nested discs resolves and audits like raw files",
             run: () => CTGTest.init("diagnostic archive")
                 .stage("resolve and audit", async () => {
-                    const game = await PsxConsole.resolveFiles([diagnostics()], { gameId: "diagnostics" });
+                    const archive = diagnostics();
+                    const descriptors = await ZipDiscSource.listDescriptors(archive);
+                    const game = await PsxConsole.resolveFiles([archive], { gameId: "diagnostics" });
                     const result = await DiscSetAudit.audit(game);
                     return {
+                        descriptors,
                         entry: game.entry,
                         paths: game.files.map(({ path }) => path),
                         sizes: game.files.map(({ blob }) => blob.size),
@@ -134,6 +137,11 @@ const testFile: TestFile = {
                     };
                 })
                 .assert("canonical archive content", ({ subject }) => subject, P.equals<unknown>({
+                    descriptors: [
+                        "psx-runtime-diagnostics.m3u",
+                        "controller/controller-test.cue",
+                        "audio/audio-test.cue",
+                    ],
                     entry: "psx-runtime-diagnostics.m3u",
                     paths: [
                         "psx-runtime-diagnostics.m3u",

@@ -32,6 +32,13 @@ interface ZipEntryRecord {
     readonly localOffset: number;       // Absolute local-header position
 }
 
+// INTERFACE :: {entry:zipEntryRecord, path:STRING}
+// One non-directory central record after archive-wide path, method, size, and duplication checks.
+interface ValidatedZipEntry {
+    readonly entry: ZipEntryRecord;    // Authoritative central-directory metadata
+    readonly path: string;             // Safe normalized file path
+}
+
 // INTERFACE :: {entryCount:NUMBER, centralOffset:NUMBER, centralSize:NUMBER}
 // Archive-wide central-directory location resolved from classic or ZIP64 end records.
 interface ZipDirectoryRecord {
@@ -85,58 +92,24 @@ export default class ZipDiscSource {
         return /\.zip$/iu.test(file.name);
     }
 
+    // METHOD :: psxLocalFileLike -> PROMISE([STRING])
+    // Lists safe CUE and M3U paths from central-directory metadata without expanding game content.
+    static async listDescriptors(archive: PsxLocalFileLike): Promise<ReadonlyArray<string>> {
+        const { strFromU8 } = await import("fflate");
+        const entries = validateEntries(await archiveEntries(archive, strFromU8));
+        return Object.freeze(entries.map(({ path }) => path)
+            .filter((path) => /\.(?:cue|m3u)$/iu.test(path)));
+    }
+
     // METHOD :: psxLocalFileLike -> PROMISE([discFile])
     // Streams, bounds, validates, and expands one ZIP archive.
     static async extract(archive: PsxLocalFileLike): Promise<ReadonlyArray<DiscFile>> {
-        if (!(archive instanceof Blob) || !ZipDiscSource.isArchive(archive)) {
-            throw invalid("The selected archive must be a ZIP file.");
-        }
-        if (archive.size === 0) throw invalid("The selected ZIP archive is empty.");
-        if (!Number.isSafeInteger(archive.size) || archive.size > ZipDiscSource.MAX_ARCHIVE_BYTES) {
-            throw invalid("The selected ZIP archive exceeds the 8 GiB compressed-size limit.");
-        }
-        const signatureBytes = new Uint8Array(await archive.slice(0, 4).arrayBuffer());
-        const signature = signatureBytes.length === 4
-            ? new DataView(signatureBytes.buffer).getUint32(0, true)
-            : 0;
-        if (signature !== 0x04034b50 && signature !== 0x06054b50) {
-            throw invalid("The selected ZIP archive is malformed or truncated.");
-        }
         const { Inflate, strFromU8 } = await import("fflate");
-        const entries = await readCentralDirectory(archive, strFromU8);
+        const entries = validateEntries(await archiveEntries(archive, strFromU8));
         const files: DiscFile[] = [];
-        const seen = new Set<string>();
-        let announcedBytes = 0;
         let expandedBytes = 0;
 
-        for (const entry of entries) {
-            const directory = entry.path.endsWith("/");
-            const path = directory ? entry.path.slice(0, -1) : entry.path;
-            if (!isDiscPath(path)) {
-                throw invalid("The ZIP archive contains an unsafe or non-normalized path.", entry.path);
-            }
-            if (directory) continue;
-            if ((entry.flags & 1) !== 0) throw invalid("Encrypted ZIP archives are not supported.", path);
-            if (entry.compression !== 0 && entry.compression !== 8) {
-                throw invalid("The ZIP archive uses an unsupported compression method.", entry.compression);
-            }
-            const folded = path.toLowerCase();
-            if (seen.has(folded)) {
-                throw invalid("The ZIP archive contains duplicate paths when case-folded.", path);
-            }
-            seen.add(folded);
-            if (seen.size > ZipDiscSource.MAX_FILES) {
-                throw invalid("The ZIP archive contains more than 64 files.");
-            }
-            if (!Number.isSafeInteger(entry.originalSize)
-                || entry.originalSize > ZipDiscSource.MAX_ENTRY_BYTES) {
-                throw invalid("A ZIP entry exceeds the 1 GiB expanded-size limit.", path);
-            }
-            announcedBytes += entry.originalSize;
-            if (!Number.isSafeInteger(announcedBytes)
-                || announcedBytes > ZipDiscSource.MAX_EXPANDED_BYTES) {
-                throw invalid("The ZIP archive exceeds the 8 GiB expanded-size limit.");
-            }
+        for (const { entry, path } of entries) {
             const compressed = await entryPayload(archive, entry);
             let blob: Blob;
             try {
@@ -170,6 +143,69 @@ export default class ZipDiscSource {
  *  Helper Functions
  *
  */
+
+// HELPER :: psxLocalFileLike, zipStringDecoder -> PROMISE([zipEntryRecord])
+// Validates the archive envelope and reads its authoritative central-directory metadata.
+const archiveEntries = async (
+    archive: PsxLocalFileLike,
+    decode: ZipStringDecoder,
+): Promise<ReadonlyArray<ZipEntryRecord>> => {
+    if (!(archive instanceof Blob) || !ZipDiscSource.isArchive(archive)) {
+        throw invalid("The selected archive must be a ZIP file.");
+    }
+    if (archive.size === 0) throw invalid("The selected ZIP archive is empty.");
+    if (!Number.isSafeInteger(archive.size) || archive.size > ZipDiscSource.MAX_ARCHIVE_BYTES) {
+        throw invalid("The selected ZIP archive exceeds the 8 GiB compressed-size limit.");
+    }
+    const signatureBytes = new Uint8Array(await archive.slice(0, 4).arrayBuffer());
+    const signature = signatureBytes.length === 4
+        ? new DataView(signatureBytes.buffer).getUint32(0, true)
+        : 0;
+    if (signature !== 0x04034b50 && signature !== 0x06054b50) {
+        throw invalid("The selected ZIP archive is malformed or truncated.");
+    }
+    return readCentralDirectory(archive, decode);
+};
+
+// HELPER :: [zipEntryRecord] -> [validatedZipEntry]
+// Applies every central-metadata limit shared by descriptor discovery and full extraction.
+const validateEntries = (entries: ReadonlyArray<ZipEntryRecord>): ReadonlyArray<ValidatedZipEntry> => {
+    const validated: ValidatedZipEntry[] = [];
+    const seen = new Set<string>();
+    let announcedBytes = 0;
+    for (const entry of entries) {
+        const directory = entry.path.endsWith("/");
+        const path = directory ? entry.path.slice(0, -1) : entry.path;
+        if (!isDiscPath(path)) {
+            throw invalid("The ZIP archive contains an unsafe or non-normalized path.", entry.path);
+        }
+        if (directory) continue;
+        if ((entry.flags & 1) !== 0) throw invalid("Encrypted ZIP archives are not supported.", path);
+        if (entry.compression !== 0 && entry.compression !== 8) {
+            throw invalid("The ZIP archive uses an unsupported compression method.", entry.compression);
+        }
+        const folded = path.toLowerCase();
+        if (seen.has(folded)) {
+            throw invalid("The ZIP archive contains duplicate paths when case-folded.", path);
+        }
+        seen.add(folded);
+        if (seen.size > ZipDiscSource.MAX_FILES) {
+            throw invalid("The ZIP archive contains more than 64 files.");
+        }
+        if (!Number.isSafeInteger(entry.originalSize)
+            || entry.originalSize > ZipDiscSource.MAX_ENTRY_BYTES) {
+            throw invalid("A ZIP entry exceeds the 1 GiB expanded-size limit.", path);
+        }
+        announcedBytes += entry.originalSize;
+        if (!Number.isSafeInteger(announcedBytes)
+            || announcedBytes > ZipDiscSource.MAX_EXPANDED_BYTES) {
+            throw invalid("The ZIP archive exceeds the 8 GiB expanded-size limit.");
+        }
+        validated.push(Object.freeze({ entry, path }));
+    }
+    if (validated.length === 0) throw invalid("The ZIP archive contains no files.");
+    return Object.freeze(validated);
+};
 
 // HELPER :: psxLocalFileLike, zipStringDecoder -> PROMISE([zipEntryRecord])
 // Reads exact entry sizes and local-header offsets from the authoritative central directory.

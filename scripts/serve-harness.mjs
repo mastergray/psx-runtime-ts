@@ -25,7 +25,6 @@ try {
         manifest: {
             available: true,
             ...(typeof parsed.buildUrl === "string" ? { buildUrl: parsed.buildUrl } : {}),
-            ...(typeof parsed.gameId === "string" ? { gameId: parsed.gameId } : {}),
             ...(typeof parsed.entry === "string" ? { entry: parsed.entry } : {}),
             ...(biosSource === null ? {} : {
                 bios: {
