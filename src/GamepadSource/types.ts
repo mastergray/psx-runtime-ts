@@ -73,7 +73,7 @@ export type GamepadButtonMap = Readonly<Partial<Record<PsxButton, number | null>
 // Device-ID-keyed digital mappings retained across browser sessions.
 export type GamepadButtonMaps = Readonly<Record<string, GamepadButtonMap>>;
 
-// INTERFACE :: {input:psxInputLike, provider:gamepadProviderLike, scheduler:frameScheduler, target:gamepadEventTargetLike, assignments:ARRAY<NUMBER, controllerPort>, deadZone:NUMBER?, triggerThreshold:NUMBER?, invertAxes:ARRAY<psxAxis, BOOLEAN>?, buttonMaps:gamepadButtonMaps?, rumble:BOOLEAN?}
+// INTERFACE :: {input:psxInputLike, provider:gamepadProviderLike, scheduler:frameScheduler, target:gamepadEventTargetLike, assignments:ARRAY<NUMBER, controllerPort>, deadZone:NUMBER?, triggerThreshold:NUMBER?, invertAxes:ARRAY<psxAxis, BOOLEAN>?, leftStickDpad:ARRAY<controllerPort, BOOLEAN>?, buttonMaps:gamepadButtonMaps?, rumble:BOOLEAN?}
 // Dependencies and options for one polling gamepad source.
 export interface GamepadSourceConfig {
     readonly input: PsxInputLike;                                     // Shared coordinator receiving isolated player channels
@@ -84,6 +84,7 @@ export interface GamepadSourceConfig {
     readonly deadZone?: number;                                       // Ignored analog center magnitude; defaults to 0.2
     readonly triggerThreshold?: number;                               // Analog trigger press threshold; defaults to 0.5
     readonly invertAxes?: Readonly<Partial<Record<PsxAxis, boolean>>>; // Optional per-axis direction inversion
+    readonly leftStickDpad?: Readonly<Partial<Record<ControllerPort, boolean>>>; // Ports where the left stick also drives D-pad buttons
     readonly buttonMaps?: GamepadButtonMaps;                           // Optional device-specific digital mappings
     readonly rumble?: boolean;                                        // Whether core rumble reaches browser actuators
 }
@@ -105,6 +106,12 @@ const inUnitRange = (value: unknown): value is number =>
     typeof value === "number" && Number.isFinite(value) && value >= 0 && value < 1;
 
 // PREDICATE :: UNKNOWN -> BOOLEAN
+// True when value maps only controller ports one and two to boolean compatibility flags.
+const isPortBooleanMap = (value: unknown): value is Readonly<Partial<Record<ControllerPort, boolean>>> =>
+    isObject(value) && Object.entries(value).every(([port, enabled]) => (port === "1" || port === "2")
+        && typeof enabled === "boolean");
+
+// PREDICATE :: UNKNOWN -> BOOLEAN
 // True when value maps known PSX buttons to non-negative indices or explicit NULL bindings.
 export const isGamepadButtonMap = (value: unknown): value is GamepadButtonMap => isObject(value)
     && Object.entries(value).every(([button, index]) => isPsxButton(button)
@@ -124,6 +131,7 @@ export function isGamepadSourceConfig(value: unknown): value is GamepadSourceCon
         || typeof value.target.removeEventListener !== "function" || !isObject(value.assignments)
         || (value.deadZone !== undefined && !inUnitRange(value.deadZone))
         || (value.triggerThreshold !== undefined && !inUnitRange(value.triggerThreshold))
+        || (value.leftStickDpad !== undefined && !isPortBooleanMap(value.leftStickDpad))
         || (value.buttonMaps !== undefined && !isGamepadButtonMaps(value.buttonMaps))
         || (value.rumble !== undefined && typeof value.rumble !== "boolean")) return false;
     const ports = new Set<number>();

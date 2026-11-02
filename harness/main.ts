@@ -60,9 +60,15 @@ const biosInput = element<HTMLInputElement>("bios");
 const biosRegionInput = element<HTMLSelectElement>("bios-region");
 biosRegionInput.value = DEFAULT_FIRMWARE_REGION;
 const filesInput = element<HTMLInputElement>("game-files");
+const gameDropZone = element<HTMLElement>("game-drop-zone");
+const gameSelection = element<HTMLElement>("game-selection");
 const gameTitleInput = element<HTMLInputElement>("game-id");
 const controllerOneInput = element<HTMLSelectElement>("controller-1");
 const controllerTwoInput = element<HTMLSelectElement>("controller-2");
+const leftStickDpadInputs: Record<ControllerPort, HTMLInputElement> = {
+    1: element<HTMLInputElement>("left-stick-dpad-1"),
+    2: element<HTMLInputElement>("left-stick-dpad-2"),
+};
 const controllersDialog = element<HTMLDialogElement>("controllers-dialog");
 const controllerTabs: Record<ControllerPort, HTMLButtonElement> = {
     1: element<HTMLButtonElement>("player-tab-1"),
@@ -126,10 +132,12 @@ let activeFirmwareByteLengths: ReadonlyArray<number> = [];
 let visibleFrameUnsubscribe: (() => void) | null = null;
 let launchInProgress = false;
 let pendingDiscCount: number | null = null;
+let pendingStoredGameId: string | null = null;
 let screenMessageRevision = 0;
 let generatedGameTitle = "";
 const gamepadAssignments: Record<ControllerPort, number | null> = { 1: 0, 2: 1 };
 const gamepadButtonMaps: Record<string, GamepadButtonMap> = Object.create(null) as Record<string, GamepadButtonMap>;
+const leftStickDpad: Record<ControllerPort, boolean> = { 1: false, 2: false };
 
 interface BindingCaptureBaseline {
     readonly buttons: boolean[];
@@ -180,6 +188,7 @@ interface StoredControlProfile {
     readonly version: 1;
     readonly keyboard: KeyboardMap;
     readonly gamepads: GamepadButtonMaps;
+    readonly leftStickDpad?: Readonly<Record<ControllerPort, boolean>>;
 }
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -190,6 +199,12 @@ const record = (value: unknown): Record<string, unknown> | null =>
 const frozenKeyboardMap = (map: KeyboardMap): KeyboardMap => Object.freeze(Object.fromEntries(
     Object.entries(map).map(([code, control]) => [code, Object.freeze({ ...control })]),
 ));
+
+const isStoredLeftStickDpad = (value: unknown): value is Readonly<Record<ControllerPort, boolean>> => {
+    const map = record(value);
+    return map !== null && Object.keys(map).every((port) => port === "1" || port === "2")
+        && typeof map[1] === "boolean" && typeof map[2] === "boolean";
+};
 
 const loadControlProfile = (): ControlProfileLoadStatus => {
     let source: string | null;
@@ -202,10 +217,16 @@ const loadControlProfile = (): ControlProfileLoadStatus => {
     try {
         const profile = record(JSON.parse(source));
         if (profile?.version !== 1 || !isKeyboardMap(profile.keyboard)
-            || !isGamepadButtonMaps(profile.gamepads)) return "invalid";
+            || !isGamepadButtonMaps(profile.gamepads)
+            || (profile.leftStickDpad !== undefined
+                && !isStoredLeftStickDpad(profile.leftStickDpad))) return "invalid";
         keyboardMap = frozenKeyboardMap(profile.keyboard);
         for (const [id, map] of Object.entries(profile.gamepads)) {
             gamepadButtonMaps[id] = Object.freeze({ ...map });
+        }
+        if (isStoredLeftStickDpad(profile.leftStickDpad)) {
+            leftStickDpad[1] = profile.leftStickDpad[1];
+            leftStickDpad[2] = profile.leftStickDpad[2];
         }
         return "loaded";
     } catch {
@@ -218,6 +239,7 @@ const persistControlProfile = (): boolean => {
         version: 1,
         keyboard: keyboardMap,
         gamepads: gamepadButtonMaps,
+        leftStickDpad: { ...leftStickDpad },
     };
     try {
         localStorage.setItem(CONTROL_PROFILE_STORAGE_KEY, JSON.stringify(profile));
@@ -315,6 +337,7 @@ const renderBindings = (): void => {
     for (const port of [1, 2] as const) {
         const pad = assignedPad(port);
         padLabels[port].textContent = pad === null ? "not connected" : gamepadName(pad);
+        leftStickDpadInputs[port].checked = leftStickDpad[port];
         for (const { button } of CONTROL_DEFINITIONS) {
             const view = bindingViews[port].get(button)!;
             view.keyboard.textContent = keyLabel(keyboardCodeFor(port, button));
@@ -401,6 +424,10 @@ const restoreDefaultBindings = (): void => {
         delete gamepadButtonMaps[id];
         runtime?.setGamepadButtonMap(id, null);
     }
+    for (const port of [1, 2] as const) {
+        leftStickDpad[port] = false;
+        runtime?.setLeftStickDpad(port, false);
+    }
     removeStoredControlProfile();
     bindingStatuses[1].textContent = "Default bindings restored.";
     bindingStatuses[2].textContent = "Default bindings restored.";
@@ -472,7 +499,7 @@ const setDiscFeedback = (message: string, state: "idle" | "working" | "success" 
 const renderDiscControls = (): void => {
     const session = player?.session;
     if (session === null || session === undefined) {
-        if (pendingDiscCount !== null) {
+        if (pendingDiscCount !== null && pendingStoredGameId !== null) {
             const selected = Number(discSelect.value);
             discSelect.replaceChildren(...Array.from({ length: pendingDiscCount }, (_, index) =>
                 new Option(`Disc ${index + 1}`, String(index))));
@@ -601,6 +628,17 @@ window.addEventListener("keydown", (event) => {
 }, true);
 window.addEventListener("gamepadconnected", renderBindings);
 window.addEventListener("gamepaddisconnected", renderBindings);
+for (const port of [1, 2] as const) {
+    leftStickDpadInputs[port].addEventListener("change", () => {
+        const enabled = leftStickDpadInputs[port].checked;
+        leftStickDpad[port] = enabled;
+        runtime?.setLeftStickDpad(port, enabled);
+        persistControlProfile();
+        bindingStatuses[port].textContent = enabled
+            ? "The left stick now also controls the D-pad for digital-only games."
+            : "Left-stick D-pad compatibility is off.";
+    });
+}
 restoreControlsButton.addEventListener("click", restoreDefaultBindings);
 
 const selectedFiles = (): PsxFileListLike => {
@@ -631,6 +669,34 @@ const setGeneratedGameTitle = (file: File | undefined): void => {
         generatedGameTitle = titleFromFile(file);
         gameTitleInput.value = generatedGameTitle;
     }
+};
+
+const selectGameFiles = (files: ReadonlyArray<File>, source: "drop" | "picker"): File | null => {
+    const file = files.length === 1 && /\.zip$/iu.test(files[0]!.name) ? files[0]! : null;
+    if (source === "drop") {
+        filesInput.value = "";
+        droppedFiles = file === null ? null : [file];
+    } else {
+        droppedFiles = null;
+    }
+    setGeneratedGameTitle(file ?? undefined);
+    pendingDiscCount = null;
+    pendingStoredGameId = null;
+    renderDiscControls();
+    if (file !== null) {
+        gameDropZone.dataset.state = "selected";
+        gameSelection.textContent = `Selected: ${file.name}`;
+        setGameFeedback("Game ZIP selected. Ready to check and store.", "idle");
+        return file;
+    }
+    const empty = files.length === 0;
+    gameDropZone.dataset.state = empty ? "idle" : "error";
+    gameSelection.textContent = empty ? "No game ZIP selected." : "Selection rejected: choose exactly one ZIP file.";
+    setGameFeedback(
+        empty ? "Choose a game ZIP, then run Check And Store." : "Choose exactly one game ZIP.",
+        empty ? "idle" : "error",
+    );
+    return null;
 };
 
 const selectedRegion = (): PsxRegion => biosRegionInput.value as PsxRegion;
@@ -752,11 +818,9 @@ deleteFirmwareButton.addEventListener("click", () => run(async () => {
 }));
 
 filesInput.addEventListener("change", () => {
-    const file = filesInput.files?.[0];
-    setGeneratedGameTitle(file);
-    pendingDiscCount = null;
-    renderDiscControls();
-    setGameFeedback(file === undefined ? "Choose a game ZIP, then run Check And Store." : "Game ZIP selected. Ready to check and store.", "idle");
+    const files = filesInput.files === null ? [] : [...filesInput.files];
+    const file = selectGameFiles(files, "picker");
+    if (file !== null) write(`Selected game ZIP: ${file.name}`);
 });
 
 const ensureRuntime = async (): Promise<PsxConsole> => {
@@ -790,6 +854,7 @@ const ensureRuntime = async (): Promise<PsxConsole> => {
                 cancel: cancelAnimationFrame.bind(globalThis),
             },
             target: document,
+            leftStickDpad,
             buttonMaps: gamepadButtonMaps,
         },
         gameStore,
@@ -924,6 +989,7 @@ const auditSelectedGame = async (console: PsxConsole): Promise<number | null> =>
 
 auditButton.addEventListener("click", () => run(async () => {
     auditButton.disabled = true;
+    pendingStoredGameId = null;
     setGameFeedback("Checking game ZIP…", "working");
     try {
         const console = await ensureRuntime();
@@ -938,6 +1004,7 @@ auditButton.addEventListener("click", () => run(async () => {
         setGameFeedback("Game check passed. Storing game…", "working");
         const imported = await console.importFiles(selectedFiles(), localConfig());
         await refreshGames();
+        pendingStoredGameId = imported.gameId;
         element<HTMLSelectElement>("stored-game").value = imported.gameId;
         renderDiscControls();
         const message = "Game check passed and game was stored in this browser.";
@@ -945,6 +1012,7 @@ auditButton.addEventListener("click", () => run(async () => {
         write(message);
     } catch (error) {
         pendingDiscCount = null;
+        pendingStoredGameId = null;
         renderDiscControls();
         const message = error instanceof Error ? error.message : String(error);
         setGameFeedback(`Game check or storage failed: ${message}`, "error");
@@ -983,14 +1051,11 @@ startButton.addEventListener("click", () => run(async () => {
     setGameFeedback("Starting session…", "working");
     setScreenMessage("Starting PlayStation…");
     write("Starting session; the first image may take a few seconds.");
+    const gameId = pendingStoredGameId;
+    if (gameId === null) throw new Error("Check and store the selected game before starting it.");
     const console = await ensureRuntime();
     const bios = await selectedBios();
-    await console.startFiles(
-        selectedFiles(),
-        localConfig(),
-        startConfig(bios, Number(discSelect.value)),
-    );
-    await refreshGames();
+    await console.startStored(gameId, startConfig(bios, Number(discSelect.value)));
     await prepareSessionAudio();
     renderDiscControls();
     setScreenMessage("Session is running; waiting for video…");
@@ -1124,18 +1189,24 @@ for (const port of [1, 2] as const) {
     }));
 }
 
-container.addEventListener("dragover", (event) => { event.preventDefault(); });
-container.addEventListener("drop", (event) => {
+for (const type of ["dragenter", "dragover"] as const) {
+    gameDropZone.addEventListener(type, (event) => {
+        if (event.dataTransfer === null || ![...event.dataTransfer.types].includes("Files")) return;
+        event.preventDefault();
+        gameDropZone.dataset.dragging = "true";
+        event.dataTransfer.dropEffect = "copy";
+    });
+}
+gameDropZone.addEventListener("dragleave", (event) => {
+    if (event.relatedTarget instanceof Node && gameDropZone.contains(event.relatedTarget)) return;
+    gameDropZone.dataset.dragging = "false";
+});
+gameDropZone.addEventListener("drop", (event) => {
     event.preventDefault();
+    gameDropZone.dataset.dragging = "false";
     const files = event.dataTransfer === null ? [] : [...event.dataTransfer.files];
-    droppedFiles = files.length === 1 && /\.zip$/iu.test(files[0]!.name) ? files : null;
-    setGeneratedGameTitle(droppedFiles?.[0]);
-    pendingDiscCount = null;
-    renderDiscControls();
-    setGameFeedback(droppedFiles === null ? "Drop exactly one game ZIP." : "Game ZIP selected. Ready to check and store.", droppedFiles === null ? "error" : "idle");
-    write(droppedFiles === null
-        ? "Drop exactly one game ZIP."
-        : `Selected game ZIP: ${droppedFiles[0]!.name}`);
+    const file = selectGameFiles(files, "drop");
+    write(file === null ? "Drop exactly one game ZIP." : `Selected game ZIP: ${file.name}`);
 });
 
 const loadStoredFirmware = async (): Promise<void> => {

@@ -141,7 +141,7 @@ const testFile: TestFile = {
                     const scheduler = new ManualFrames();
                     const buttons = Array.from({ length: 16 }, () => ({ pressed: false, value: 0 }));
                     buttons[0] = { pressed: true, value: 1 };
-                    const pad = { id: "pad", index: 3, connected: true, mapping: "standard", axes: [0, 0, 0, 0], buttons };
+                    const pad = { id: "pad", index: 3, connected: true, mapping: "standard", axes: [-1, 0, 0, 0], buttons };
                     const pads = Array.from({ length: 4 }, () => null) as Array<typeof pad | null>;
                     pads[3] = pad;
                     const gameStore = new FakeGameStore();
@@ -164,6 +164,7 @@ const testFile: TestFile = {
                     const localInput = player.input!;
                     console.setKeyboardMap({ ...DEFAULT_KEYBOARD_MAP, KeyZ: { port: 2, button: "circle" } });
                     console.setGamepadButtonMap("pad", { cross: null, triangle: 0 });
+                    console.setLeftStickDpad(2, true);
                     keyboardTarget.key("keydown", "KeyZ");
                     keyboardTarget.key("keyup", "KeyZ");
                     scheduler.pulse();
@@ -193,7 +194,10 @@ const testFile: TestFile = {
                     audit: [true, 1],
                     starts: [["local", "game.cue", 2], ["stored", "game.cue", 2]],
                     samePathShape: ["game.cue", "track.bin"],
-                    localInput: ["down:2:circle", "up:2:circle", "down:2:triangle", "release:2:triangle"],
+                    localInput: [
+                        "down:2:circle", "up:2:circle", "down:2:triangle", "down:2:left",
+                        "axis:2:left-x:-1", "release:2:triangle", "release:2:left",
+                    ],
                     storedInput: ["down:1:up", "release:1:up"],
                     imported: ["stored", 2],
                     cleanup: [0, 0, 1],

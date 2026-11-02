@@ -57,6 +57,13 @@
     .feedback[data-state="working"] { border-color: #8b6b38; color: #f1cb8a; }
     .feedback[data-state="success"] { border-color: #2e7458; color: #83e3b9; }
     .feedback[data-state="error"] { border-color: #8a4541; color: #ffaaa3; }
+    .game-drop-zone { display: grid; place-items: center; gap: .35rem; margin: .55rem 0; padding: 1rem; border: 1px dashed #53657a; border-radius: .55rem; background: #0b1017; text-align: center; transition: border-color .12s ease, background .12s ease; }
+    .game-drop-zone[data-dragging="true"] { border-color: #66c7ff; background: #102435; }
+    .game-drop-zone[data-state="selected"] { border-color: #3d906d; background: #0e1d18; }
+    .game-drop-zone[data-state="error"] { border-color: #a5524d; background: #211211; }
+    .game-drop-zone label { margin: .35rem 0 0; }
+    .game-drop-zone input { max-width: 100%; }
+    #game-selection { color: #9caabc; overflow-wrap: anywhere; }
     small { color: #9caabc; }
     code { color: #bfe6ff; }
     details { margin: .6rem 0; }
@@ -72,6 +79,8 @@
     .player-tabs button { margin-bottom: -1px; padding: .5rem .8rem; border: 1px solid transparent; border-bottom-color: #303b49; background: transparent; color: #9eabb9; cursor: pointer; }
     .player-tabs button[aria-selected="true"] { border-color: #3f8ab8 #3f8ab8 #111720; color: #d8efff; background: #111720; }
     .device-line { margin: .7rem 0; color: #b8c4d1; }
+    .check-option { grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .55rem; }
+    .check-option input { width: auto; margin: 0; }
     .binding-change { border: 1px solid #425267; border-radius: .35rem; padding: .35rem .55rem; background: #1d2937; color: inherit; cursor: pointer; }
     .binding-change:hover { border-color: #67a3cc; background: #26384a; }
     .binding-change[data-capturing="true"] { border-color: #b5843f; color: #ffd99b; }
@@ -143,7 +152,11 @@
     <div class="dialog-body">
     <fieldset>
       <legend>Game</legend>
-      <label>Game ZIP <input id="game-files" type="file" accept=".zip,application/zip"></label>
+      <div id="game-drop-zone" class="game-drop-zone" data-state="idle" data-dragging="false">
+        <strong>Drop one game ZIP here</strong>
+        <span id="game-selection">No game ZIP selected.</span>
+        <label>Or choose a ZIP <input id="game-files" type="file" accept=".zip,application/zip"></label>
+      </div>
       <p><small>Game Check And Store validates this ZIP before adding it to the browser library.</small></p>
       <label>Game title <input id="game-id" placeholder="Derived from the ZIP filename"></label>
       <p><small>This is the title shown in Library. Content identity is generated automatically.</small></p>
@@ -206,17 +219,19 @@
       </div>
       <section id="player-panel-1" role="tabpanel" aria-labelledby="player-tab-1">
         <label>Emulated controller <select id="controller-1"><option>dualshock</option><option>digital</option><option>none</option></select></label>
+        <label class="check-option"><input id="left-stick-dpad-1" type="checkbox"> <span>Left stick also acts as D-pad</span></label>
         <p class="device-line">Keyboard · Gamepad: <strong id="pad-label-1">Detecting…</strong></p>
         <table class="key-map"><thead><tr><th>Control</th><th>Keyboard</th><th>Gamepad 1</th><th>Change</th></tr></thead><tbody id="bindings-1"></tbody></table>
         <p id="binding-status-1" class="binding-status" role="status" aria-live="polite">Choose Change beside a control, then press a key or gamepad button.</p>
       </section>
       <section id="player-panel-2" role="tabpanel" aria-labelledby="player-tab-2" hidden>
         <label>Emulated controller <select id="controller-2"><option>dualshock</option><option>digital</option><option>none</option></select></label>
+        <label class="check-option"><input id="left-stick-dpad-2" type="checkbox"> <span>Left stick also acts as D-pad</span></label>
         <p class="device-line">Keyboard · Gamepad: <strong id="pad-label-2">Detecting…</strong></p>
         <table class="key-map"><thead><tr><th>Control</th><th>Keyboard</th><th>Gamepad 2</th><th>Change</th></tr></thead><tbody id="bindings-2"></tbody></table>
         <p id="binding-status-2" class="binding-status" role="status" aria-live="polite">Choose Change beside a control, then press a key or gamepad button.</p>
       </section>
-      <p><small id="controller-type-status">Emulated controller types apply when the next game starts. Analog sticks continue to use the standard gamepad axes.</small></p>
+      <p><small id="controller-type-status">Emulated controller types apply when the next game starts. Left-stick D-pad compatibility lets digital-only games use a modern gamepad stick.</small></p>
       <div class="buttons"><button id="restore-controls" type="button">Restore default bindings</button></div>
       <p><small id="control-storage-status" role="status" aria-live="polite">Control bindings are stored in this browser.</small></p>
     </div>

@@ -67,6 +67,7 @@ export default class GamepadSource {
     private readonly _deadZone: number;                                             // Center magnitude ignored for every axis
     private readonly _triggerThreshold: number;                                     // Analog trigger value considered pressed
     private readonly _invertAxes: NonNullable<GamepadSourceConfig["invertAxes"]>;   // Per-axis inversion flags
+    private readonly _leftStickDpad: NonNullable<GamepadSourceConfig["leftStickDpad"]>; // Ports receiving left-stick D-pad compatibility input
     private readonly _buttonMaps: GamepadButtonMaps;                                // Device-ID-keyed digital overrides
     private readonly _rumbleEnabled: boolean;                                       // Whether core rumble may reach actuators
     private readonly _assignments: Assignment[];                                    // Stable browser-index-to-port state
@@ -97,6 +98,7 @@ export default class GamepadSource {
         this._deadZone = config.deadZone ?? 0.2;
         this._triggerThreshold = config.triggerThreshold ?? 0.5;
         this._invertAxes = config.invertAxes ?? {};
+        this._leftStickDpad = config.leftStickDpad ?? {};
         this._buttonMaps = config.buttonMaps ?? {};
         this._rumbleEnabled = config.rumble ?? true;
         this._assignments = Object.entries(config.assignments)
@@ -241,6 +243,14 @@ export default class GamepadSource {
             next.set(button, control);
             if (!assignment.active.has(button)) assignment.channel.press(control);
         }
+        if (this._leftStickDpad[assignment.port] === true) {
+            for (const button of leftStickDpadButtons(pad, this._deadZone, this._invertAxes)) {
+                const control = { port: assignment.port, button } as const;
+                const alreadyActive = assignment.active.has(button) || next.has(button);
+                next.set(button, control);
+                if (!alreadyActive) assignment.channel.press(control);
+            }
+        }
         for (const [button, control] of assignment.active) {
             if (!next.has(button)) assignment.channel.release(control);
         }
@@ -339,4 +349,23 @@ const normalizedAxis = (value: number, deadZone: number): number => {
     const magnitude = Math.abs(clamped);
     if (magnitude <= deadZone) return 0;
     return Math.sign(clamped) * (magnitude - deadZone) / (1 - deadZone);
+};
+
+// HELPER :: gamepadLike, NUMBER, ARRAY<psxAxis, BOOLEAN> -> [psxButton]
+// Converts the normalized left stick into diagonal-capable D-pad directions for digital-only games.
+const leftStickDpadButtons = (
+    pad: GamepadLike,
+    deadZone: number,
+    invertAxes: NonNullable<GamepadSourceConfig["invertAxes"]>,
+): ReadonlyArray<PsxButton> => {
+    let horizontal = normalizedAxis(pad.axes[0] ?? 0, deadZone);
+    let vertical = normalizedAxis(pad.axes[1] ?? 0, deadZone);
+    if (invertAxes["left-x"] === true) horizontal = -horizontal;
+    if (invertAxes["left-y"] === true) vertical = -vertical;
+    const buttons: PsxButton[] = [];
+    if (vertical <= -0.5) buttons.push("up");
+    else if (vertical >= 0.5) buttons.push("down");
+    if (horizontal <= -0.5) buttons.push("left");
+    else if (horizontal >= 0.5) buttons.push("right");
+    return buttons;
 };

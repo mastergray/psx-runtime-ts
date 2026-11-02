@@ -53,6 +53,7 @@ export default class PsxConsole {
     private readonly _assignments = new Map<number, ControllerPort>();                  // Browser gamepad index to physical port bindings
     private readonly _gamepadButtonMaps: Record<string, GamepadButtonMap> =             // Device-specific digital remapping retained across sessions
         Object.create(null) as Record<string, GamepadButtonMap>;
+    private readonly _leftStickDpad: Record<ControllerPort, boolean> = { 1: false, 2: false }; // Per-port digital-game stick compatibility
     private readonly _unsubscribeStatus: () => void;                                    // Player-status observer cleanup
     private _keyboardMap: KeyboardMap | null;                                           // Current keyboard mapping override
     private _keyboard: KeyboardSource | null = null;                                    // Input source attached to the running session
@@ -68,6 +69,7 @@ export default class PsxConsole {
         this._gamepadConfig = config.gamepad ?? null;
         this._keyboardMap = config.keyboard?.map ?? null;
         Object.assign(this._gamepadButtonMaps, config.gamepad?.buttonMaps ?? {});
+        Object.assign(this._leftStickDpad, config.gamepad?.leftStickDpad ?? {});
         this._gameStore = config.gameStore ?? null;
         this._unsubscribeStatus = config.player.on("status", (status) => {
             if (status === "running") this._attachSources();
@@ -130,6 +132,21 @@ export default class PsxConsole {
         }
         if (map === null) delete this._gamepadButtonMaps[id];
         else this._gamepadButtonMaps[id] = Object.freeze({ ...map });
+        if (this._player.status === "running") this._attachSources();
+    }
+
+    // METHOD :: controllerPort, BOOLEAN -> VOID
+    // Enables or disables left-stick-to-D-pad compatibility for one emulated port.
+    setLeftStickDpad(port: ControllerPort, enabled: boolean): void {
+        this._assertLive();
+        if (this._gamepadConfig === null || !isControllerPort(port) || typeof enabled !== "boolean") {
+            throw invalid("Left-stick D-pad compatibility is invalid or gamepad input is not configured.", {
+                port,
+                enabled,
+            });
+        }
+        if (this._leftStickDpad[port] === enabled) return;
+        this._leftStickDpad[port] = enabled;
         if (this._player.status === "running") this._attachSources();
     }
 
@@ -244,6 +261,7 @@ export default class PsxConsole {
                 ...this._gamepadConfig,
                 input,
                 assignments,
+                leftStickDpad: this._leftStickDpad,
                 buttonMaps: this._gamepadButtonMaps,
             });
             this._gamepad.attach();

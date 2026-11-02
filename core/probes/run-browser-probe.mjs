@@ -273,11 +273,42 @@ try {
     if (probe === "m8") {
         await page.waitForFunction(() => document.querySelector("#screen") !== null
             && document.querySelectorAll("button").length >= 10);
+        const gameDrop = await page.evaluate(() => {
+            const zone = document.querySelector("#game-drop-zone");
+            if (!(zone instanceof HTMLElement)) throw new Error("Missing game ZIP drop zone");
+            const transfer = new DataTransfer();
+            transfer.items.add(new File([new Uint8Array([1, 2, 3])], "Dragged Game.zip", {
+                type: "application/zip",
+            }));
+            const dragover = new DragEvent("dragover", {
+                bubbles: true,
+                cancelable: true,
+                dataTransfer: transfer,
+            });
+            const accepted = !zone.dispatchEvent(dragover) && dragover.defaultPrevented;
+            const highlighted = zone.dataset.dragging;
+            zone.dispatchEvent(new DragEvent("drop", {
+                bubbles: true,
+                cancelable: true,
+                dataTransfer: transfer,
+            }));
+            return {
+                accepted,
+                highlighted,
+                dialog: zone.closest("dialog")?.id,
+                state: zone.dataset.state,
+                dragging: zone.dataset.dragging,
+                selection: document.querySelector("#game-selection")?.textContent,
+                feedback: document.querySelector("#game-feedback")?.textContent,
+                title: document.querySelector("#game-id")?.value,
+            };
+        });
         await page.click("[data-open-dialog='controllers-dialog']");
         await page.click("#player-tab-2");
         const tabSelected = await page.getAttribute("#player-tab-2", "aria-selected");
         const playerOneHidden = await page.getAttribute("#player-panel-1", "hidden");
         const playerTwoHidden = await page.getAttribute("#player-panel-2", "hidden");
+        await page.click("#left-stick-dpad-2");
         await page.click("#change-2-up");
         const keyboardListening = await page.textContent("#change-2-up");
         await page.keyboard.press("KeyG");
@@ -295,29 +326,34 @@ try {
             playerTwoUpKey: document.querySelector("#keyboard-2-up")?.textContent,
             playerTwoCircleButton: document.querySelector("#gamepad-2-circle")?.textContent,
             playerTwoCrossButton: document.querySelector("#gamepad-2-cross")?.textContent,
+            playerTwoStickDpad: document.querySelector("#left-stick-dpad-2")?.checked,
             stored: localStorage.getItem("psx-runtime:ui:controls") !== null,
         }));
         await page.reload({ waitUntil: "domcontentloaded" });
         await page.waitForFunction(() => document.querySelector("#keyboard-2-up")?.textContent === "G"
             && document.querySelector("#gamepad-1-circle")?.textContent === "A"
-            && document.querySelector("#gamepad-1-cross")?.textContent === "unbound");
+            && document.querySelector("#gamepad-1-cross")?.textContent === "unbound"
+            && document.querySelector("#left-stick-dpad-2")?.checked === true);
         await page.click("[data-open-dialog='controllers-dialog']");
         const persisted = await page.evaluate(() => ({
             playerOnePad: document.querySelector("#pad-label-1")?.textContent,
             playerTwoUpKey: document.querySelector("#keyboard-2-up")?.textContent,
             playerOneCircleButton: document.querySelector("#gamepad-1-circle")?.textContent,
             playerOneCrossButton: document.querySelector("#gamepad-1-cross")?.textContent,
+            playerTwoStickDpad: document.querySelector("#left-stick-dpad-2")?.checked,
             storageStatus: document.querySelector("#control-storage-status")?.textContent,
         }));
         await page.click("#restore-controls");
         await page.waitForFunction(() => document.querySelector("#keyboard-2-up")?.textContent === "I"
             && document.querySelector("#gamepad-1-cross")?.textContent === "A"
             && document.querySelector("#gamepad-1-circle")?.textContent === "B"
+            && document.querySelector("#left-stick-dpad-2")?.checked === false
             && localStorage.getItem("psx-runtime:ui:controls") === null);
         const restored = await page.evaluate(() => ({
             playerTwoUpKey: document.querySelector("#keyboard-2-up")?.textContent,
             playerOneCrossButton: document.querySelector("#gamepad-1-cross")?.textContent,
             playerOneCircleButton: document.querySelector("#gamepad-1-circle")?.textContent,
+            playerTwoStickDpad: document.querySelector("#left-stick-dpad-2")?.checked,
             stored: localStorage.getItem("psx-runtime:ui:controls") !== null,
         }));
         await page.evaluate(() => localStorage.setItem("psx-runtime:ui:controls", JSON.stringify({
@@ -340,21 +376,28 @@ try {
         }));
         resolveResult({
             ok: harness.canvas && harness.buttons >= 10 && harness.status === "idle"
+                && gameDrop.accepted && gameDrop.highlighted === "true"
+                && gameDrop.dialog === "game-dialog" && gameDrop.state === "selected"
+                && gameDrop.dragging === "false" && gameDrop.selection === "Selected: Dragged Game.zip"
+                && gameDrop.feedback === "Game ZIP selected. Ready to check and store."
+                && gameDrop.title === "Dragged Game"
                 && tabSelected === "true" && playerOneHidden === "" && playerTwoHidden === null
                 && keyboardListening === "Press a key or button…"
                 && gamepadListening === "Press a key or button…"
                 && captured.playerOnePad === "not connected" && captured.playerTwoPad === "M8 Test Gamepad"
                 && captured.playerTwoUpKey === "G" && captured.playerTwoCircleButton === "A"
-                && captured.playerTwoCrossButton === "unbound" && captured.stored
+                && captured.playerTwoCrossButton === "unbound" && captured.playerTwoStickDpad && captured.stored
                 && persisted.playerOnePad === "M8 Test Gamepad" && persisted.playerTwoUpKey === "G"
                 && persisted.playerOneCircleButton === "A" && persisted.playerOneCrossButton === "unbound"
+                && persisted.playerTwoStickDpad
                 && persisted.storageStatus === "Stored control bindings loaded from this browser."
                 && restored.playerTwoUpKey === "I" && restored.playerOneCrossButton === "A"
-                && restored.playerOneCircleButton === "B" && !restored.stored
+                && restored.playerOneCircleButton === "B" && !restored.playerTwoStickDpad && !restored.stored
                 && invalidIgnored.playerTwoUpKey === "I"
                 && invalidIgnored.storageStatus === "The stored control profile is invalid and was ignored; default bindings are active."
                 && pageErrors.length === 0,
             ...harness,
+            gameDrop,
             captured,
             persisted,
             restored,

@@ -313,7 +313,7 @@ const testFile: TestFile = {
                         index: 3,
                         connected: true,
                         mapping: "standard",
-                        axes: [0.1, 0.6, 0, 0],
+                        axes: [-0.7, 0.7, 0, 0],
                         buttons: firstButtons,
                         vibrationActuator: {
                             playEffect: async (type, parameters) => { rumbleCalls.push({ type, parameters }); },
@@ -340,6 +340,7 @@ const testFile: TestFile = {
                         deadZone: 0.2,
                         triggerThreshold: 0.7,
                         invertAxes: { "left-y": true },
+                        leftStickDpad: { 1: true },
                         buttonMaps: { one: { cross: 1, circle: 0 } },
                     };
                     const source = new GamepadSource(config);
@@ -356,6 +357,7 @@ const testFile: TestFile = {
                         config: isGamepadSourceConfig(config),
                         duplicateRejected: isGamepadSourceConfig({ ...config, assignments: { 3: 1, 7: 1 } }),
                         buttonMapRejected: isGamepadSourceConfig({ ...config, buttonMaps: { one: { cross: -1 } } }),
+                        leftStickDpadRejected: isGamepadSourceConfig({ ...config, leftStickDpad: { 3: true } }),
                         players: source.players,
                         buttons: session.buttons,
                         axes: session.axes,
@@ -368,6 +370,7 @@ const testFile: TestFile = {
                     config: true,
                     duplicateRejected: false,
                     buttonMapRejected: false,
+                    leftStickDpadRejected: false,
                     players: [
                         { index: 3, port: 1, id: null },
                         { index: 7, port: 2, id: null },
@@ -375,13 +378,17 @@ const testFile: TestFile = {
                     buttons: [
                         "1:circle:true",
                         "1:left:true",
+                        "1:up:true",
                         "2:start:true",
                         "1:circle:false",
                         "1:left:false",
+                        "1:up:false",
                         "2:start:false",
                     ],
                     axes: [
-                        "1:left-y:-0.5",
+                        "1:left-x:-0.625",
+                        "1:left-y:-0.625",
+                        "1:left-x:0",
                         "1:left-y:0",
                     ],
                     rumbleCalls: [{
