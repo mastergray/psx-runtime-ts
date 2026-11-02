@@ -96,6 +96,10 @@ export default class PsxPlayer {
     // Returns the audio output for the active session.
     get audio(): PsxPlayerAudioLike | null { return this._audio; }
 
+    // GETTER :: VOID -> psxPlayerDisplayLike
+    // Returns the display so browser shells can control presentation without owning its lifecycle.
+    get display(): PsxPlayerConfig["display"] { return this._display; }
+
     /**
      *
      * Instance Methods

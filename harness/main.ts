@@ -23,6 +23,7 @@ import type {
     PsxFirmwareRecord,
     PsxPlayer,
     PsxRegion,
+    PsxScalingMode,
 } from "../src/index.js";
 
 interface PreloadManifest {
@@ -52,6 +53,8 @@ const gameMenuButton = element<HTMLButtonElement>("game-menu");
 const libraryMenuButton = element<HTMLButtonElement>("library-menu");
 const gameDialog = element<HTMLDialogElement>("game-dialog");
 const libraryDialog = element<HTMLDialogElement>("library-dialog");
+const deleteGameDialog = element<HTMLDialogElement>("delete-game-dialog");
+const viewDialog = element<HTMLDialogElement>("view-dialog");
 const sessionDialog = element<HTMLDialogElement>("session-dialog");
 const canvas = element<HTMLCanvasElement>("screen");
 const container = element<HTMLDivElement>("screen-stage");
@@ -115,11 +118,25 @@ const firmwareStatus = element<HTMLElement>("firmware-status");
 const gameFeedback = element<HTMLElement>("game-feedback");
 const discFeedback = element<HTMLElement>("disc-feedback");
 const discSelect = element<HTMLSelectElement>("disc-index");
+const storedGameInput = element<HTMLSelectElement>("stored-game");
+const storedTitleInput = element<HTMLInputElement>("stored-title");
+const startStoredButton = element<HTMLButtonElement>("start-stored");
+const renameStoredButton = element<HTMLButtonElement>("rename-stored");
+const deleteStoredButton = element<HTMLButtonElement>("delete-stored");
+const confirmDeleteStoredButton = element<HTMLButtonElement>("confirm-delete-stored");
+const deleteGameName = element<HTMLElement>("delete-game-name");
 const startButton = element<HTMLButtonElement>("start");
 const auditButton = element<HTMLButtonElement>("audit");
 const firmwareStoreButton = element<HTMLButtonElement>("check-store-firmware");
 const deleteFirmwareButton = element<HTMLButtonElement>("delete-firmware");
+const pauseButton = element<HTMLButtonElement>("pause");
+const resetButton = element<HTMLButtonElement>("soft-reset");
 const muteAudioButton = element<HTMLButtonElement>("mute-audio");
+const fullscreenButtons: Readonly<Record<"fit" | "stretch", HTMLButtonElement>> = {
+    fit: element<HTMLButtonElement>("fullscreen-fit"),
+    stretch: element<HTMLButtonElement>("fullscreen-stretch"),
+};
+const viewStatus = element<HTMLElement>("view-status");
 let preloadFiles: File[] | null = null;
 let preloadBios: File | null = null;
 let preloadRegion: "ntsc-u" | "ntsc-j" | "pal" = "ntsc-u";
@@ -133,8 +150,11 @@ let visibleFrameUnsubscribe: (() => void) | null = null;
 let launchInProgress = false;
 let pendingDiscCount: number | null = null;
 let pendingStoredGameId: string | null = null;
+let pendingDeleteGameId: string | null = null;
 let screenMessageRevision = 0;
 let generatedGameTitle = "";
+let fullscreenExitChordHeld = false;
+const storedGameTitles = new Map<string, string>();
 
 interface GamepadAssignment {
     readonly index: number;
@@ -980,6 +1000,33 @@ const run = (action: () => Promise<unknown> | unknown): void => {
     void Promise.resolve().then(action).catch(report);
 };
 
+interface HarnessDisplay {
+    readonly isFullscreen: boolean;
+    scaling: PsxScalingMode;
+    fullscreen(): Promise<void>;
+    exitFullscreen(): Promise<void>;
+}
+
+const sessionDisplay = (): HarnessDisplay | null => {
+    const display = player?.display;
+    return display !== undefined && typeof display.isFullscreen === "boolean"
+        && display.scaling !== undefined && typeof display.fullscreen === "function"
+        && typeof display.exitFullscreen === "function"
+        ? display as HarnessDisplay
+        : null;
+};
+
+const enterFullscreen = async (scaling: "fit" | "stretch"): Promise<void> => {
+    const display = sessionDisplay();
+    if (display === null || player?.session === null || player?.session === undefined) {
+        throw new Error("Start a game before entering fullscreen.");
+    }
+    display.scaling = scaling;
+    await display.fullscreen();
+    viewDialog.close();
+    write(`Fullscreen ${scaling} view enabled.`);
+};
+
 const updateDiagnostics = (): void => {
     const input = player?.input as ({
         readonly snapshot?: ReadonlyArray<{ readonly port: number; readonly button: string }>;
@@ -988,10 +1035,22 @@ const updateDiagnostics = (): void => {
             readonly value: number;
         }>;
     } | null);
-    const buttons = input?.snapshot?.map(({ port, button }) => `${port}:${button}`) ?? [];
+    const snapshot = input?.snapshot ?? [];
+    const buttons = snapshot.map(({ port, button }) => `${port}:${button}`);
     const axes = input?.axes?.filter(({ value }) => Math.abs(value) > 0.01)
         .map(({ control, value }) => `${control.port}:${control.axis}=${value.toFixed(2)}`) ?? [];
     inputStatus.textContent = [...buttons, ...axes].join(", ") || "none";
+    const display = sessionDisplay();
+    const exitChord = ([1, 2] as const).some((port) =>
+        snapshot.some((control) => control.port === port && control.button === "l3")
+        && snapshot.some((control) => control.port === port && control.button === "r3"));
+    if (exitChord && !fullscreenExitChordHeld && display?.isFullscreen === true) {
+        fullscreenExitChordHeld = true;
+        void display.exitFullscreen().catch(report);
+    } else if (!exitChord) {
+        fullscreenExitChordHeld = false;
+    }
+    viewStatus.textContent = `${display?.isFullscreen === true ? "fullscreen" : "windowed"} · ${display?.scaling ?? "fit"}`;
     const audio = player?.audio as ({
         readonly isUnlocked?: boolean;
         readonly isMuted?: boolean;
@@ -1006,12 +1065,18 @@ const updateDiagnostics = (): void => {
             : `waiting for browser permission; output ${audio.isMuted ? "muted" : "will be audible"}`;
     sessionAudioStatus.textContent = availability;
     muteAudioButton.disabled = audio === null || audio === undefined;
-    muteAudioButton.textContent = audio?.isMuted === true ? "Unmute audio" : "Mute audio";
+    muteAudioButton.textContent = audio?.isMuted === true ? "Unmute" : "Mute";
     audioStatus.textContent = audio === null || audio === undefined
         ? availability
         : `${availability}, queue=${(audio.queuedMs ?? 0).toFixed(1)}ms, `
             + `dropped=${audio.droppedSamples ?? 0}, device=${audio.deviceSampleRate ?? "pending"}Hz`;
     const sessionActive = player?.session !== null && player?.session !== undefined;
+    const sessionStatus = player?.status;
+    pauseButton.disabled = sessionStatus !== "running" && sessionStatus !== "paused";
+    pauseButton.textContent = sessionStatus === "paused" ? "Resume" : "Pause";
+    resetButton.disabled = !sessionActive;
+    fullscreenButtons.fit.disabled = !sessionActive || display === null;
+    fullscreenButtons.stretch.disabled = !sessionActive || display === null;
     controllerOneInput.disabled = sessionActive;
     controllerTwoInput.disabled = sessionActive;
     controllerTypeStatus.textContent = sessionActive
@@ -1096,7 +1161,8 @@ auditButton.addEventListener("click", () => run(async () => {
         const imported = await console.importFiles(selectedFiles(), localConfig());
         await refreshGames();
         pendingStoredGameId = imported.gameId;
-        element<HTMLSelectElement>("stored-game").value = imported.gameId;
+        storedGameInput.value = imported.gameId;
+        renderStoredGameSelection();
         renderDiscControls();
         const message = "Game check passed and game was stored in this browser.";
         setGameFeedback(message, "success");
@@ -1158,50 +1224,85 @@ startButton.addEventListener("click", () => run(async () => {
 }));
 
 const selectedStoredGame = (): string => {
-    const gameId = element<HTMLSelectElement>("stored-game").value;
+    const gameId = storedGameInput.value;
     if (gameId.length === 0) throw new Error("Select a stored game first.");
     return gameId;
 };
 
+const renderStoredGameSelection = (): void => {
+    const gameId = storedGameInput.value;
+    const hasSelection = gameId.length > 0 && storedGameTitles.has(gameId);
+    startStoredButton.disabled = !hasSelection;
+    renameStoredButton.disabled = !hasSelection;
+    deleteStoredButton.disabled = !hasSelection;
+    storedTitleInput.disabled = !hasSelection;
+    if (hasSelection) storedTitleInput.value = storedGameTitles.get(gameId)!;
+    else storedTitleInput.value = "";
+};
+
 const refreshGames = async (): Promise<void> => {
-    const select = element<HTMLSelectElement>("stored-game");
-    const previous = select.value;
+    const previous = storedGameInput.value;
     const games = await gameStore.list();
-    select.replaceChildren(...games.map((game) => {
+    storedGameTitles.clear();
+    games.forEach((game) => storedGameTitles.set(game.gameId, game.displayTitle));
+    storedGameInput.replaceChildren(...games.map((game) => {
         const option = document.createElement("option");
         option.value = game.gameId;
         option.textContent = `${game.displayTitle} (${game.discCount} disc${game.discCount === 1 ? "" : "s"})`;
         return option;
     }));
-    if (games.some(({ gameId }) => gameId === previous)) select.value = previous;
+    if (games.some(({ gameId }) => gameId === previous)) storedGameInput.value = previous;
+    renderStoredGameSelection();
 };
 
 element("refresh-games").addEventListener("click", () => run(refreshGames));
-element("start-stored").addEventListener("click", () => run(async () => {
+storedGameInput.addEventListener("change", renderStoredGameSelection);
+startStoredButton.addEventListener("click", () => run(async () => {
+    const gameId = selectedStoredGame();
+    const switching = player?.session !== null && player?.session !== undefined;
     launchInProgress = true;
-    setScreenMessage("Starting stored PlayStation game…");
+    stopWatchingForVisibleFrame();
+    setScreenMessage(switching ? "Switching PlayStation games…" : "Starting stored PlayStation game…");
     const console = await ensureRuntime();
     const bios = await selectedBios();
-    await console.startStored(selectedStoredGame(), startConfig(bios));
+    await console.startStored(gameId, startConfig(bios));
     await prepareSessionAudio();
     renderDiscControls();
     setScreenMessage("Session is running; waiting for video…");
     watchForVisibleFrame();
     libraryDialog.close();
     launchInProgress = false;
-    write("Stored session started.");
+    write(switching ? "Stored session replaced the previous game." : "Stored session started.");
 }));
-element("rename-stored").addEventListener("click", () => run(async () => {
+renameStoredButton.addEventListener("click", () => run(async () => {
     await gameStore.renameDisplayTitle(
         selectedStoredGame(),
-        element<HTMLInputElement>("stored-title").value,
+        storedTitleInput.value,
     );
     await refreshGames();
 }));
-element("delete-stored").addEventListener("click", () => run(async () => {
-    await gameStore.delete(selectedStoredGame());
-    await refreshGames();
+deleteStoredButton.addEventListener("click", () => run(() => {
+    pendingDeleteGameId = selectedStoredGame();
+    deleteGameName.textContent = storedGameTitles.get(pendingDeleteGameId) ?? "this game";
+    if (!deleteGameDialog.open) deleteGameDialog.showModal();
 }));
+confirmDeleteStoredButton.addEventListener("click", () => run(async () => {
+    const gameId = pendingDeleteGameId;
+    if (gameId === null) throw new Error("No stored game is awaiting removal.");
+    confirmDeleteStoredButton.disabled = true;
+    try {
+        await gameStore.delete(gameId);
+        await refreshGames();
+        deleteGameDialog.close();
+        write("Stored game removed from this browser.");
+    } finally {
+        confirmDeleteStoredButton.disabled = false;
+    }
+}));
+deleteGameDialog.addEventListener("close", () => {
+    pendingDeleteGameId = null;
+    deleteGameName.textContent = "this game";
+});
 
 element("stop").addEventListener("click", () => run(async () => {
     stopWatchingForVisibleFrame();
@@ -1211,9 +1312,19 @@ element("stop").addEventListener("click", () => run(async () => {
     sessionDialog.close();
     write("Session stopped.");
 }));
-element("pause").addEventListener("click", () => run(async () => { await player?.pause(); }));
-element("resume").addEventListener("click", () => run(() => player?.resume()));
-element("soft-reset").addEventListener("click", () => run(async () => { await player?.reset("soft"); }));
+pauseButton.addEventListener("click", () => run(async () => {
+    if (player?.status === "paused") {
+        player.resume();
+        write("Session resumed.");
+        return;
+    }
+    await player?.pause();
+    write("Session paused.");
+}));
+resetButton.addEventListener("click", () => run(async () => {
+    await player?.reset("soft");
+    write("Session reset.");
+}));
 element("hard-reset").addEventListener("click", () => run(async () => { await player?.reset("hard"); }));
 discSelect.addEventListener("change", () => {
     const session = player?.session;
@@ -1251,7 +1362,8 @@ element("audio-volume").addEventListener("input", () => run(() => {
     const audio = sessionAudio();
     if (audio !== null) audio.volume = Number(element<HTMLInputElement>("audio-volume").value);
 }));
-element("fullscreen").addEventListener("click", () => run(async () => { await container.requestFullscreen(); }));
+fullscreenButtons.fit.addEventListener("click", () => run(() => enterFullscreen("fit")));
+fullscreenButtons.stretch.addEventListener("click", () => run(() => enterFullscreen("stretch")));
 
 const stateName = (): string => element<HTMLInputElement>("state-name").value;
 element("save-state").addEventListener("click", () => run(async () => { await player?.saveState(stateName()); }));

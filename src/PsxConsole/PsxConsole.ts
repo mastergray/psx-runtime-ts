@@ -215,6 +215,8 @@ export default class PsxConsole {
             code: PsxRuntimeError.CODE.CONTENT_LOAD_FAILED,
             message: "The stored game does not exist.",
         });
+        if (this._player.status === "running" || this._player.status === "paused"
+            || this._player.status === "failed") await this._player.stop();
         await this._player.start({ ...config, game });
     }
 

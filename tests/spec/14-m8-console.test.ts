@@ -53,6 +53,7 @@ class FakePlayer {
     input: FakeInput | null = null;
     readonly starts: PsxStartConfig[] = [];
     readonly listeners = new Set<(status: PsxPlayerStatus) => void>();
+    stops = 0;
     destroyed = 0;
     async start(config: PsxStartConfig): Promise<void> {
         this.starts.push(config);
@@ -61,6 +62,7 @@ class FakePlayer {
         this.listeners.forEach((listener) => listener(this.status));
     }
     async stop(): Promise<void> {
+        this.stops++;
         this.status = "idle";
         this.listeners.forEach((listener) => listener(this.status));
         this.input = null;
@@ -168,7 +170,6 @@ const testFile: TestFile = {
                     keyboardTarget.key("keydown", "KeyZ");
                     keyboardTarget.key("keyup", "KeyZ");
                     scheduler.pulse();
-                    await console.stop();
                     const imported = await console.importFiles(files, { gameId: "stored" });
                     await console.startStored("stored", { bios: {
                         name: "firmware", region: "ntsc-u", blob: new Blob([new Uint8Array([1])]),
@@ -186,7 +187,7 @@ const testFile: TestFile = {
                         storedInput: storedInput.calls,
                         imported: [imported.gameId, gameStore.imports],
                         cleanup: [scheduler.callbacks.size, keyboardTarget.listeners.get("keydown")?.size ?? 0,
-                            player.destroyed],
+                            player.stops, player.destroyed],
                     };
                 })
                 .assert("console behavior", ({ subject }) => subject, P.equals<unknown>({
@@ -200,7 +201,7 @@ const testFile: TestFile = {
                     ],
                     storedInput: ["down:1:up", "release:1:up"],
                     imported: ["stored", 2],
-                    cleanup: [0, 0, 1],
+                    cleanup: [0, 0, 2, 1],
                 }))
                 .start(undefined),
         },

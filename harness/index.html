@@ -57,6 +57,7 @@
     .feedback[data-state="working"] { border-color: #8b6b38; color: #f1cb8a; }
     .feedback[data-state="success"] { border-color: #2e7458; color: #83e3b9; }
     .feedback[data-state="error"] { border-color: #8a4541; color: #ffaaa3; }
+    .danger { border-color: #8a4541 !important; color: #ffaaa3; }
     .game-drop-zone { display: grid; place-items: center; gap: .35rem; margin: .55rem 0; padding: 1rem; border: 1px dashed #53657a; border-radius: .55rem; background: #0b1017; text-align: center; transition: border-color .12s ease, background .12s ease; }
     .game-drop-zone[data-dragging="true"] { border-color: #66c7ff; background: #102435; }
     .game-drop-zone[data-state="selected"] { border-color: #3d906d; background: #0e1d18; }
@@ -109,6 +110,10 @@
     <button id="system-menu" type="button" aria-haspopup="dialog" aria-controls="system-dialog" aria-expanded="false" data-open-dialog="system-dialog">System</button>
     <button id="game-menu" type="button" aria-haspopup="dialog" aria-controls="game-dialog" aria-expanded="false" data-open-dialog="game-dialog" disabled title="Check and store valid firmware in System first.">Game</button>
     <button id="library-menu" type="button" aria-haspopup="dialog" aria-controls="library-dialog" aria-expanded="false" data-open-dialog="library-dialog" disabled title="Check and store valid firmware in System first.">Library</button>
+    <button id="view-menu" type="button" aria-haspopup="dialog" aria-controls="view-dialog" aria-expanded="false" data-open-dialog="view-dialog">View</button>
+    <button id="pause" type="button" disabled>Pause</button>
+    <button id="soft-reset" type="button" disabled>Reset</button>
+    <button id="mute-audio" type="button" disabled>Mute</button>
     <button type="button" aria-haspopup="dialog" aria-controls="session-dialog" aria-expanded="false" data-open-dialog="session-dialog">Session</button>
     <button type="button" aria-haspopup="dialog" aria-controls="controllers-dialog" aria-expanded="false" data-open-dialog="controllers-dialog">Controllers</button>
     <button type="button" aria-haspopup="dialog" aria-controls="memory-cards-dialog" aria-expanded="false" data-open-dialog="memory-cards-dialog">Memory Cards</button>
@@ -188,6 +193,32 @@
   </div>
 </dialog>
 
+<dialog id="delete-game-dialog" aria-labelledby="delete-game-dialog-title">
+  <div class="dialog-shell">
+    <header class="dialog-header"><h2 id="delete-game-dialog-title">Remove stored game?</h2><button class="dialog-close" type="button" data-close-dialog>Cancel</button></header>
+    <div class="dialog-body">
+      <p>Remove <strong id="delete-game-name">this game</strong> from this browser?</p>
+      <p><small>This removes its stored game files and cannot be undone.</small></p>
+      <div class="buttons"><button type="button" data-close-dialog>Keep game</button><button id="confirm-delete-stored" class="danger" type="button">Remove game</button></div>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="view-dialog" aria-labelledby="view-dialog-title">
+  <div class="dialog-shell">
+    <header class="dialog-header"><h2 id="view-dialog-title">View</h2><button class="dialog-close" type="button" data-close-dialog>Close</button></header>
+    <div class="dialog-body">
+      <fieldset>
+        <legend>Fullscreen presentation</legend>
+        <p><small>Fit preserves the PlayStation aspect ratio. Stretch fills the entire screen.</small></p>
+        <div class="buttons"><button id="fullscreen-fit" type="button">Fullscreen (Fit)</button><button id="fullscreen-stretch" type="button">Fullscreen (Stretch)</button></div>
+        <p>View status: <code id="view-status" role="status" aria-live="polite">windowed · fit</code></p>
+        <p><small>Press Escape or both controller stick buttons (L3 + R3) to leave fullscreen.</small></p>
+      </fieldset>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="session-dialog" aria-labelledby="session-dialog-title">
   <div class="dialog-shell">
     <header class="dialog-header"><h2 id="session-dialog-title">Session</h2><button class="dialog-close" type="button" data-close-dialog>Close</button></header>
@@ -196,9 +227,7 @@
       <legend>Session</legend>
       <div class="buttons">
         <button id="stop">Stop</button>
-        <button id="mute-audio" disabled>Mute audio</button>
-        <button id="pause">Pause</button><button id="resume">Resume</button>
-        <button id="soft-reset">Soft reset</button><button id="hard-reset">Hard reset</button><button id="fullscreen">Fullscreen</button>
+        <button id="hard-reset">Hard reset</button>
       </div>
       <p>Audio: <code id="session-audio-status" role="status" aria-live="polite">unavailable until a game starts</code></p>
       <label>Audio volume <input id="audio-volume" type="range" min="0" max="1" step="0.05" value="0.15"></label>

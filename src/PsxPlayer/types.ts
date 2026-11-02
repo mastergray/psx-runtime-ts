@@ -1,5 +1,6 @@
 // Dependencies:
 import { isPsxAdapter } from "../shared.types.js";    // Validates the backend adapter supplied to the player
+import { isPsxScalingMode } from "../PsxDisplay/types.js"; // Validates optional presentation controls exposed by a display
 
 // Type dependencies:
 import type {
@@ -15,6 +16,7 @@ import type {
     PsxStateRecord,            // Persisted save-state record
     PsxStateSaveConfig,        // Save-state persistence input
 } from "../PsxStorage/types.js";
+import type { PsxScalingMode } from "../PsxDisplay/types.js"; // Fit or stretch strategy available to browser presentation controls
 
 /**
  *
@@ -27,10 +29,14 @@ import type {
 export type PsxPlayerStatus =
     | "idle" | "starting" | "running" | "paused" | "stopping" | "failed" | "destroyed";
 
-// INTERFACE :: {hasFrame:BOOLEAN, attach:(psxSession -> unsubscribe), detach:(VOID -> VOID), destroy:(VOID -> VOID)}
+// INTERFACE :: {hasFrame:BOOLEAN, isFullscreen:BOOLEAN?, scaling:psxScalingMode?, fullscreen:(VOID -> PROMISE(VOID))?, exitFullscreen:(VOID -> PROMISE(VOID))?, attach:(psxSession -> unsubscribe), detach:(VOID -> VOID), destroy:(VOID -> VOID)}
 // Display lifecycle surface composed with each session.
 export interface PsxPlayerDisplayLike {
     readonly hasFrame: boolean;                   // Whether startup produced visible output
+    readonly isFullscreen?: boolean;              // Whether this display currently owns browser fullscreen
+    scaling?: PsxScalingMode;                     // Optional mutable presentation strategy
+    fullscreen?(): Promise<void>;                 // Optionally requests browser fullscreen
+    exitFullscreen?(): Promise<void>;             // Optionally leaves browser fullscreen
     attach(session: PsxSession): Unsubscribe;     // Subscribes to one session's frames
     detach(): void;                               // Removes the active frame subscription
     destroy(): void;                              // Ends display ownership
@@ -102,7 +108,11 @@ export function isPsxPlayerStatus(value: unknown): value is PsxPlayerStatus {
 // True when value exposes the required display lifecycle surface.
 export function isPsxPlayerDisplayLike(value: unknown): value is PsxPlayerDisplayLike {
     return isObject(value) && typeof value.hasFrame === "boolean" && typeof value.attach === "function"
-        && typeof value.detach === "function" && typeof value.destroy === "function";
+        && typeof value.detach === "function" && typeof value.destroy === "function"
+        && (value.isFullscreen === undefined || typeof value.isFullscreen === "boolean")
+        && (value.scaling === undefined || isPsxScalingMode(value.scaling))
+        && (value.fullscreen === undefined || typeof value.fullscreen === "function")
+        && (value.exitFullscreen === undefined || typeof value.exitFullscreen === "function");
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN

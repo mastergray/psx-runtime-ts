@@ -382,9 +382,17 @@ try {
             buttons: document.querySelectorAll("button").length,
             status: document.querySelector("#status")?.textContent,
             canvas: document.querySelector("#screen") instanceof HTMLCanvasElement,
+            topLevelSessionControls: ["pause", "soft-reset", "mute-audio"].every((id) =>
+                document.querySelector(`#${id}`)?.closest(".menu-actions") !== null),
+            viewControls: document.querySelector("#view-menu")?.getAttribute("aria-controls") === "view-dialog"
+                && document.querySelector("#fullscreen-fit")?.textContent === "Fullscreen (Fit)"
+                && document.querySelector("#fullscreen-stretch")?.textContent === "Fullscreen (Stretch)",
+            deleteConfirmation: document.querySelector("#delete-stored") !== null
+                && document.querySelector("#delete-game-dialog #confirm-delete-stored")?.textContent === "Remove game",
         }));
         resolveResult({
             ok: harness.canvas && harness.buttons >= 10 && harness.status === "idle"
+                && harness.topLevelSessionControls && harness.viewControls && harness.deleteConfirmation
                 && gameDrop.accepted && gameDrop.highlighted === "true"
                 && gameDrop.dialog === "game-dialog" && gameDrop.state === "selected"
                 && gameDrop.dragging === "false" && gameDrop.selection === "Selected: Dragged Game.zip"

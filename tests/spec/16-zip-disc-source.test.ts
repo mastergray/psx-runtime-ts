@@ -1,5 +1,5 @@
 import CTGTest, { CTGTestPredicates as P } from "ctg-js-test";
-import { strToU8, zipSync } from "fflate";
+import { deflateSync, strFromU8, strToU8, zipSync } from "fflate";
 
 import {
     DiscSetAudit,
@@ -41,6 +41,55 @@ const diagnostics = (): PsxLocalFileLike => archive({
     },
 });
 
+const crc32 = (bytes: Uint8Array): number => {
+    let value = 0xffffffff;
+    for (const byte of bytes) {
+        value ^= byte;
+        for (let bit = 0; bit < 8; bit++) value = (value >>> 1) ^ (value & 1 ? 0xedb88320 : 0);
+    }
+    return (value ^ 0xffffffff) >>> 0;
+};
+
+const descriptorArchive = (path: string, contents: Uint8Array): PsxLocalFileLike => {
+    const name = strToU8(path);
+    const compressed = deflateSync(contents, { level: 0 });
+    const localBytes = 30 + name.byteLength + compressed.byteLength + 16;
+    const centralBytes = 46 + name.byteLength;
+    const bytes = new Uint8Array(localBytes + centralBytes + 22);
+    const view = new DataView(bytes.buffer);
+    const checksum = crc32(contents);
+    view.setUint32(0, 0x04034b50, true);
+    view.setUint16(4, 20, true);
+    view.setUint16(6, 8, true);
+    view.setUint16(8, 8, true);
+    view.setUint16(26, name.byteLength, true);
+    bytes.set(name, 30);
+    bytes.set(compressed, 30 + name.byteLength);
+    const descriptor = 30 + name.byteLength + compressed.byteLength;
+    view.setUint32(descriptor, 0x08074b50, true);
+    view.setUint32(descriptor + 4, checksum, true);
+    view.setUint32(descriptor + 8, compressed.byteLength, true);
+    view.setUint32(descriptor + 12, contents.byteLength, true);
+    const central = localBytes;
+    view.setUint32(central, 0x02014b50, true);
+    view.setUint16(central + 4, 20, true);
+    view.setUint16(central + 6, 20, true);
+    view.setUint16(central + 8, 8, true);
+    view.setUint16(central + 10, 8, true);
+    view.setUint32(central + 16, checksum, true);
+    view.setUint32(central + 20, compressed.byteLength, true);
+    view.setUint32(central + 24, contents.byteLength, true);
+    view.setUint16(central + 28, name.byteLength, true);
+    bytes.set(name, central + 46);
+    const end = central + centralBytes;
+    view.setUint32(end, 0x06054b50, true);
+    view.setUint16(end + 8, 1, true);
+    view.setUint16(end + 10, 1, true);
+    view.setUint32(end + 12, centralBytes, true);
+    view.setUint32(end + 16, central, true);
+    return namedBlob("descriptor.zip", bytes);
+};
+
 const capture = async (action: () => Promise<unknown>): Promise<unknown> => {
     try {
         await action();
@@ -57,6 +106,20 @@ const errorSnapshot = (error: unknown): unknown => PsxRuntimeError.is(error)
 const testFile: TestFile = {
     label: "ZIP disc source",
     cases: [
+        {
+            label: "data descriptors cannot truncate an entry when their signature occurs inside compressed data",
+            run: () => CTGTest.init("descriptor signature collision")
+                .stage("extract exact central-directory range", async () => {
+                    const contents = strToU8("before-PK\u0007\b-after");
+                    const files = await ZipDiscSource.extract(descriptorArchive("collision.bin", contents));
+                    return [files[0]?.path, files[0]?.blob.size,
+                        strFromU8(new Uint8Array(await files[0]!.blob.arrayBuffer()))];
+                })
+                .assert("complete entry", ({ subject }) => subject, P.equals<unknown>([
+                    "collision.bin", 17, "before-PK\u0007\b-after",
+                ]))
+                .start(undefined),
+        },
         {
             label: "a ZIP containing an M3U and two nested discs resolves and audits like raw files",
             run: () => CTGTest.init("diagnostic archive")

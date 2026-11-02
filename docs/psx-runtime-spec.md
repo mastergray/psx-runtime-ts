@@ -678,12 +678,15 @@ itself. The ZIP is a transport container: it is expanded locally and its CUE,
 BIN, M3U and SBI files enter the same `DiscSetAudit` and mount-plan path as raw
 files. The core never receives or interprets the archive.
 
-Extraction streams compressed input and rejects malformed or encrypted ZIPs,
-compression methods other than stored/deflate, unsafe or case-ambiguous paths,
-more than 64 files, an entry larger than 1 GiB, or more than 8 GiB total
-compressed or expanded data. A ZIP may contain one CUE/BIN disc or one M3U
-whose relative entries reach all included discs. Mixing a ZIP with separately
-selected files is an explicit `ARCHIVE_INVALID` error.
+Extraction resolves exact entry ranges from the classic or ZIP64 central
+directory, then streams each stored/deflate payload. Data descriptors are
+supported without scanning compressed bytes for ambiguous signatures. The
+reader rejects malformed or encrypted ZIPs, other compression methods, unsafe
+or case-ambiguous paths, more than 64 files, an entry larger than 1 GiB, or
+more than 8 GiB total compressed or expanded data. A ZIP may contain one
+CUE/BIN disc or one M3U whose relative entries reach all included discs.
+Mixing a ZIP with separately selected files is an explicit `ARCHIVE_INVALID`
+error.
 
 The library stores only the normalized extracted `Blob`s and descriptors; it
 does not retain a redundant copy of the ZIP. Directory selection and explicit
@@ -863,6 +866,10 @@ flushes cards, performs a final flush, exits the session and returns to idle.
 `destroy` is terminal. Concurrent lifecycle calls reject predictably rather
 than racing.
 
+The player exposes its composed display so a browser shell can select
+presentation scaling and enter or leave fullscreen without taking ownership
+of display attachment or teardown.
+
 The player provides `setDisc`, `saveState(name)`, `loadState(name)`,
 `deleteState(name)`, `downloadMemoryCard(slot)` and
 `replaceMemoryCard(slot, bytes)`. Replacing a card requires a stopped player;
@@ -884,6 +891,9 @@ to normalize a `FileList`, audit/import it, start a stored game, bind a browser
 gamepad to a port, replace the live keyboard map, replace a device-specific
 gamepad button map and dispose the complete graph. Live mapping changes rebuild
 only the browser input sources; they do not restart the emulated session.
+Starting a stored game while another session is active first resolves the
+requested content, then stops and flushes the current session before starting
+its replacement.
 
 ## 9. Persistence and local game storage
 
@@ -973,7 +983,8 @@ The harness is a consumer of the package, not a second runtime. It provides:
 - a single-ZIP game picker plus drag/drop for the release-test workflow;
 - an audit panel showing every missing/invalid reference;
 - separate browser-local **Check And Store** actions for firmware and games,
-  with independent removal;
+  with independent removal and explicit confirmation before a stored game is
+  deleted;
 - a **System** surface before **Game**; Game and Library remain disabled until
   stored firmware for the selected region matches the active core's supported
   byte lengths;
@@ -987,7 +998,13 @@ The harness is a consumer of the package, not a second runtime. It provides:
   indices are resolved again whenever devices connect, and the user can
   restore defaults;
 - controller type selection before start;
-- pause/resume, soft/hard reset, disc selection and fullscreen;
+- top-level pause/resume, soft reset and mute/unmute controls, with remaining
+  session operations grouped in the Session surface;
+- a View surface with aspect-preserving and stretched fullscreen choices;
+  Escape or a same-player L3 + R3 chord exits fullscreen;
+- Library starts that replace an active session after its persistent state has
+  been flushed;
+- hard reset and disc selection;
 - two card selectors, import/export and auto-save status;
 - named state create/load/delete;
 - sanitized core logs and timing/audio/video counters; and
