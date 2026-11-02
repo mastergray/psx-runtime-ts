@@ -9,11 +9,6 @@ const ROUND_CONSTANTS = new Uint32Array([    // Fixed SHA-256 round constants fr
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ]);
 
-// METHOD :: NUMBER, NUMBER -> NUMBER
-// Rotates one unsigned 32-bit word right by the requested bit count.
-const rotateRight = (value: number, bits: number): number =>
-    (value >>> bits) | (value << (32 - bits));
-
 /**
  *
  * Class
@@ -138,3 +133,14 @@ export default class Sha256 {
     }
 
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: NUMBER, NUMBER -> NUMBER
+// Rotates one unsigned 32-bit word right by the requested bit count.
+const rotateRight = (value: number, bits: number): number =>
+    (value >>> bits) | (value << (32 - bits));

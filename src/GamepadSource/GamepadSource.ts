@@ -50,32 +50,6 @@ const AXES: ReadonlyArray<readonly [number, PsxAxis]> = [         // Standard-la
     [0, "left-x"], [1, "left-y"], [2, "right-x"], [3, "right-y"],
 ];
 
-// METHOD :: UNKNOWN -> psxRuntimeError
-// Creates one invalid gamepad-source configuration error.
-const invalid = (data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.INVALID_CONFIG,
-    message: "GamepadSource config is invalid.",
-    data,
-});
-
-// METHOD :: gamepadLike, NUMBER, NUMBER -> BOOLEAN
-// Applies digital and trigger thresholds to one physical button.
-const buttonDown = (pad: GamepadLike, index: number, triggerThreshold: number): boolean => {
-    const button = pad.buttons[index];
-    if (button === undefined) return false;
-    return button.pressed || button.value >= (index === 6 || index === 7 ? triggerThreshold : 0.5);
-};
-
-// METHOD :: NUMBER, NUMBER -> NUMBER
-// Clamps and rescales one raw axis outside the configured dead zone.
-const normalizedAxis = (value: number, deadZone: number): number => {
-    if (!Number.isFinite(value)) return 0;
-    const clamped = Math.max(-1, Math.min(1, value));
-    const magnitude = Math.abs(clamped);
-    if (magnitude <= deadZone) return 0;
-    return Math.sign(clamped) * (magnitude - deadZone) / (1 - deadZone);
-};
-
 /**
  *
  * Class
@@ -334,3 +308,35 @@ export default class GamepadSource {
         });
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: UNKNOWN -> psxRuntimeError
+// Creates one invalid gamepad-source configuration error.
+const invalid = (data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.INVALID_CONFIG,
+    message: "GamepadSource config is invalid.",
+    data,
+});
+
+// HELPER :: gamepadLike, NUMBER, NUMBER -> BOOLEAN
+// Applies digital and trigger thresholds to one physical button.
+const buttonDown = (pad: GamepadLike, index: number, triggerThreshold: number): boolean => {
+    const button = pad.buttons[index];
+    if (button === undefined) return false;
+    return button.pressed || button.value >= (index === 6 || index === 7 ? triggerThreshold : 0.5);
+};
+
+// HELPER :: NUMBER, NUMBER -> NUMBER
+// Clamps and rescales one raw axis outside the configured dead zone.
+const normalizedAxis = (value: number, deadZone: number): number => {
+    if (!Number.isFinite(value)) return 0;
+    const clamped = Math.max(-1, Math.min(1, value));
+    const magnitude = Math.abs(clamped);
+    if (magnitude <= deadZone) return 0;
+    return Math.sign(clamped) * (magnitude - deadZone) / (1 - deadZone);
+};

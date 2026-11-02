@@ -43,122 +43,7 @@ interface CanonicalContent {
 const FORMAT = "psx-runtime-game";                       // Persisted game-record format identifier
 const VERSION = 1;                                       // Persisted identity and record schema version
 const GAME_ID = /^psx-v1-[a-f0-9]{64}$/u;               // Content-addressed identity accepted by public lookups
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;    // Characters forbidden in display titles
-
-// METHOD :: STRING, UNKNOWN -> psxRuntimeError
-// Creates one invalid game-library request error.
-const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.INVALID_CONFIG,
-    message,
-    data,
-});
-
-// METHOD :: STRING, UNKNOWN -> psxRuntimeError
-// Creates one hashing, quota, record-integrity, or persistence error.
-const failed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.STORAGE_FAILED,
-    message,
-    data,
-});
-
-// METHOD :: psxStoredGameRecord -> psxStoredGame
-// Projects a complete record into an immutable library summary.
-const summary = (record: PsxStoredGameRecord): PsxStoredGame => Object.freeze({
-    gameId: record.gameId,
-    displayTitle: record.displayTitle,
-    importedAt: record.importedAt,
-    totalBytes: record.totalBytes,
-    fileCount: record.fileCount,
-    discCount: record.discCount,
-});
-
-// METHOD :: psxStoredGameRecord -> discSet
-// Returns an immutable content view safe for session startup.
-const copyGame = (record: PsxStoredGameRecord): DiscSet => Object.freeze({
-    gameId: record.gameId,
-    entry: record.game.entry,
-    files: Object.freeze(record.game.files.map(({ path, blob }) => Object.freeze({ path, blob }))),
-});
-
-// METHOD :: STRING -> STRING
-// Returns the final normalized component of a content path.
-const basename = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
-
-// METHOD :: UNKNOWN -> STRING
-// Normalizes and validates a bounded printable display title.
-const normalizeTitle = (value: unknown): string => {
-    if (typeof value !== "string") throw invalid("Game display title must be a string.", value);
-    const normalized = value.trim().normalize("NFC");
-    if (normalized.length === 0 || [...normalized].length > 160 || CONTROL_CHARACTERS.test(normalized)) {
-        throw invalid("Game display title must contain 1–160 printable characters.", value);
-    }
-    return normalized;
-};
-
-// METHOD :: UNKNOWN -> STRING
-// Validates and returns an exact content-addressed game identity.
-const assertGameId = (value: unknown): string => {
-    if (typeof value !== "string" || !GAME_ID.test(value)) {
-        throw invalid("Stored gameId is invalid.", value);
-    }
-    return value;
-};
-
-// METHOD :: uint8Array -> uint8Array
-// Removes transient worker mount prefixes from descriptor identity bytes.
-const normalizeDescriptor = (bytes: Uint8Array): Uint8Array => {
-    const text = new TextDecoder().decode(bytes)
-        .replaceAll("/content/blob/", "")
-        .replaceAll("/content/index/", "");
-    return new TextEncoder().encode(text);
-};
-
-// METHOD :: discSet, auditedDisc -> PROMISE(canonicalContent)
-// Builds deterministic descriptor, track, and sidecar names for identity and storage.
-const canonicalContent = async (set: DiscSet, audit: AuditedDisc): Promise<CanonicalContent> => {
-    const plan = await createMountPlan(set, audit);
-    const descriptors = plan.descriptors.map(({ path, bytes }) => {
-        const normalized = normalizeDescriptor(bytes);
-        return { path: basename(path), text: new TextDecoder().decode(normalized), bytes: normalized };
-    });
-    const trackNames = new Map<string, string>();
-    let trackIndex = 0;
-    for (const disc of audit.discs) {
-        for (const track of disc.tracks) {
-            if (!trackNames.has(track.file)) {
-                trackNames.set(track.file, `track-${trackIndex.toString().padStart(3, "0")}.bin`);
-                trackIndex++;
-            }
-        }
-    }
-    const sidecarNames = new Map<string, string>();
-    for (let index = 0; index < audit.discs.length; index++) {
-        const sidecar = audit.discs[index]!.sbi;
-        if (sidecar !== undefined) sidecarNames.set(sidecar, `disc-${index.toString().padStart(3, "0")}.sbi`);
-    }
-    const source = new Map(set.files.map((file) => [file.path, file.blob]));
-    const files: DiscFile[] = descriptors.map(({ path, bytes }) => ({
-        path,
-        blob: new Blob([Uint8Array.from(bytes).buffer], { type: "text/plain;charset=utf-8" }),
-    }));
-    for (const [path, name] of trackNames) {
-        const blob = source.get(path);
-        if (blob === undefined) throw failed("An audited track disappeared during import.", path);
-        files.push({ path: name, blob });
-    }
-    for (const [path, name] of sidecarNames) {
-        const blob = source.get(path);
-        if (blob === undefined) throw failed("An audited sidecar disappeared during import.", path);
-        files.push({ path: name, blob });
-    }
-    return {
-        entry: basename(plan.entryPath),
-        files: Object.freeze(files.map((file) => Object.freeze(file))),
-        descriptors: Object.freeze(descriptors.map(({ path, text }) => Object.freeze({ path, text }))),
-        trackNames,
-        sidecarNames,
-    };
-};
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;
 
 /**
  *
@@ -430,3 +315,126 @@ export default class PsxGameStore {
         });
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// Characters forbidden in display titles
+
+// HELPER :: STRING, UNKNOWN -> psxRuntimeError
+// Creates one invalid game-library request error.
+const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.INVALID_CONFIG,
+    message,
+    data,
+});
+
+// HELPER :: STRING, UNKNOWN -> psxRuntimeError
+// Creates one hashing, quota, record-integrity, or persistence error.
+const failed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.STORAGE_FAILED,
+    message,
+    data,
+});
+
+// HELPER :: psxStoredGameRecord -> psxStoredGame
+// Projects a complete record into an immutable library summary.
+const summary = (record: PsxStoredGameRecord): PsxStoredGame => Object.freeze({
+    gameId: record.gameId,
+    displayTitle: record.displayTitle,
+    importedAt: record.importedAt,
+    totalBytes: record.totalBytes,
+    fileCount: record.fileCount,
+    discCount: record.discCount,
+});
+
+// HELPER :: psxStoredGameRecord -> discSet
+// Returns an immutable content view safe for session startup.
+const copyGame = (record: PsxStoredGameRecord): DiscSet => Object.freeze({
+    gameId: record.gameId,
+    entry: record.game.entry,
+    files: Object.freeze(record.game.files.map(({ path, blob }) => Object.freeze({ path, blob }))),
+});
+
+// HELPER :: STRING -> STRING
+// Returns the final normalized component of a content path.
+const basename = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+
+// HELPER :: UNKNOWN -> STRING
+// Normalizes and validates a bounded printable display title.
+const normalizeTitle = (value: unknown): string => {
+    if (typeof value !== "string") throw invalid("Game display title must be a string.", value);
+    const normalized = value.trim().normalize("NFC");
+    if (normalized.length === 0 || [...normalized].length > 160 || CONTROL_CHARACTERS.test(normalized)) {
+        throw invalid("Game display title must contain 1–160 printable characters.", value);
+    }
+    return normalized;
+};
+
+// HELPER :: UNKNOWN -> STRING
+// Validates and returns an exact content-addressed game identity.
+const assertGameId = (value: unknown): string => {
+    if (typeof value !== "string" || !GAME_ID.test(value)) {
+        throw invalid("Stored gameId is invalid.", value);
+    }
+    return value;
+};
+
+// HELPER :: uint8Array -> uint8Array
+// Removes transient worker mount prefixes from descriptor identity bytes.
+const normalizeDescriptor = (bytes: Uint8Array): Uint8Array => {
+    const text = new TextDecoder().decode(bytes)
+        .replaceAll("/content/blob/", "")
+        .replaceAll("/content/index/", "");
+    return new TextEncoder().encode(text);
+};
+
+// HELPER :: discSet, auditedDisc -> PROMISE(canonicalContent)
+// Builds deterministic descriptor, track, and sidecar names for identity and storage.
+const canonicalContent = async (set: DiscSet, audit: AuditedDisc): Promise<CanonicalContent> => {
+    const plan = await createMountPlan(set, audit);
+    const descriptors = plan.descriptors.map(({ path, bytes }) => {
+        const normalized = normalizeDescriptor(bytes);
+        return { path: basename(path), text: new TextDecoder().decode(normalized), bytes: normalized };
+    });
+    const trackNames = new Map<string, string>();
+    let trackIndex = 0;
+    for (const disc of audit.discs) {
+        for (const track of disc.tracks) {
+            if (!trackNames.has(track.file)) {
+                trackNames.set(track.file, `track-${trackIndex.toString().padStart(3, "0")}.bin`);
+                trackIndex++;
+            }
+        }
+    }
+    const sidecarNames = new Map<string, string>();
+    for (let index = 0; index < audit.discs.length; index++) {
+        const sidecar = audit.discs[index]!.sbi;
+        if (sidecar !== undefined) sidecarNames.set(sidecar, `disc-${index.toString().padStart(3, "0")}.sbi`);
+    }
+    const source = new Map(set.files.map((file) => [file.path, file.blob]));
+    const files: DiscFile[] = descriptors.map(({ path, bytes }) => ({
+        path,
+        blob: new Blob([Uint8Array.from(bytes).buffer], { type: "text/plain;charset=utf-8" }),
+    }));
+    for (const [path, name] of trackNames) {
+        const blob = source.get(path);
+        if (blob === undefined) throw failed("An audited track disappeared during import.", path);
+        files.push({ path: name, blob });
+    }
+    for (const [path, name] of sidecarNames) {
+        const blob = source.get(path);
+        if (blob === undefined) throw failed("An audited sidecar disappeared during import.", path);
+        files.push({ path: name, blob });
+    }
+    return {
+        entry: basename(plan.entryPath),
+        files: Object.freeze(files.map((file) => Object.freeze(file))),
+        descriptors: Object.freeze(descriptors.map(({ path, text }) => Object.freeze({ path, text }))),
+        trackNames,
+        sidecarNames,
+    };
+};

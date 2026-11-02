@@ -32,136 +32,7 @@ import type {
 } from "./types.js";
 
 const CARD_BYTES = 128 * 1024;    // Physical PlayStation memory-card byte length
-const REQUIRED_ARTIFACTS = ["psx-core.js", "psx-core.wasm", "core.worker.js"] as const; // Build files required by this adapter
-
-// METHOD :: UNKNOWN, STRING? -> psxRuntimeError
-// Creates one invalid adapter, build, or startup configuration error.
-const invalid = (data: unknown, message = "LibretroPsxAdapter configuration is invalid."): PsxRuntimeError =>
-    new PsxRuntimeError({ code: PsxRuntimeError.CODE.INVALID_CONFIG, message, data });
-
-// METHOD :: STRING, STRING -> STRING
-// Resolves one build-relative artifact across URL and path-based deployments.
-const resolveBuildUrl = (buildUrl: string, relative: string): string => {
-    if (/^[a-z][a-z\d+.-]*:/iu.test(relative) || relative.startsWith("//") || relative.startsWith("/")) return relative;
-    const root = buildUrl.endsWith("/") ? buildUrl : `${buildUrl}/`;
-    if (/^[a-z][a-z\d+.-]*:/iu.test(root) || root.startsWith("//")) return new URL(relative, root).href;
-    return `${root}${relative.replace(/^\.\//u, "")}`;
-};
-
-// METHOD :: VOID -> frameScheduler
-// Returns validated browser animation-frame scheduling operations.
-const browserScheduler = (): FrameScheduler => {
-    if (typeof globalThis.requestAnimationFrame !== "function"
-        || typeof globalThis.cancelAnimationFrame !== "function") {
-        throw new PsxRuntimeError({
-            code: PsxRuntimeError.CODE.UNSUPPORTED,
-            message: "PlayStation pacing requires requestAnimationFrame.",
-        });
-    }
-    return {
-        request: globalThis.requestAnimationFrame.bind(globalThis),
-        cancel: globalThis.cancelAnimationFrame.bind(globalThis),
-    };
-};
-
-// METHOD :: VOID -> psxClock
-// Returns the validated browser monotonic clock.
-const browserClock = (): PsxClock => {
-    if (typeof globalThis.performance?.now !== "function") throw new PsxRuntimeError({
-        code: PsxRuntimeError.CODE.UNSUPPORTED,
-        message: "PlayStation pacing requires performance.now().",
-    });
-    return globalThis.performance.now.bind(globalThis.performance);
-};
-
-// METHOD :: VOID -> workerFactory
-// Returns a module-worker factory backed by the browser Worker API.
-const browserWorkerFactory = (): WorkerFactory => (url) => {
-    if (typeof globalThis.Worker !== "function") throw new PsxRuntimeError({
-        code: PsxRuntimeError.CODE.UNSUPPORTED,
-        message: "PlayStation emulation requires module Worker support.",
-    });
-    return new globalThis.Worker(url, { type: "module" });
-};
-
-// METHOD :: VOID -> (requestInfo, requestInit? -> PROMISE(response))
-// Returns the browser fetch operation or reports missing platform support.
-const browserFetch = (): typeof globalThis.fetch => {
-    if (typeof globalThis.fetch !== "function") throw new PsxRuntimeError({
-        code: PsxRuntimeError.CODE.UNSUPPORTED,
-        message: "Adapter initialization requires fetch support.",
-    });
-    return globalThis.fetch.bind(globalThis);
-};
-
-// METHOD :: blob -> PROMISE(STRING)
-// Reads and hashes one firmware blob with browser Web Crypto.
-const sha256 = async (blob: Blob): Promise<string> => {
-    if (typeof globalThis.crypto?.subtle?.digest !== "function") throw new PsxRuntimeError({
-        code: PsxRuntimeError.CODE.UNSUPPORTED,
-        message: "BIOS validation requires Web Crypto SHA-256 support.",
-    });
-    let source: ArrayBuffer;
-    try {
-        source = await blob.arrayBuffer();
-    } catch (error) {
-        throw new PsxRuntimeError({
-            code: PsxRuntimeError.CODE.CONTENT_LOAD_FAILED,
-            message: "The BIOS image could not be read.",
-            data: error instanceof Error ? error.message : null,
-        });
-    }
-    const digest = await globalThis.crypto.subtle.digest("SHA-256", source);
-    return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
-};
-
-// METHOD :: VOID -> uint8Array
-// Creates a freshly formatted blank PlayStation memory-card image.
-const blankMemoryCard = (): Uint8Array => {
-    const bytes = new Uint8Array(CARD_BYTES);
-    bytes[0] = 0x4d;
-    bytes[1] = 0x43;
-    bytes[127] = 0x0e;
-    for (let frame = 1; frame <= 15; frame++) {
-        const offset = frame * 128;
-        bytes[offset] = 0xa0;
-        bytes[offset + 8] = 0xff;
-        bytes[offset + 9] = 0xff;
-        let checksum = 0;
-        for (let index = 0; index < 127; index++) checksum ^= bytes[offset + index]!;
-        bytes[offset + 127] = checksum;
-    }
-    return bytes;
-};
-
-// METHOD :: psxStartConfig, [psxControllerType] -> ARRAY<controllerPort, psxControllerType>
-// Applies digital defaults and rejects controller modes unsupported by the build.
-const normalizedControllers = (
-    config: PsxStartConfig,
-    supported: ReadonlyArray<PsxControllerType>,
-): Readonly<Record<ControllerPort, PsxControllerType>> => {
-    const controllers: Readonly<Record<ControllerPort, PsxControllerType>> = {
-        1: config.controllers?.[1] ?? "digital",
-        2: config.controllers?.[2] ?? "digital",
-    };
-    for (const type of Object.values(controllers)) {
-        if (!supported.includes(type)) throw new PsxRuntimeError({
-            code: PsxRuntimeError.CODE.UNSUPPORTED,
-            message: "The selected core build does not support a requested controller type.",
-            data: type,
-        });
-    }
-    return controllers;
-};
-
-// METHOD :: psxStartConfig -> ARRAY<controllerPort, uint8Array>
-// Copies supplied card images or creates blank formatted cards for both slots.
-const normalizedCards = (
-    config: PsxStartConfig,
-): Readonly<Record<ControllerPort, Uint8Array>> => ({
-    1: config.memoryCards?.[1]?.slice() ?? blankMemoryCard(),
-    2: config.memoryCards?.[2]?.slice() ?? blankMemoryCard(),
-});
+const REQUIRED_ARTIFACTS = ["psx-core.js", "psx-core.wasm", "core.worker.js"] as const;
 
 /**
  *
@@ -359,3 +230,140 @@ export default class LibretroPsxAdapter implements PsxAdapter {
         });
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// Build files required by this adapter
+
+// HELPER :: UNKNOWN, STRING? -> psxRuntimeError
+// Creates one invalid adapter, build, or startup configuration error.
+const invalid = (data: unknown, message = "LibretroPsxAdapter configuration is invalid."): PsxRuntimeError =>
+    new PsxRuntimeError({ code: PsxRuntimeError.CODE.INVALID_CONFIG, message, data });
+
+// HELPER :: STRING, STRING -> STRING
+// Resolves one build-relative artifact across URL and path-based deployments.
+const resolveBuildUrl = (buildUrl: string, relative: string): string => {
+    if (/^[a-z][a-z\d+.-]*:/iu.test(relative) || relative.startsWith("//") || relative.startsWith("/")) return relative;
+    const root = buildUrl.endsWith("/") ? buildUrl : `${buildUrl}/`;
+    if (/^[a-z][a-z\d+.-]*:/iu.test(root) || root.startsWith("//")) return new URL(relative, root).href;
+    return `${root}${relative.replace(/^\.\//u, "")}`;
+};
+
+// HELPER :: VOID -> frameScheduler
+// Returns validated browser animation-frame scheduling operations.
+const browserScheduler = (): FrameScheduler => {
+    if (typeof globalThis.requestAnimationFrame !== "function"
+        || typeof globalThis.cancelAnimationFrame !== "function") {
+        throw new PsxRuntimeError({
+            code: PsxRuntimeError.CODE.UNSUPPORTED,
+            message: "PlayStation pacing requires requestAnimationFrame.",
+        });
+    }
+    return {
+        request: globalThis.requestAnimationFrame.bind(globalThis),
+        cancel: globalThis.cancelAnimationFrame.bind(globalThis),
+    };
+};
+
+// HELPER :: VOID -> psxClock
+// Returns the validated browser monotonic clock.
+const browserClock = (): PsxClock => {
+    if (typeof globalThis.performance?.now !== "function") throw new PsxRuntimeError({
+        code: PsxRuntimeError.CODE.UNSUPPORTED,
+        message: "PlayStation pacing requires performance.now().",
+    });
+    return globalThis.performance.now.bind(globalThis.performance);
+};
+
+// HELPER :: VOID -> workerFactory
+// Returns a module-worker factory backed by the browser Worker API.
+const browserWorkerFactory = (): WorkerFactory => (url) => {
+    if (typeof globalThis.Worker !== "function") throw new PsxRuntimeError({
+        code: PsxRuntimeError.CODE.UNSUPPORTED,
+        message: "PlayStation emulation requires module Worker support.",
+    });
+    return new globalThis.Worker(url, { type: "module" });
+};
+
+// HELPER :: VOID -> (requestInfo, requestInit? -> PROMISE(response))
+// Returns the browser fetch operation or reports missing platform support.
+const browserFetch = (): typeof globalThis.fetch => {
+    if (typeof globalThis.fetch !== "function") throw new PsxRuntimeError({
+        code: PsxRuntimeError.CODE.UNSUPPORTED,
+        message: "Adapter initialization requires fetch support.",
+    });
+    return globalThis.fetch.bind(globalThis);
+};
+
+// HELPER :: blob -> PROMISE(STRING)
+// Reads and hashes one firmware blob with browser Web Crypto.
+const sha256 = async (blob: Blob): Promise<string> => {
+    if (typeof globalThis.crypto?.subtle?.digest !== "function") throw new PsxRuntimeError({
+        code: PsxRuntimeError.CODE.UNSUPPORTED,
+        message: "BIOS validation requires Web Crypto SHA-256 support.",
+    });
+    let source: ArrayBuffer;
+    try {
+        source = await blob.arrayBuffer();
+    } catch (error) {
+        throw new PsxRuntimeError({
+            code: PsxRuntimeError.CODE.CONTENT_LOAD_FAILED,
+            message: "The BIOS image could not be read.",
+            data: error instanceof Error ? error.message : null,
+        });
+    }
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", source);
+    return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+};
+
+// HELPER :: VOID -> uint8Array
+// Creates a freshly formatted blank PlayStation memory-card image.
+const blankMemoryCard = (): Uint8Array => {
+    const bytes = new Uint8Array(CARD_BYTES);
+    bytes[0] = 0x4d;
+    bytes[1] = 0x43;
+    bytes[127] = 0x0e;
+    for (let frame = 1; frame <= 15; frame++) {
+        const offset = frame * 128;
+        bytes[offset] = 0xa0;
+        bytes[offset + 8] = 0xff;
+        bytes[offset + 9] = 0xff;
+        let checksum = 0;
+        for (let index = 0; index < 127; index++) checksum ^= bytes[offset + index]!;
+        bytes[offset + 127] = checksum;
+    }
+    return bytes;
+};
+
+// HELPER :: psxStartConfig, [psxControllerType] -> ARRAY<controllerPort, psxControllerType>
+// Applies digital defaults and rejects controller modes unsupported by the build.
+const normalizedControllers = (
+    config: PsxStartConfig,
+    supported: ReadonlyArray<PsxControllerType>,
+): Readonly<Record<ControllerPort, PsxControllerType>> => {
+    const controllers: Readonly<Record<ControllerPort, PsxControllerType>> = {
+        1: config.controllers?.[1] ?? "digital",
+        2: config.controllers?.[2] ?? "digital",
+    };
+    for (const type of Object.values(controllers)) {
+        if (!supported.includes(type)) throw new PsxRuntimeError({
+            code: PsxRuntimeError.CODE.UNSUPPORTED,
+            message: "The selected core build does not support a requested controller type.",
+            data: type,
+        });
+    }
+    return controllers;
+};
+
+// HELPER :: psxStartConfig -> ARRAY<controllerPort, uint8Array>
+// Copies supplied card images or creates blank formatted cards for both slots.
+const normalizedCards = (
+    config: PsxStartConfig,
+): Readonly<Record<ControllerPort, Uint8Array>> => ({
+    1: config.memoryCards?.[1]?.slice() ?? blankMemoryCard(),
+    2: config.memoryCards?.[2]?.slice() ?? blankMemoryCard(),
+});

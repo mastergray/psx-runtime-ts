@@ -41,14 +41,6 @@ export type RestartSession = (
     cards: Readonly<Record<ControllerPort, Uint8Array>>,
 ) => Promise<SessionWorker>;
 
-// METHOD :: UNKNOWN -> psxRuntimeError
-// Creates one invalid public session method-argument error.
-const invalid = (data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.INVALID_CONFIG,
-    message: "The PlayStation session method received an invalid argument.",
-    data,
-});
-
 /**
  *
  * Class
@@ -391,3 +383,17 @@ export default class PsxSession implements PsxSessionContract {
         this._emit(this._exitListeners, undefined);
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: UNKNOWN -> psxRuntimeError
+// Creates one invalid public session method-argument error.
+const invalid = (data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.INVALID_CONFIG,
+    message: "The PlayStation session method received an invalid argument.",
+    data,
+});

@@ -62,29 +62,6 @@ interface ClientEvents {
     readonly failure: PsxRuntimeError;      // Terminal normalized worker failure
 }
 
-// METHOD :: UNKNOWN, STRING -> psxRuntimeError
-// Preserves structured runtime errors and normalizes arbitrary worker failures.
-const asWorkerError = (value: unknown, fallback: string): PsxRuntimeError => {
-    if (PsxRuntimeError.is(value)) return value;
-    if (typeof value === "object" && value !== null) {
-        const candidate = value as { code?: unknown; message?: unknown; data?: unknown };
-        if (typeof candidate.code === "number" && Number.isSafeInteger(candidate.code)
-            && candidate.code >= 1 && candidate.code <= 20
-            && typeof candidate.message === "string" && candidate.message.trim().length > 0) {
-            return new PsxRuntimeError({
-                code: candidate.code,
-                message: candidate.message,
-                data: candidate.data ?? null,
-            });
-        }
-    }
-    return new PsxRuntimeError({
-        code: PsxRuntimeError.CODE.WORKER_FAILED,
-        message: value instanceof Error && value.message.trim().length > 0 ? value.message : fallback,
-        data: null,
-    });
-};
-
 /**
  *
  * Class
@@ -440,3 +417,32 @@ export default class WorkerClient {
         return error;
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: UNKNOWN, STRING -> psxRuntimeError
+// Preserves structured runtime errors and normalizes arbitrary worker failures.
+const asWorkerError = (value: unknown, fallback: string): PsxRuntimeError => {
+    if (PsxRuntimeError.is(value)) return value;
+    if (typeof value === "object" && value !== null) {
+        const candidate = value as { code?: unknown; message?: unknown; data?: unknown };
+        if (typeof candidate.code === "number" && Number.isSafeInteger(candidate.code)
+            && candidate.code >= 1 && candidate.code <= 20
+            && typeof candidate.message === "string" && candidate.message.trim().length > 0) {
+            return new PsxRuntimeError({
+                code: candidate.code,
+                message: candidate.message,
+                data: candidate.data ?? null,
+            });
+        }
+    }
+    return new PsxRuntimeError({
+        code: PsxRuntimeError.CODE.WORKER_FAILED,
+        message: value instanceof Error && value.message.trim().length > 0 ? value.message : fallback,
+        data: null,
+    });
+};

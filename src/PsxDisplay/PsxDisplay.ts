@@ -42,14 +42,6 @@ interface FrameSize {
     readonly height: number;    // Vertical native pixels
 }
 
-// METHOD :: STRING, UNKNOWN -> psxRuntimeError
-// Creates one invalid display configuration or operation error.
-const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.INVALID_CONFIG,
-    message,
-    data,
-});
-
 /**
  *
  * Class
@@ -476,3 +468,17 @@ export default class PsxDisplay {
         return new PsxDisplay(filled);
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: STRING, UNKNOWN -> psxRuntimeError
+// Creates one invalid display configuration or operation error.
+const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.INVALID_CONFIG,
+    message,
+    data,
+});

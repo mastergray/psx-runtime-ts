@@ -15,11 +15,6 @@ import type {
     KeyboardSourceConfig,      // Injected input, target, mapping, and ramp configuration
 } from "./types.js";
 
-// METHOD :: NUMBER, psxButton -> psxButtonControl
-// Creates one immutable default digital control.
-const frozenControl = (port: 1 | 2, button: PsxButtonControl["button"]): PsxButtonControl =>
-    Object.freeze({ port, button });
-
 export const DEFAULT_KEYBOARD_MAP: KeyboardMap = Object.freeze({        // Built-in port-one desktop keyboard layout
     ArrowUp: frozenControl(1, "up"),
     ArrowDown: frozenControl(1, "down"),
@@ -48,18 +43,6 @@ export const DEFAULT_KEYBOARD_MAP: KeyboardMap = Object.freeze({        // Built
 interface HeldAnalog extends KeyboardAnalogBinding {
     readonly sequence: number;        // Monotonic press order used to select the effective direction
 }
-
-// METHOD :: STRING, UNKNOWN -> psxRuntimeError
-// Creates one invalid-configuration error.
-const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.INVALID_CONFIG,
-    message,
-    data,
-});
-
-// METHOD :: psxAxisControl -> STRING
-// Produces the canonical ownership key for one controller axis.
-const axisKey = ({ port, axis }: PsxAxisControl): string => `${port}:${axis}`;
 
 /**
  *
@@ -247,3 +230,27 @@ export default class KeyboardSource {
         });
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: NUMBER, psxButton -> psxButtonControl
+// Creates one immutable default digital control.
+function frozenControl(port: 1 | 2, button: PsxButtonControl["button"]): PsxButtonControl {
+    return Object.freeze({ port, button });
+}
+
+// HELPER :: STRING, UNKNOWN -> psxRuntimeError
+// Creates one invalid-configuration error.
+const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.INVALID_CONFIG,
+    message,
+    data,
+});
+
+// HELPER :: psxAxisControl -> STRING
+// Produces the canonical ownership key for one controller axis.
+const axisKey = ({ port, axis }: PsxAxisControl): string => `${port}:${axis}`;

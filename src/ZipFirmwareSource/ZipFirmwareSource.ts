@@ -10,55 +10,7 @@ import type { PsxRegion } from "../shared.types.js";               // Supported 
 import type { PsxLocalFileLike } from "../PsxConsole/types.js";    // Browser-compatible archive selected by a caller
 import type { PsxFirmwareFile } from "./types.js";                 // Extracted firmware name and immutable blob
 
-const MEBIBYTE = 1024 * 1024;    // Binary byte unit used by extraction limits
-
-// METHOD :: STRING, UNKNOWN? -> psxRuntimeError
-// Creates one invalid or unsafe archive error.
-const archiveInvalid = (message: string, data?: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.ARCHIVE_INVALID,
-    message,
-    data,
-});
-
-// METHOD :: STRING, UNKNOWN? -> psxRuntimeError
-// Creates one unsupported firmware-content error.
-const biosInvalid = (message: string, data?: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.BIOS_INVALID,
-    message,
-    data,
-});
-
-// METHOD :: UNKNOWN -> psxRuntimeError
-// Creates one extraction-constraint configuration error.
-const invalidConfig = (data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.INVALID_CONFIG,
-    message: "Firmware byte-length constraints are invalid.",
-    data,
-});
-
-// METHOD :: UNKNOWN -> STRING
-// Converts an arbitrary decompression failure into stable diagnostic text.
-const reasonOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
-
-// METHOD :: STRING -> STRING
-// Returns the final normalized component of an archive path.
-const basename = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
-
-// METHOD :: STRING -> psxRegion?
-// Infers a firmware region from conventional labels and model numbers.
-const regionForName = (name: string): PsxRegion | null => {
-    const normalized = name.toLowerCase();
-    const token = (pattern: string): boolean => new RegExp(`(?:^|[._ -])(?:${pattern})(?:[._ -]|$)`, "u")
-        .test(normalized);
-    if (token("us|usa|ntsc[-_ ]?u")) return "ntsc-u";
-    if (token("jp|japan|ntsc[-_ ]?j")) return "ntsc-j";
-    if (token("eu|eur|europe|pal")) return "pal";
-    const model = /(?:scph|dtlh)[-_ ]?(\d{4,5})/u.exec(normalized)?.[1];
-    if (model?.endsWith("1") === true) return "ntsc-u";
-    if (model?.endsWith("0") === true) return "ntsc-j";
-    if (model?.endsWith("2") === true) return "pal";
-    return null;
-};
+const MEBIBYTE = 1024 * 1024;
 
 /**
  *
@@ -275,3 +227,59 @@ export default class ZipFirmwareSource {
         );
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// Binary byte unit used by extraction limits
+
+// HELPER :: STRING, UNKNOWN? -> psxRuntimeError
+// Creates one invalid or unsafe archive error.
+const archiveInvalid = (message: string, data?: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.ARCHIVE_INVALID,
+    message,
+    data,
+});
+
+// HELPER :: STRING, UNKNOWN? -> psxRuntimeError
+// Creates one unsupported firmware-content error.
+const biosInvalid = (message: string, data?: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.BIOS_INVALID,
+    message,
+    data,
+});
+
+// HELPER :: UNKNOWN -> psxRuntimeError
+// Creates one extraction-constraint configuration error.
+const invalidConfig = (data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.INVALID_CONFIG,
+    message: "Firmware byte-length constraints are invalid.",
+    data,
+});
+
+// HELPER :: UNKNOWN -> STRING
+// Converts an arbitrary decompression failure into stable diagnostic text.
+const reasonOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+// HELPER :: STRING -> STRING
+// Returns the final normalized component of an archive path.
+const basename = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+
+// HELPER :: STRING -> psxRegion?
+// Infers a firmware region from conventional labels and model numbers.
+const regionForName = (name: string): PsxRegion | null => {
+    const normalized = name.toLowerCase();
+    const token = (pattern: string): boolean => new RegExp(`(?:^|[._ -])(?:${pattern})(?:[._ -]|$)`, "u")
+        .test(normalized);
+    if (token("us|usa|ntsc[-_ ]?u")) return "ntsc-u";
+    if (token("jp|japan|ntsc[-_ ]?j")) return "ntsc-j";
+    if (token("eu|eur|europe|pal")) return "pal";
+    const model = /(?:scph|dtlh)[-_ ]?(\d{4,5})/u.exec(normalized)?.[1];
+    if (model?.endsWith("1") === true) return "ntsc-u";
+    if (model?.endsWith("0") === true) return "ntsc-j";
+    if (model?.endsWith("2") === true) return "pal";
+    return null;
+};

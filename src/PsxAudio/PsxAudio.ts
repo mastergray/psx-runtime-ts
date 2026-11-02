@@ -48,22 +48,6 @@ interface ScheduledChunk extends StereoChunk {
     readonly startTime: number;                   // Context timestamp at which playback begins
 }
 
-// METHOD :: UNKNOWN -> psxRuntimeError
-// Creates one invalid audio configuration or property error.
-const invalid = (data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.INVALID_CONFIG,
-    message: "PsxAudio config is invalid.",
-    data,
-});
-
-// METHOD :: STRING, UNKNOWN? -> psxRuntimeError
-// Creates one Web Audio construction, resume, or scheduling error.
-const audioFailed = (message: string, data?: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.AUDIO_FAILED,
-    message,
-    data,
-});
-
 /**
  *
  * Class
@@ -492,3 +476,25 @@ export default class PsxAudio {
         });
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: UNKNOWN -> psxRuntimeError
+// Creates one invalid audio configuration or property error.
+const invalid = (data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.INVALID_CONFIG,
+    message: "PsxAudio config is invalid.",
+    data,
+});
+
+// HELPER :: STRING, UNKNOWN? -> psxRuntimeError
+// Creates one Web Audio construction, resume, or scheduling error.
+const audioFailed = (message: string, data?: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.AUDIO_FAILED,
+    message,
+    data,
+});

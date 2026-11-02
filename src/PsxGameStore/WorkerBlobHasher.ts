@@ -18,14 +18,6 @@ interface HashWorkerResult {
     readonly message?: string;                 // Failure detail supplied for error results
 }
 
-// METHOD :: STRING, UNKNOWN -> psxRuntimeError
-// Creates a stable storage failure for hashing boundary errors.
-const failed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.STORAGE_FAILED,
-    message,
-    data,
-});
-
 /**
  *
  * Class
@@ -87,3 +79,17 @@ export default class WorkerBlobHasher implements PsxBlobHasherLike {
     }
 
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: STRING, UNKNOWN -> psxRuntimeError
+// Creates a stable storage failure for hashing boundary errors.
+const failed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.STORAGE_FAILED,
+    message,
+    data,
+});

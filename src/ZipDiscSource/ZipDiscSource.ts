@@ -6,19 +6,7 @@ import { isDiscPath } from "../shared.types.js";                       // Reject
 import type { DiscFile } from "../shared.types.js";                    // Normalized Blob-backed files returned to the content pipeline
 import type { PsxLocalFileLike } from "../PsxConsole/types.js";        // Browser file shape accepted at the archive boundary
 
-const GIBIBYTE = 1024 * 1024 * 1024;                                   // Binary byte unit used by archive limits
-
-// METHOD :: STRING, UNKNOWN? -> psxRuntimeError
-// Creates one stable archive-validation error.
-const invalid = (message: string, data?: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.ARCHIVE_INVALID,
-    message,
-    data,
-});
-
-// METHOD :: UNKNOWN -> STRING
-// Normalizes arbitrary decompressor failures into a readable reason.
-const reasonOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
+const GIBIBYTE = 1024 * 1024 * 1024;
 
 /**
  *
@@ -196,3 +184,23 @@ export default class ZipDiscSource {
         return Object.freeze(files);
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// Binary byte unit used by archive limits
+
+// HELPER :: STRING, UNKNOWN? -> psxRuntimeError
+// Creates one stable archive-validation error.
+const invalid = (message: string, data?: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.ARCHIVE_INVALID,
+    message,
+    data,
+});
+
+// HELPER :: UNKNOWN -> STRING
+// Normalizes arbitrary decompressor failures into a readable reason.
+const reasonOf = (error: unknown): string => error instanceof Error ? error.message : String(error);

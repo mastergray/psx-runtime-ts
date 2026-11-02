@@ -36,24 +36,6 @@ import type {
     PsxLocalFilesConfig,     // Caller-supplied local identity and optional entry
 } from "./types.js";
 
-// METHOD :: STRING, UNKNOWN -> psxRuntimeError
-// Creates one invalid console configuration or local-selection error.
-const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.INVALID_CONFIG,
-    message,
-    data,
-});
-
-// METHOD :: [STRING] -> STRING
-// Infers the only unambiguous playlist or cue entry in a local file set.
-const inferEntry = (paths: ReadonlyArray<string>): string => {
-    const playlists = paths.filter((path) => path.toLowerCase().endsWith(".m3u"));
-    if (playlists.length === 1) return playlists[0]!;
-    const cues = paths.filter((path) => path.toLowerCase().endsWith(".cue"));
-    if (playlists.length === 0 && cues.length === 1) return cues[0]!;
-    throw invalid("Select an explicit entry when the file set has multiple descriptors.", paths);
-};
-
 /**
  *
  * Class
@@ -373,3 +355,27 @@ export default class PsxConsole {
     }
 
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: STRING, UNKNOWN -> psxRuntimeError
+// Creates one invalid console configuration or local-selection error.
+const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.INVALID_CONFIG,
+    message,
+    data,
+});
+
+// HELPER :: [STRING] -> STRING
+// Infers the only unambiguous playlist or cue entry in a local file set.
+const inferEntry = (paths: ReadonlyArray<string>): string => {
+    const playlists = paths.filter((path) => path.toLowerCase().endsWith(".m3u"));
+    if (playlists.length === 1) return playlists[0]!;
+    const cues = paths.filter((path) => path.toLowerCase().endsWith(".cue"));
+    if (playlists.length === 0 && cues.length === 1) return cues[0]!;
+    throw invalid("Select an explicit entry when the file set has multiple descriptors.", paths);
+};

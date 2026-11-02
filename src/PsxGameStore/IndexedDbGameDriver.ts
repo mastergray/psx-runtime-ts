@@ -4,15 +4,7 @@ import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";    // Norma
 // Type dependencies:
 import type { PsxGameStoreDriverLike } from "./types.js";              // Storage-driver contract implemented for game records
 
-const STORE = "games";                                                 // IndexedDB object store containing complete game records
-
-// METHOD :: STRING, UNKNOWN -> psxRuntimeError
-// Creates a stable storage failure for an IndexedDB boundary error.
-const failed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.STORAGE_FAILED,
-    message,
-    data,
-});
+const STORE = "games";
 
 /**
  *
@@ -198,3 +190,19 @@ export default class IndexedDbGameDriver implements PsxGameStoreDriverLike {
         }
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// IndexedDB object store containing complete game records
+
+// HELPER :: STRING, UNKNOWN -> psxRuntimeError
+// Creates a stable storage failure for an IndexedDB boundary error.
+const failed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.STORAGE_FAILED,
+    message,
+    data,
+});

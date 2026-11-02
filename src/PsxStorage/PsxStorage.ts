@@ -49,132 +49,7 @@ interface StoredCard {
     readonly previous: PsxMemoryCardRecord | null;     // Immediately preceding revision when one exists
 }
 
-const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;    // Unicode control characters forbidden in user identities
-
-// METHOD :: STRING, UNKNOWN -> psxRuntimeError
-// Creates one invalid public storage request error.
-const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.INVALID_CONFIG,
-    message,
-    data,
-});
-
-// METHOD :: STRING, UNKNOWN -> psxRuntimeError
-// Creates one persistence or record-integrity error.
-const storageFailed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.STORAGE_FAILED,
-    message,
-    data,
-});
-
-// METHOD :: UNKNOWN -> psxRuntimeError
-// Creates one save-state compatibility error.
-const incompatible = (data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.STATE_INCOMPATIBLE,
-    message: "The save state is incompatible with this session.",
-    data,
-});
-
-// METHOD :: UNKNOWN, STRING -> STRING
-// Normalizes bounded user-facing identifiers without changing their meaning.
-const normalizedIdentity = (value: unknown, label: string): string => {
-    if (typeof value !== "string") throw invalid(`${label} must be a string.`, value);
-    const normalized = value.trim().normalize("NFC");
-    const codePoints = [...normalized];
-    if (normalized.length === 0 || codePoints.length > 80 || CONTROL_PATTERN.test(normalized)) {
-        throw invalid(`${label} must contain 1 to 80 non-control Unicode code points.`, value);
-    }
-    return normalized;
-};
-
-// METHOD :: psxMemoryCardRecord -> psxMemoryCardRecord
-// Returns an immutable defensive copy of a card revision.
-const copyCard = (record: PsxMemoryCardRecord): PsxMemoryCardRecord => Object.freeze({
-    ...record,
-    bytes: record.bytes.slice(),
-});
-
-// METHOD :: psxStateRecord -> psxStateRecord
-// Returns an immutable defensive copy of a save-state record.
-const copyState = (record: PsxStateRecord): PsxStateRecord => Object.freeze({
-    ...record,
-    metadata: Object.freeze({ ...record.metadata }),
-    payload: record.payload.slice(),
-});
-
-// METHOD :: psxFirmwareRecord -> psxFirmwareRecord
-// Returns an immutable defensive copy of a firmware record.
-const copyFirmware = (record: PsxFirmwareRecord): PsxFirmwareRecord => Object.freeze({
-    ...record,
-    blob: record.blob.slice(0, record.blob.size, record.blob.type),
-});
-
-// METHOD :: UNKNOWN -> BOOLEAN
-// Narrows persisted data to a structurally valid two-revision card envelope.
-const isStoredCard = (value: unknown): value is StoredCard => typeof value === "object"
-    && value !== null && isPsxMemoryCardRecord((value as StoredCard).current)
-    && ((value as StoredCard).previous === null || isPsxMemoryCardRecord((value as StoredCard).previous));
-
-// METHOD :: UNKNOWN, STRING, STRING -> BOOLEAN
-// Narrows a card envelope and verifies its key identities and revision ordering.
-const isStoredCardFor = (value: unknown, profileId: string, cardId: string): value is StoredCard => {
-    if (!isStoredCard(value) || value.current.profileId !== profileId || value.current.cardId !== cardId) return false;
-    return value.previous === null || (value.previous.profileId === profileId
-        && value.previous.cardId === cardId && value.previous.revision < value.current.revision);
-};
-
-// METHOD :: STRING, STRING -> STRING
-// Produces the collision-safe storage key for one profile memory card.
-const cardKey = (profileId: string, cardId: string): string => JSON.stringify([profileId, cardId]);
-
-// METHOD :: STRING, STRING, STRING -> STRING
-// Produces the collision-safe storage key for one named save state.
-const stateKey = (profileId: string, gameId: string, name: string): string =>
-    JSON.stringify([profileId, gameId, name]);
-
-// METHOD :: UNKNOWN -> STRING
-// Preserves an exact non-empty game identity without display-name normalization.
-const exactGameId = (value: unknown): string => {
-    if (typeof value !== "string" || value.trim().length === 0) {
-        throw invalid("gameId must be a non-empty string.", value);
-    }
-    return value;
-};
-
-// METHOD :: psxStateRecord, STRING, STRING, psxMachineInfo -> VOID
-// Rejects a save state whose identity or build contract differs from the active session.
-const assertCompatible = (
-    record: PsxStateRecord,
-    profileId: string,
-    name: string,
-    machine: PsxMachineInfo,
-): void => {
-    if (!isPsxMachineInfo(machine) || record.profileId !== profileId || record.name !== name
-        || record.metadata.format !== "psx-runtime-state" || record.metadata.version !== 1
-        || record.metadata.adapter !== "libretro-psx" || record.metadata.buildId !== machine.buildId
-        || record.metadata.core !== machine.core || record.metadata.coreVersion !== machine.coreVersion
-        || record.metadata.gameId !== machine.gameId
-        || record.metadata.discIndex >= machine.discCount) {
-        throw incompatible({
-            expected: {
-                profileId,
-                name,
-                buildId: machine.buildId,
-                core: machine.core,
-                coreVersion: machine.coreVersion,
-                gameId: machine.gameId,
-            },
-            actual: {
-                profileId: record.profileId,
-                name: record.name,
-                buildId: record.metadata.buildId,
-                core: record.metadata.core,
-                coreVersion: record.metadata.coreVersion,
-                gameId: record.metadata.gameId,
-            },
-        });
-    }
-};
+const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 
 /**
  *
@@ -453,3 +328,136 @@ export default class PsxStorage {
         });
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// Unicode control characters forbidden in user identities
+
+// HELPER :: STRING, UNKNOWN -> psxRuntimeError
+// Creates one invalid public storage request error.
+const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.INVALID_CONFIG,
+    message,
+    data,
+});
+
+// HELPER :: STRING, UNKNOWN -> psxRuntimeError
+// Creates one persistence or record-integrity error.
+const storageFailed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.STORAGE_FAILED,
+    message,
+    data,
+});
+
+// HELPER :: UNKNOWN -> psxRuntimeError
+// Creates one save-state compatibility error.
+const incompatible = (data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.STATE_INCOMPATIBLE,
+    message: "The save state is incompatible with this session.",
+    data,
+});
+
+// HELPER :: UNKNOWN, STRING -> STRING
+// Normalizes bounded user-facing identifiers without changing their meaning.
+const normalizedIdentity = (value: unknown, label: string): string => {
+    if (typeof value !== "string") throw invalid(`${label} must be a string.`, value);
+    const normalized = value.trim().normalize("NFC");
+    const codePoints = [...normalized];
+    if (normalized.length === 0 || codePoints.length > 80 || CONTROL_PATTERN.test(normalized)) {
+        throw invalid(`${label} must contain 1 to 80 non-control Unicode code points.`, value);
+    }
+    return normalized;
+};
+
+// HELPER :: psxMemoryCardRecord -> psxMemoryCardRecord
+// Returns an immutable defensive copy of a card revision.
+const copyCard = (record: PsxMemoryCardRecord): PsxMemoryCardRecord => Object.freeze({
+    ...record,
+    bytes: record.bytes.slice(),
+});
+
+// HELPER :: psxStateRecord -> psxStateRecord
+// Returns an immutable defensive copy of a save-state record.
+const copyState = (record: PsxStateRecord): PsxStateRecord => Object.freeze({
+    ...record,
+    metadata: Object.freeze({ ...record.metadata }),
+    payload: record.payload.slice(),
+});
+
+// HELPER :: psxFirmwareRecord -> psxFirmwareRecord
+// Returns an immutable defensive copy of a firmware record.
+const copyFirmware = (record: PsxFirmwareRecord): PsxFirmwareRecord => Object.freeze({
+    ...record,
+    blob: record.blob.slice(0, record.blob.size, record.blob.type),
+});
+
+// HELPER :: UNKNOWN -> BOOLEAN
+// Narrows persisted data to a structurally valid two-revision card envelope.
+const isStoredCard = (value: unknown): value is StoredCard => typeof value === "object"
+    && value !== null && isPsxMemoryCardRecord((value as StoredCard).current)
+    && ((value as StoredCard).previous === null || isPsxMemoryCardRecord((value as StoredCard).previous));
+
+// HELPER :: UNKNOWN, STRING, STRING -> BOOLEAN
+// Narrows a card envelope and verifies its key identities and revision ordering.
+const isStoredCardFor = (value: unknown, profileId: string, cardId: string): value is StoredCard => {
+    if (!isStoredCard(value) || value.current.profileId !== profileId || value.current.cardId !== cardId) return false;
+    return value.previous === null || (value.previous.profileId === profileId
+        && value.previous.cardId === cardId && value.previous.revision < value.current.revision);
+};
+
+// HELPER :: STRING, STRING -> STRING
+// Produces the collision-safe storage key for one profile memory card.
+const cardKey = (profileId: string, cardId: string): string => JSON.stringify([profileId, cardId]);
+
+// HELPER :: STRING, STRING, STRING -> STRING
+// Produces the collision-safe storage key for one named save state.
+const stateKey = (profileId: string, gameId: string, name: string): string =>
+    JSON.stringify([profileId, gameId, name]);
+
+// HELPER :: UNKNOWN -> STRING
+// Preserves an exact non-empty game identity without display-name normalization.
+const exactGameId = (value: unknown): string => {
+    if (typeof value !== "string" || value.trim().length === 0) {
+        throw invalid("gameId must be a non-empty string.", value);
+    }
+    return value;
+};
+
+// HELPER :: psxStateRecord, STRING, STRING, psxMachineInfo -> VOID
+// Rejects a save state whose identity or build contract differs from the active session.
+const assertCompatible = (
+    record: PsxStateRecord,
+    profileId: string,
+    name: string,
+    machine: PsxMachineInfo,
+): void => {
+    if (!isPsxMachineInfo(machine) || record.profileId !== profileId || record.name !== name
+        || record.metadata.format !== "psx-runtime-state" || record.metadata.version !== 1
+        || record.metadata.adapter !== "libretro-psx" || record.metadata.buildId !== machine.buildId
+        || record.metadata.core !== machine.core || record.metadata.coreVersion !== machine.coreVersion
+        || record.metadata.gameId !== machine.gameId
+        || record.metadata.discIndex >= machine.discCount) {
+        throw incompatible({
+            expected: {
+                profileId,
+                name,
+                buildId: machine.buildId,
+                core: machine.core,
+                coreVersion: machine.coreVersion,
+                gameId: machine.gameId,
+            },
+            actual: {
+                profileId: record.profileId,
+                name: record.name,
+                buildId: record.metadata.buildId,
+                core: record.metadata.core,
+                coreVersion: record.metadata.coreVersion,
+                gameId: record.metadata.gameId,
+            },
+        });
+    }
+};

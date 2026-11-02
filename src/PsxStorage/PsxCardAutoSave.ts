@@ -23,16 +23,6 @@ interface MutableBinding {
     bytes: Uint8Array | null;           // Last successfully persisted bytes used for dirty checks
 }
 
-// METHOD :: uint8Array, uint8Array -> BOOLEAN
-// Compares two memory-card images without allocating a copy.
-const equalBytes = (left: Uint8Array, right: Uint8Array): boolean => {
-    if (left.byteLength !== right.byteLength) return false;
-    for (let index = 0; index < left.byteLength; index++) {
-        if (left[index] !== right[index]) return false;
-    }
-    return true;
-};
-
 /**
  *
  * Class
@@ -198,3 +188,19 @@ export default class PsxCardAutoSave {
         });
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: uint8Array, uint8Array -> BOOLEAN
+// Compares two memory-card images without allocating a copy.
+const equalBytes = (left: Uint8Array, right: Uint8Array): boolean => {
+    if (left.byteLength !== right.byteLength) return false;
+    for (let index = 0; index < left.byteLength; index++) {
+        if (left[index] !== right[index]) return false;
+    }
+    return true;
+};

@@ -9,15 +9,7 @@ import type {
     PsxStorageStore,               // Closed set of object stores managed by the schema
 } from "./types.js";
 
-const STORES: ReadonlyArray<PsxStorageStore> = ["cards", "states", "firmware"];    // Stores created for the current schema
-
-// METHOD :: STRING, UNKNOWN -> psxRuntimeError
-// Creates a stable storage failure for an IndexedDB boundary error.
-const storageFailed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.STORAGE_FAILED,
-    message,
-    data,
-});
+const STORES: ReadonlyArray<PsxStorageStore> = ["cards", "states", "firmware"];
 
 /**
  *
@@ -211,3 +203,19 @@ export default class IndexedDbDriver implements PsxStorageDriverLike {
         }
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// Stores created for the current schema
+
+// HELPER :: STRING, UNKNOWN -> psxRuntimeError
+// Creates a stable storage failure for an IndexedDB boundary error.
+const storageFailed = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.STORAGE_FAILED,
+    message,
+    data,
+});

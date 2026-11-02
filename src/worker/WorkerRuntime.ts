@@ -91,46 +91,6 @@ export interface WorkerCore {
 // Worker-owned core lifecycle state.
 type RuntimeState = "idle" | "running" | "paused" | "exited" | "failed";
 
-// METHOD :: workerCommand, workerRequestType, psxRuntimeError -> workerOutput
-// Builds one cloneable correlated failure response.
-const requestFailure = (
-    command: WorkerCommand,
-    type: WorkerRequestType,
-    error: PsxRuntimeError,
-): WorkerOutput => ({
-    type: "response",
-    command: type,
-    requestId: command.requestId,
-    generation: command.generation,
-    ok: false,
-    error: { code: error.code, message: error.message, data: error.data },
-});
-
-// METHOD :: workerCommand, workerRequestType, workerResponseResult -> workerOutput
-// Builds one cloneable correlated success response.
-const requestSuccess = (
-    command: WorkerCommand,
-    type: WorkerRequestType,
-    result: WorkerResponseResult,
-): WorkerOutput => ({
-    type: "response",
-    command: type,
-    requestId: command.requestId,
-    generation: command.generation,
-    ok: true,
-    result,
-});
-
-// METHOD :: UNKNOWN -> psxRuntimeError
-// Preserves typed errors and normalizes arbitrary core failures.
-const asRuntimeError = (error: unknown): PsxRuntimeError => PsxRuntimeError.is(error)
-    ? error
-    : new PsxRuntimeError({
-        code: PsxRuntimeError.CODE.WORKER_FAILED,
-        message: error instanceof Error ? error.message : "Worker core operation failed.",
-        data: null,
-    });
-
 /**
  *
  * Class
@@ -395,3 +355,49 @@ export default class WorkerRuntime {
         await this._core.stop();
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: workerCommand, workerRequestType, psxRuntimeError -> workerOutput
+// Builds one cloneable correlated failure response.
+const requestFailure = (
+    command: WorkerCommand,
+    type: WorkerRequestType,
+    error: PsxRuntimeError,
+): WorkerOutput => ({
+    type: "response",
+    command: type,
+    requestId: command.requestId,
+    generation: command.generation,
+    ok: false,
+    error: { code: error.code, message: error.message, data: error.data },
+});
+
+// HELPER :: workerCommand, workerRequestType, workerResponseResult -> workerOutput
+// Builds one cloneable correlated success response.
+const requestSuccess = (
+    command: WorkerCommand,
+    type: WorkerRequestType,
+    result: WorkerResponseResult,
+): WorkerOutput => ({
+    type: "response",
+    command: type,
+    requestId: command.requestId,
+    generation: command.generation,
+    ok: true,
+    result,
+});
+
+// HELPER :: UNKNOWN -> psxRuntimeError
+// Preserves typed errors and normalizes arbitrary core failures.
+const asRuntimeError = (error: unknown): PsxRuntimeError => PsxRuntimeError.is(error)
+    ? error
+    : new PsxRuntimeError({
+        code: PsxRuntimeError.CODE.WORKER_FAILED,
+        message: error instanceof Error ? error.message : "Worker core operation failed.",
+        data: null,
+    });

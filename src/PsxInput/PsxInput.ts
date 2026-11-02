@@ -57,22 +57,6 @@ const OPPOSITE: Readonly<Partial<Record<PsxButtonControl["button"], PsxButtonCon
     right: "left",
 };
 
-// METHOD :: psxButtonControl -> STRING
-// Produces the canonical ownership key for one digital control.
-const buttonKey = ({ port, button }: PsxButtonControl): string => `${port}:${button}`;
-
-// METHOD :: psxAxisControl -> STRING
-// Produces the canonical ownership key for one analog control.
-const axisKey = ({ port, axis }: PsxAxisControl): string => `${port}:${axis}`;
-
-// METHOD :: STRING, UNKNOWN -> psxRuntimeError
-// Creates one invalid input configuration or operation error.
-const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.INVALID_CONFIG,
-    message,
-    data,
-});
-
 /**
  *
  * Class
@@ -346,3 +330,25 @@ export default class PsxInput {
         });
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: psxButtonControl -> STRING
+// Produces the canonical ownership key for one digital control.
+const buttonKey = ({ port, button }: PsxButtonControl): string => `${port}:${button}`;
+
+// HELPER :: psxAxisControl -> STRING
+// Produces the canonical ownership key for one analog control.
+const axisKey = ({ port, axis }: PsxAxisControl): string => `${port}:${axis}`;
+
+// HELPER :: STRING, UNKNOWN -> psxRuntimeError
+// Creates one invalid input configuration or operation error.
+const invalid = (message: string, data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.INVALID_CONFIG,
+    message,
+    data,
+});

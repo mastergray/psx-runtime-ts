@@ -30,21 +30,6 @@ import type {
     PsxPlayerStatus,       // Closed lifecycle state set
 } from "./types.js";
 
-// METHOD :: UNKNOWN -> psxRuntimeError
-// Creates one invalid player configuration or method-argument error.
-const invalid = (data: unknown): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.INVALID_CONFIG,
-    message: "PsxPlayer config or method argument is invalid.",
-    data,
-});
-
-// METHOD :: STRING -> psxRuntimeError
-// Creates one unavailable optional-feature error.
-const unsupported = (message: string): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.UNSUPPORTED,
-    message,
-});
-
 /**
  *
  * Class
@@ -556,3 +541,24 @@ export default class PsxPlayer {
         });
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: UNKNOWN -> psxRuntimeError
+// Creates one invalid player configuration or method-argument error.
+const invalid = (data: unknown): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.INVALID_CONFIG,
+    message: "PsxPlayer config or method argument is invalid.",
+    data,
+});
+
+// HELPER :: STRING -> psxRuntimeError
+// Creates one unavailable optional-feature error.
+const unsupported = (message: string): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.UNSUPPORTED,
+    message,
+});

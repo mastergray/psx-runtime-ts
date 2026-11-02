@@ -115,39 +115,6 @@ const AXIS_IDS: Readonly<Record<PsxAxis, number>> = {        // Public axis name
     "right-y": 3,
 };
 
-// METHOD :: STRING, UNKNOWN? -> psxRuntimeError
-// Creates one generated-module loading or shape failure.
-const moduleFailure = (message: string, data: unknown = null): PsxRuntimeError => new PsxRuntimeError({
-    code: PsxRuntimeError.CODE.CORE_LOAD_FAILED,
-    message,
-    data,
-});
-
-// METHOD :: UNKNOWN -> BOOLEAN
-// Narrows an instantiated value to the required Emscripten module surface.
-const isModule = (value: unknown): value is EmscriptenPsxModule => {
-    if (typeof value !== "object" || value === null) return false;
-    const module = value as Partial<EmscriptenPsxModule>;
-    return typeof module.FS === "object" && module.FS !== null
-        && typeof module.FS.mkdir === "function" && typeof module.FS.mount === "function"
-        && typeof module.FS.writeFile === "function" && module.HEAPU8 instanceof Uint8Array
-        && module.HEAP16 instanceof Int16Array && typeof module._malloc === "function"
-        && typeof module._free === "function" && typeof module.stringToUTF8 === "function"
-        && typeof module.lengthBytesUTF8 === "function" && typeof module._psx_start === "function"
-        && typeof module._psx_run_frame === "function" && typeof module._psx_stop === "function";
-};
-
-// METHOD :: STRING, STRING -> STRING
-// Resolves a module-relative artifact with a path fallback for non-URL deployments.
-const relativeTo = (url: string, path: string): string => {
-    try {
-        return new URL(path, url).href;
-    } catch {
-        const slash = url.lastIndexOf("/");
-        return `${slash < 0 ? "" : url.slice(0, slash + 1)}${path}`;
-    }
-};
-
 /**
  *
  * Class
@@ -467,3 +434,42 @@ export default class EmscriptenPsxCore implements WorkerCore {
         return this._module;
     }
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: STRING, UNKNOWN? -> psxRuntimeError
+// Creates one generated-module loading or shape failure.
+const moduleFailure = (message: string, data: unknown = null): PsxRuntimeError => new PsxRuntimeError({
+    code: PsxRuntimeError.CODE.CORE_LOAD_FAILED,
+    message,
+    data,
+});
+
+// HELPER :: UNKNOWN -> BOOLEAN
+// Narrows an instantiated value to the required Emscripten module surface.
+const isModule = (value: unknown): value is EmscriptenPsxModule => {
+    if (typeof value !== "object" || value === null) return false;
+    const module = value as Partial<EmscriptenPsxModule>;
+    return typeof module.FS === "object" && module.FS !== null
+        && typeof module.FS.mkdir === "function" && typeof module.FS.mount === "function"
+        && typeof module.FS.writeFile === "function" && module.HEAPU8 instanceof Uint8Array
+        && module.HEAP16 instanceof Int16Array && typeof module._malloc === "function"
+        && typeof module._free === "function" && typeof module.stringToUTF8 === "function"
+        && typeof module.lengthBytesUTF8 === "function" && typeof module._psx_start === "function"
+        && typeof module._psx_run_frame === "function" && typeof module._psx_stop === "function";
+};
+
+// HELPER :: STRING, STRING -> STRING
+// Resolves a module-relative artifact with a path fallback for non-URL deployments.
+const relativeTo = (url: string, path: string): string => {
+    try {
+        return new URL(path, url).href;
+    } catch {
+        const slash = url.lastIndexOf("/");
+        return `${slash < 0 ? "" : url.slice(0, slash + 1)}${path}`;
+    }
+};

@@ -18,27 +18,6 @@ export interface WorkerPostTarget {
     postMessage(message: WorkerOutput, transfer: Transferable[]): void;    // Posts one output with its transferable payloads
 }
 
-// METHOD :: UNKNOWN -> NUMBER
-// Recovers a valid generation for errors raised before command validation.
-const generationOf = (value: unknown): number => {
-    if (typeof value !== "object" || value === null) return 1;
-    const generation = (value as { generation?: unknown }).generation;
-    return typeof generation === "number" && Number.isSafeInteger(generation) && generation > 0
-        ? generation
-        : 1;
-};
-
-// METHOD :: workerOutput -> [transferable]
-// Selects owned binary payloads that can be transferred without copying.
-const transferablesFor = (output: WorkerOutput): Transferable[] => {
-    if (output.type === "frame") return [output.rgba];
-    if (output.type === "sound") return [output.samples];
-    if (output.type === "response" && output.ok && output.result instanceof Uint8Array) {
-        return [output.result.buffer as ArrayBuffer];
-    }
-    return [];
-};
-
 /**
  *
  * Class
@@ -91,3 +70,30 @@ export default class WorkerEndpoint {
     }
 
 }
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: UNKNOWN -> NUMBER
+// Recovers a valid generation for errors raised before command validation.
+const generationOf = (value: unknown): number => {
+    if (typeof value !== "object" || value === null) return 1;
+    const generation = (value as { generation?: unknown }).generation;
+    return typeof generation === "number" && Number.isSafeInteger(generation) && generation > 0
+        ? generation
+        : 1;
+};
+
+// HELPER :: workerOutput -> [transferable]
+// Selects owned binary payloads that can be transferred without copying.
+const transferablesFor = (output: WorkerOutput): Transferable[] => {
+    if (output.type === "frame") return [output.rgba];
+    if (output.type === "sound") return [output.samples];
+    if (output.type === "response" && output.ok && output.result instanceof Uint8Array) {
+        return [output.result.buffer as ArrayBuffer];
+    }
+    return [];
+};
