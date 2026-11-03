@@ -87,8 +87,12 @@ disc as a new session.
 Runtime controller shortcuts use L3 with the shoulder buttons for fast-forward:
 R1 holds the selected speed, R2 cycles `×2`, `×5` and `×7`, L1 holds direct
 `×2`, and L2 holds direct `×7`. R3 with L1/L2 saves Quick State 1/2;
-R3 with R1/R2 loads Quick State 1/2. Accelerated execution skips audio and
-returns to normal speed when the hold chord is released.
+R3 with R1/R2 loads Quick State 1/2. The States surface assigns any compatible
+named state to Q1 or Q2 per game; controller save overwrites that assignment
+and controller load restores it. Assigning one slot's state to the other slot
+swaps the two assignments. Assignments are stored locally per game and survive
+page reloads. Accelerated execution skips audio and returns to normal speed
+when the hold chord is released.
 
 Firmware may be supplied as a raw image or as a small ZIP. When a ZIP contains
 multiple supported images, the runtime requires exactly one filename that can

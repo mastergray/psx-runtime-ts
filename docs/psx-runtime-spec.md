@@ -1048,9 +1048,13 @@ The harness is a consumer of the package, not a second runtime. It provides:
   rate, press L3 + R2 to cycle `×2`, `×5` and `×7`, hold L3 + L1 for direct
   `×2`, or hold L3 + L2 for direct `×7`; releasing the hold returns to
   `×1`, and an on-canvas indicator shows the active accelerated rate;
-- controller quick states named **Quick State 1** and **Quick State 2**: R3 +
-  L1/L2 saves the corresponding state and R3 + R1/R2 loads it, with edge
-  triggering and visible success or failure notices;
+- per-game controller quick-state assignments: the States surface provides Q1
+  and Q2 radio controls for compatible named states, R3 + L1/L2 overwrites the
+  assigned state, and R3 + R1/R2 loads it, with edge triggering and visible
+  success or failure notices; an unassigned save creates **Quick State 1** or
+  **Quick State 2** and assigns it automatically; assigning the state held by
+  one quick slot to the other swaps their assignments so one state cannot own
+  both slots; assignments persist in browser storage per game across reloads;
 - Library starts expose the selected game's starting disc and replace an active
   session after its persistent state has been flushed; the initiating dialog
   closes before replacement so its modal pause cannot cover the new session;

@@ -42,6 +42,7 @@ interface PreloadManifest {
 
 const DEFAULT_FIRMWARE_REGION: PsxRegion = "ntsc-u";
 const CONTROL_PROFILE_STORAGE_KEY = "psx-runtime:ui:controls";
+const QUICK_STATE_STORAGE_KEY = "psx-runtime:ui:quick-states";
 const HARNESS_PROFILE_ID = "harness";
 const FAST_FORWARD_RATES = [2, 5, 7] as const;
 const QUICK_STATE_NAMES = ["Quick State 1", "Quick State 2"] as const;
@@ -197,6 +198,7 @@ let fullscreenExitChordHeld = false;
 let selectedFastForwardRate: PsxPlaybackRate = 2;
 let quickStateOperationInProgress = false;
 const heldRuntimeShortcuts = new Set<string>();
+let quickStateAssignments: QuickStateAssignments = {};
 let stateRecords: ReadonlyArray<PsxStateRecord> = [];
 let pendingStateAction: { readonly kind: "overwrite" | "delete"; readonly name: string } | null = null;
 let modalPauseOwner: PsxPlayer | null = null;
@@ -260,6 +262,10 @@ const write = (message: string): void => {
 
 type ControlProfileLoadStatus = "defaults" | "loaded" | "invalid" | "unavailable";
 
+type QuickStateSlot = 1 | 2;
+
+type QuickStateAssignments = Record<string, Partial<Record<QuickStateSlot, string>>>;
+
 interface StoredControlProfile {
     readonly version: 1;
     readonly keyboard: KeyboardMap;
@@ -272,6 +278,89 @@ const record = (value: unknown): Record<string, unknown> | null =>
     typeof value === "object" && value !== null && !Array.isArray(value)
         ? value as Record<string, unknown>
         : null;
+
+const loadQuickStateAssignments = (): void => {
+    let source: string | null;
+    try {
+        source = localStorage.getItem(QUICK_STATE_STORAGE_KEY);
+    } catch {
+        return;
+    }
+    if (source === null) return;
+    try {
+        const stored = record(JSON.parse(source));
+        const games = record(stored?.games);
+        if (stored?.version !== 1 || games === null) return;
+        const loaded: QuickStateAssignments = {};
+        for (const [gameId, value] of Object.entries(games)) {
+            const slots = record(value);
+            if (gameId.trim().length === 0 || slots === null
+                || Object.keys(slots).some((slot) => slot !== "1" && slot !== "2")) return;
+            const one = slots[1];
+            const two = slots[2];
+            if ((one !== undefined && (typeof one !== "string" || one.trim().length === 0 || one.length > 80))
+                || (two !== undefined && (typeof two !== "string" || two.trim().length === 0 || two.length > 80))
+                || (typeof one === "string" && one === two)) return;
+            loaded[gameId] = {
+                ...(typeof one === "string" ? { 1: one.normalize("NFC") } : {}),
+                ...(typeof two === "string" ? { 2: two.normalize("NFC") } : {}),
+            };
+        }
+        quickStateAssignments = loaded;
+    } catch {
+        // Invalid or unavailable browser data leaves quick slots unassigned.
+    }
+};
+
+const persistQuickStateAssignments = (): boolean => {
+    try {
+        localStorage.setItem(QUICK_STATE_STORAGE_KEY, JSON.stringify({
+            version: 1,
+            games: quickStateAssignments,
+        }));
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+const quickStateNameFor = (gameId: string, slot: QuickStateSlot): string | null => {
+    const stored = quickStateAssignments[gameId];
+    if (stored !== undefined) return stored[slot] ?? null;
+    const fallback = slot === 1 ? QUICK_STATE_NAMES[0] : QUICK_STATE_NAMES[1];
+    return stateRecords.some((record) => record.name === fallback) ? fallback : null;
+};
+
+const assignQuickState = (gameId: string, slot: QuickStateSlot, name: string): boolean => {
+    const otherSlot: QuickStateSlot = slot === 1 ? 2 : 1;
+    const previousOne = quickStateNameFor(gameId, 1);
+    const previousTwo = quickStateNameFor(gameId, 2);
+    const previousTarget = slot === 1 ? previousOne : previousTwo;
+    const previousOther = otherSlot === 1 ? previousOne : previousTwo;
+    const next: Partial<Record<QuickStateSlot, string>> = {};
+    if (previousOne !== null) next[1] = previousOne;
+    if (previousTwo !== null) next[2] = previousTwo;
+    next[slot] = name;
+    if (previousOther === name) {
+        if (previousTarget === null || previousTarget === name) delete next[otherSlot];
+        else next[otherSlot] = previousTarget;
+    }
+    quickStateAssignments = { ...quickStateAssignments, [gameId]: next };
+    return persistQuickStateAssignments();
+};
+
+const clearQuickStateName = (gameId: string, name: string): void => {
+    const current = quickStateAssignments[gameId];
+    if (current === undefined || (current[1] !== name && current[2] !== name)) return;
+    const next: Partial<Record<QuickStateSlot, string>> = { ...current };
+    if (next[1] === name) delete next[1];
+    if (next[2] === name) delete next[2];
+    const remaining = Object.keys(next).length === 0
+        ? Object.fromEntries(Object.entries(quickStateAssignments).filter(([id]) => id !== gameId))
+        : { ...quickStateAssignments, [gameId]: next };
+    quickStateAssignments = remaining;
+    persistQuickStateAssignments();
+};
 
 const frozenKeyboardMap = (map: KeyboardMap): KeyboardMap => Object.freeze(Object.fromEntries(
     Object.entries(map).map(([code, control]) => [code, Object.freeze({ ...control })]),
@@ -1347,7 +1436,7 @@ const renderStateManager = (): void => {
         saveNewStateButton.disabled = true;
         newStateNameInput.disabled = true;
         const cell = document.createElement("td");
-        cell.colSpan = 5;
+        cell.colSpan = 6;
         cell.className = "state-empty";
         cell.textContent = "Start a game to view its states.";
         const row = document.createElement("tr");
@@ -1361,7 +1450,7 @@ const renderStateManager = (): void => {
     newStateNameInput.disabled = false;
     if (stateRecords.length === 0) {
         const cell = document.createElement("td");
-        cell.colSpan = 5;
+        cell.colSpan = 6;
         cell.className = "state-empty";
         cell.textContent = "No save states for this game.";
         const row = document.createElement("tr");
@@ -1380,6 +1469,36 @@ const renderStateManager = (): void => {
         disc.textContent = String(record.metadata.discIndex + 1);
         const compatibility = document.createElement("td");
         compatibility.textContent = compatible ? "Ready" : "Different core build";
+        const quickSlots = document.createElement("td");
+        quickSlots.className = "quick-state-slots";
+        for (const slot of [1, 2] as const) {
+            const label = document.createElement("label");
+            const radio = document.createElement("input");
+            radio.type = "radio";
+            radio.name = `quick-state-${slot}`;
+            radio.value = record.name;
+            radio.checked = quickStateNameFor(session.machine.gameId, slot) === record.name;
+            radio.disabled = !compatible;
+            radio.setAttribute("aria-label", `Use “${record.name}” as Quick State ${slot}`);
+            radio.addEventListener("change", () => {
+                if (!radio.checked) return;
+                const otherSlot: QuickStateSlot = slot === 1 ? 2 : 1;
+                const previousTarget = quickStateNameFor(session.machine.gameId, slot);
+                const swapsSlots = previousTarget !== null && previousTarget !== record.name
+                    && quickStateNameFor(session.machine.gameId, otherSlot) === record.name;
+                const persisted = assignQuickState(session.machine.gameId, slot, record.name);
+                renderStateManager();
+                const assignment = swapsSlots
+                    ? `“${record.name}” assigned to Quick State ${slot}; “${previousTarget}” moved to Quick State ${otherSlot}`
+                    : `“${record.name}” assigned to Quick State ${slot}`;
+                const message = assignment
+                    + (persisted ? "." : " for this page; browser storage is unavailable.");
+                setStateFeedback(message, persisted ? "success" : "error");
+                showNotice(message);
+            });
+            label.append(radio, ` Q${slot}`);
+            quickSlots.append(label);
+        }
         const actions = document.createElement("td");
         const controls = document.createElement("div");
         controls.className = "state-actions";
@@ -1396,7 +1515,7 @@ const renderStateManager = (): void => {
             stateActionButton("Delete", () => openStateConfirmation("delete", record.name)),
         );
         actions.append(controls);
-        row.append(name, saved, disc, compatibility, actions);
+        row.append(name, saved, disc, compatibility, quickSlots, actions);
         return row;
     }));
 };
@@ -1459,22 +1578,40 @@ const runQuickStateShortcut = (action: "save" | "load", slot: 1 | 2): void => {
         showNotice("Another quick-state operation is still in progress.");
         return;
     }
-    const name = slot === 1 ? QUICK_STATE_NAMES[0] : QUICK_STATE_NAMES[1];
+    const shortcutName = slot === 1 ? QUICK_STATE_NAMES[0] : QUICK_STATE_NAMES[1];
     quickStateOperationInProgress = true;
     void run(async () => {
         const current = requireStatePlayer();
+        const gameId = current.session!.machine.gameId;
+        await refreshStates();
+        const assignedName = quickStateNameFor(gameId, slot);
+        const name = assignedName ?? shortcutName;
         try {
-            if (action === "save") await current.saveState(name);
-            else await current.loadState(name);
+            if (action === "save") {
+                await current.saveState(name);
+                assignQuickState(gameId, slot, name);
+            } else {
+                if (assignedName === null) {
+                    throw new Error(`${shortcutName} has no saved state. Assign one in the States menu or use its controller save shortcut first.`);
+                }
+                const record = stateRecords.find((candidate) => candidate.name === name);
+                if (record === undefined) {
+                    throw new Error(`${shortcutName} has no saved state. Assign one in the States menu or use its controller save shortcut first.`);
+                }
+                if (!stateIsCompatible(record)) {
+                    throw new Error(`The state assigned to ${shortcutName} belongs to a different core build.`);
+                }
+                await current.loadState(name);
+            }
             await refreshStates();
             renderDiscControls();
             const message = action === "save"
-                ? `Saved ${name}.`
-                : `Loaded ${name}.`;
+                ? `Saved ${shortcutName} to “${name}”.`
+                : `Loaded ${shortcutName} from “${name}”.`;
             setStateFeedback(message, "success");
             showNotice(message);
         } catch (error) {
-            const message = `${action === "save" ? "Save" : "Load"} ${name} failed: `
+            const message = `${action === "save" ? "Save" : "Load"} ${shortcutName} failed: `
                 + (error instanceof Error ? error.message : String(error));
             setStateFeedback(message, "error");
             showNotice(message, 5_000);
@@ -2007,7 +2144,10 @@ confirmStateActionButton.addEventListener("click", () => runStateAction(async ()
             await requireStatePlayer().saveState(action.name);
         } else {
             setStateFeedback(`Deleting “${action.name}”…`, "working");
-            await requireStatePlayer().deleteState(action.name);
+            const current = requireStatePlayer();
+            const gameId = current.session!.machine.gameId;
+            await current.deleteState(action.name);
+            clearQuickStateName(gameId, action.name);
         }
         await refreshStates();
         stateConfirmDialog.close();
@@ -2143,6 +2283,7 @@ const initialize = async (): Promise<void> => {
     await ensureRuntime();
 };
 
+loadQuickStateAssignments();
 const controlProfileLoadStatus = loadControlProfile();
 controlStorageStatus.textContent = controlProfileLoadStatus === "loaded"
     ? "Stored control bindings loaded from this browser."

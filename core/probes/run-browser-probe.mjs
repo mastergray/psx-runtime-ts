@@ -475,6 +475,8 @@ try {
             stateManager: document.querySelector("#states-menu")?.getAttribute("aria-controls") === "states-dialog"
                 && document.querySelector("#state-list") !== null
                 && document.querySelector("#save-new-state")?.textContent === "Save new state"
+                && document.querySelector("#states-dialog")?.textContent?.includes("Quick slots") === true
+                && document.querySelector("#states-dialog")?.textContent?.includes("Controller save overwrites the assigned state") === true
                 && document.querySelector("#state-confirm-dialog #confirm-state-action") !== null
                 && document.querySelector("#notice-toast")?.getAttribute("popover") === "manual",
             pauseOverlay: document.querySelector("#pause-overlay")?.textContent === "Paused"
