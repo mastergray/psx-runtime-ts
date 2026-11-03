@@ -171,9 +171,11 @@ const testFile: TestFile = {
                     keyboardTarget.key("keyup", "KeyZ");
                     scheduler.pulse();
                     const imported = await console.importFiles(files, { gameId: "stored" });
+                    player.status = "paused";
+                    player.listeners.forEach((listener) => listener(player.status));
                     await console.startStored("stored", { bios: {
                         name: "firmware", region: "ntsc-u", blob: new Blob([new Uint8Array([1])]),
-                    } });
+                    }, initialDiscIndex: 0 });
                     const storedInput = player.input!;
                     keyboardTarget.key("keydown", "ArrowUp");
                     await console.stop();
@@ -181,7 +183,8 @@ const testFile: TestFile = {
                     return {
                         valid: isPsxConsoleConfig(config),
                         audit: [audit.ok, audit.ok ? audit.audit.discs.length : 0],
-                        starts: player.starts.map(({ game }) => [game.gameId, game.entry, game.files.length]),
+                        starts: player.starts.map(({ game, initialDiscIndex }) =>
+                            [game.gameId, game.entry, game.files.length, initialDiscIndex ?? null]),
                         samePathShape: player.starts[0]!.game.files.map(({ path }) => path),
                         localInput: localInput.calls,
                         storedInput: storedInput.calls,
@@ -193,7 +196,7 @@ const testFile: TestFile = {
                 .assert("console behavior", ({ subject }) => subject, P.equals<unknown>({
                     valid: true,
                     audit: [true, 1],
-                    starts: [["local", "game.cue", 2], ["stored", "game.cue", 2]],
+                    starts: [["local", "game.cue", 2, null], ["stored", "game.cue", 2, 0]],
                     samePathShape: ["game.cue", "track.bin"],
                     localInput: [
                         "down:2:circle", "up:2:circle", "down:2:triangle", "down:2:left",

@@ -75,8 +75,13 @@ const run = async () => {
         };
         await runtime.startFiles(files, { gameId: "Selected fixture" }, start);
         const selected = await checkpoint(runtime.player);
-        await runtime.stop();
         const library = await gameStore.list();
+        await runtime.player.pause();
+        await runtime.startStored(library[0].gameId, { ...start, initialDiscIndex: 1 });
+        const secondDisc = await checkpoint(runtime.player);
+        const replacementStatus = runtime.player.status;
+        const replacementDiscIndex = runtime.player.session?.discIndex;
+        await runtime.stop();
         await runtime.startStored(library[0].gameId, start);
         const stored = await checkpoint(runtime.player);
         await runtime.stop();
@@ -89,12 +94,17 @@ const run = async () => {
             ok: library.length === 1
                 && selected.machine.discCount === 2
                 && selected.machine.gameId === library[0].gameId
+                && secondDisc.machine.gameId === library[0].gameId
+                && replacementStatus === "running"
+                && replacementDiscIndex === 1
                 && stored.machine.gameId === library[0].gameId
                 && selected.hash === stored.hash
                 && JSON.stringify(comparableMachine(selected.machine))
                     === JSON.stringify(comparableMachine(stored.machine)),
             gameId: library[0]?.gameId,
             discCount: selected.machine.discCount,
+            replacementStatus,
+            replacementDiscIndex,
             frameHashes: [selected.hash, stored.hash],
             geometry: [selected.geometry, stored.geometry],
             machineEqual: JSON.stringify(comparableMachine(selected.machine))

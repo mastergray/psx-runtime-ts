@@ -2,6 +2,7 @@ import {
     DEFAULT_GAMEPAD_BUTTON_MAP,
     DEFAULT_KEYBOARD_MAP,
     LibretroPsxAdapter,
+    MultiZipDiscSource,
     PsxConsole,
     PsxGameStore,
     PsxRuntimeError,
@@ -27,6 +28,7 @@ import type {
     PsxScalingMode,
     PsxStateRecord,
     PsxStoredGame,
+    PsxMultiZipManifest,
 } from "../src/index.js";
 
 interface PreloadManifest {
@@ -58,6 +60,8 @@ const gameMenuButton = element<HTMLButtonElement>("game-menu");
 const libraryMenuButton = element<HTMLButtonElement>("library-menu");
 const statesMenuButton = element<HTMLButtonElement>("states-menu");
 const gameDialog = element<HTMLDialogElement>("game-dialog");
+const gameDialogCloseButton = element<HTMLButtonElement>("game-dialog-close");
+const gameControls = element<HTMLFieldSetElement>("game-controls");
 const libraryDialog = element<HTMLDialogElement>("library-dialog");
 const deleteGameDialog = element<HTMLDialogElement>("delete-game-dialog");
 const viewDialog = element<HTMLDialogElement>("view-dialog");
@@ -73,8 +77,13 @@ biosRegionInput.value = DEFAULT_FIRMWARE_REGION;
 const filesInput = element<HTMLInputElement>("game-files");
 const gameDropZone = element<HTMLElement>("game-drop-zone");
 const gameSelection = element<HTMLElement>("game-selection");
+const gameArchiveList = element<HTMLOListElement>("game-archive-list");
+const clearGameSelectionButton = element<HTMLButtonElement>("clear-game-selection");
 const entryChoice = element<HTMLElement>("entry-choice");
 const entrySelect = element<HTMLSelectElement>("entry-select");
+const m3uPanel = element<HTMLElement>("m3u-panel");
+const m3uDescription = element<HTMLElement>("m3u-description");
+const m3uPreview = element<HTMLPreElement>("m3u-preview");
 const controllerOneInput = element<HTMLSelectElement>("controller-1");
 const controllerTwoInput = element<HTMLSelectElement>("controller-2");
 const leftStickDpadInputs: Record<ControllerPort, HTMLInputElement> = {
@@ -111,6 +120,7 @@ const controllerTypeStatus = element<HTMLElement>("controller-type-status");
 const controlStorageStatus = element<HTMLElement>("control-storage-status");
 const restoreControlsButton = element<HTMLButtonElement>("restore-controls");
 const memoryCardStatus = element<HTMLElement>("memory-card-status");
+const memoryCardFeedback = element<HTMLElement>("memory-card-feedback");
 const replacementCardInput = element<HTMLInputElement>("replacement-card");
 const downloadCardButtons = [
     element<HTMLButtonElement>("download-card-1"),
@@ -128,15 +138,19 @@ const gameFeedback = element<HTMLElement>("game-feedback");
 const discFeedback = element<HTMLElement>("disc-feedback");
 const discSelect = element<HTMLSelectElement>("disc-index");
 const storedGameInput = element<HTMLSelectElement>("stored-game");
+const storedDiscSelect = element<HTMLSelectElement>("stored-disc-index");
+const storedDiscFeedback = element<HTMLElement>("stored-disc-feedback");
 const storedTitleInput = element<HTMLInputElement>("stored-title");
 const librarySummary = element<HTMLElement>("library-summary");
 const storedGameDetails = element<HTMLElement>("stored-game-details");
 const startStoredButton = element<HTMLButtonElement>("start-stored");
+const downloadStoredM3uButton = element<HTMLButtonElement>("download-stored-m3u");
 const renameStoredButton = element<HTMLButtonElement>("rename-stored");
 const deleteStoredButton = element<HTMLButtonElement>("delete-stored");
 const confirmDeleteStoredButton = element<HTMLButtonElement>("confirm-delete-stored");
 const deleteGameName = element<HTMLElement>("delete-game-name");
 const startButton = element<HTMLButtonElement>("start");
+const restartDiscButton = element<HTMLButtonElement>("restart-disc");
 const auditButton = element<HTMLButtonElement>("audit");
 const firmwareStoreButton = element<HTMLButtonElement>("check-store-firmware");
 const deleteFirmwareButton = element<HTMLButtonElement>("delete-firmware");
@@ -156,10 +170,11 @@ const fullscreenButtons: Readonly<Record<"fit" | "stretch", HTMLButtonElement>> 
     stretch: element<HTMLButtonElement>("fullscreen-stretch"),
 };
 const viewStatus = element<HTMLElement>("view-status");
-let preloadFiles: File[] | null = null;
 let preloadBios: File | null = null;
 let preloadRegion: "ntsc-u" | "ntsc-j" | "pal" = "ntsc-u";
-let droppedFiles: File[] | null = null;
+let selectedGameArchives: File[] = [];
+let storedM3u: { readonly name: string; readonly blob: Blob } | null = null;
+let storedM3uRevision = 0;
 let runtime: PsxConsole | null = null;
 let player: PsxPlayer | null = null;
 let activeBuildUrl = "";
@@ -167,6 +182,7 @@ let supportedFirmwareByteLengths: ReadonlyArray<number> = [];
 let activeFirmwareByteLengths: ReadonlyArray<number> = [];
 let visibleFrameUnsubscribe: (() => void) | null = null;
 let launchInProgress = false;
+let gameImportInProgress = false;
 let pendingDiscCount: number | null = null;
 let pendingStoredGameId: string | null = null;
 let pendingDeleteGameId: string | null = null;
@@ -638,9 +654,22 @@ const setGameFeedback = (message: string, state: "idle" | "working" | "success" 
     gameFeedback.dataset.state = state;
 };
 
+const setGameImportInProgress = (inProgress: boolean): void => {
+    gameImportInProgress = inProgress;
+    gameControls.disabled = inProgress;
+    gameDialogCloseButton.disabled = inProgress;
+    gameDialogCloseButton.title = inProgress ? "Wait for Check And Store to finish." : "";
+    gameDialog.toggleAttribute("aria-busy", inProgress);
+};
+
 const setDiscFeedback = (message: string, state: "idle" | "working" | "success" | "error"): void => {
     discFeedback.textContent = message;
     discFeedback.dataset.state = state;
+};
+
+const setMemoryCardFeedback = (message: string, state: "idle" | "working" | "success" | "error"): void => {
+    memoryCardFeedback.textContent = message;
+    memoryCardFeedback.dataset.state = state;
 };
 
 const renderDiscControls = (): void => {
@@ -650,6 +679,8 @@ const renderDiscControls = (): void => {
     const pendingGameReady = pendingCount !== null && pendingGameId !== null
         && (session === null || session === undefined || pendingGameId !== session.machine.gameId);
     if (pendingGameReady) {
+        restartDiscButton.hidden = true;
+        restartDiscButton.disabled = true;
         const selected = Number(discSelect.value);
         discSelect.replaceChildren(...Array.from({ length: pendingCount }, (_, index) =>
             new Option(`Disc ${index + 1}`, String(index))));
@@ -670,6 +701,8 @@ const renderDiscControls = (): void => {
         return;
     }
     if (session === null || session === undefined) {
+        restartDiscButton.hidden = true;
+        restartDiscButton.disabled = true;
         discSelect.replaceChildren(new Option("No checked game", ""));
         discSelect.disabled = true;
         startButton.textContent = "Start";
@@ -686,6 +719,8 @@ const renderDiscControls = (): void => {
     discSelect.disabled = count < 2;
     startButton.textContent = "Disc active";
     startButton.disabled = true;
+    restartDiscButton.hidden = true;
+    restartDiscButton.disabled = true;
     const active = `Disc ${session.discIndex + 1} of ${count} active.`;
     setDiscFeedback(active, "success");
     gameMenuButton.textContent = `Game · Disc ${session.discIndex + 1}/${count}`;
@@ -754,6 +789,13 @@ const releaseModalPause = (): void => {
     }
 };
 
+// HELPER :: htmlDialogElement -> VOID
+// Closes an initiating modal and resumes its owned pause before a player mutation can lock the session.
+const closeDialogForSessionAction = (dialog: HTMLDialogElement): void => {
+    dialog.close();
+    releaseModalPause();
+};
+
 const pauseForModal = (): void => {
     const owner = player;
     if (owner === null || owner.status !== "running" || modalPauseOwner !== null) return;
@@ -783,12 +825,19 @@ document.querySelectorAll<HTMLButtonElement>("[data-open-dialog]").forEach((butt
 });
 
 document.querySelectorAll<HTMLButtonElement>("[data-close-dialog]").forEach((button) => {
-    button.addEventListener("click", () => button.closest("dialog")?.close());
+    button.addEventListener("click", () => {
+        const dialog = button.closest("dialog");
+        if (dialog === gameDialog && gameImportInProgress) return;
+        dialog?.close();
+    });
 });
 
 document.querySelectorAll<HTMLDialogElement>("dialog").forEach((dialog) => {
     dialog.addEventListener("click", (event) => {
-        if (event.target === dialog) dialog.close();
+        if (event.target === dialog && (dialog !== gameDialog || !gameImportInProgress)) dialog.close();
+    });
+    dialog.addEventListener("cancel", (event) => {
+        if (dialog === gameDialog && gameImportInProgress) event.preventDefault();
     });
     dialog.addEventListener("close", () => {
         if (dialog === controllersDialog) finishBindingCapture();
@@ -833,22 +882,10 @@ for (const port of [1, 2] as const) {
 restoreControlsButton.addEventListener("click", restoreDefaultBindings);
 
 const selectedFiles = (): PsxFileListLike => {
-    const files = filesInput.files !== null && filesInput.files.length > 0
-        ? filesInput.files
-        : droppedFiles !== null && droppedFiles.length > 0
-            ? droppedFiles
-            : preloadFiles !== null && preloadFiles.length > 0
-                ? preloadFiles
-                : null;
-    if (files === null) {
-        throw new Error("No game is selected. Choose one game ZIP; firmware is a separate input.");
+    if (selectedGameArchives.length === 0) {
+        throw new Error("No game is selected. Choose one or more game ZIPs; firmware is a separate input.");
     }
-    const selection: PsxFileListLike = files;
-    const first = typeof selection.item === "function" ? selection.item(0) : selection[0];
-    if (selection.length !== 1 || first === null || first === undefined || !/\.zip$/iu.test(first.name)) {
-        throw new Error("The harness accepts exactly one game ZIP.");
-    }
-    return selection;
+    return selectedGameArchives;
 };
 
 const titleFromFile = (file: { readonly name: string }): string =>
@@ -874,70 +911,170 @@ const ambiguousDescriptors = (descriptors: ReadonlyArray<string>): ReadonlyArray
     return cues.length > 1 ? cues : [];
 };
 
-const inspectGameEntry = async (
-    file: File,
+const renderManifest = (
+    manifest: Pick<PsxMultiZipManifest, "name" | "text"> | null,
+    source: "generated" | "included" = "generated",
+): void => {
+    m3uPanel.hidden = manifest === null;
+    m3uDescription.textContent = manifest === null
+        ? ""
+        : source === "generated"
+            ? "A new M3U will be generated and stored with this multi-disc game during Check And Store."
+            : "This ZIP already contains an M3U; its normalized manifest will be stored with the game.";
+    m3uPreview.textContent = manifest?.text ?? "";
+};
+
+const archiveActionButton = (
+    label: string,
+    title: string,
+    action: () => void,
+    disabled = false,
+): HTMLButtonElement => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.title = title;
+    button.disabled = disabled;
+    button.addEventListener("click", action);
+    return button;
+};
+
+const renderGameArchives = (): void => {
+    const multiple = selectedGameArchives.length > 1;
+    gameArchiveList.hidden = selectedGameArchives.length === 0;
+    clearGameSelectionButton.hidden = selectedGameArchives.length === 0;
+    gameArchiveList.replaceChildren(...selectedGameArchives.map((file, index) => {
+        const row = document.createElement("li");
+        row.className = "archive-row";
+        const name = document.createElement("span");
+        name.className = "archive-name";
+        name.textContent = multiple ? `Disc ${index + 1} · ${file.name}` : `Game ZIP · ${file.name}`;
+        name.title = file.name;
+        const actions = document.createElement("span");
+        actions.className = "archive-actions";
+        actions.append(
+            archiveActionButton("↑", `Move ${file.name} earlier`, () => {
+                const previous = selectedGameArchives[index - 1];
+                if (previous === undefined) return;
+                selectedGameArchives[index - 1] = file;
+                selectedGameArchives[index] = previous;
+                void refreshGameSelection();
+            }, !multiple || index === 0),
+            archiveActionButton("↓", `Move ${file.name} later`, () => {
+                const next = selectedGameArchives[index + 1];
+                if (next === undefined) return;
+                selectedGameArchives[index + 1] = file;
+                selectedGameArchives[index] = next;
+                void refreshGameSelection();
+            }, !multiple || index === selectedGameArchives.length - 1),
+            archiveActionButton("Remove", `Remove ${file.name}`, () => {
+                selectedGameArchives.splice(index, 1);
+                void refreshGameSelection();
+            }),
+        );
+        row.append(name, actions);
+        return row;
+    }));
+};
+
+const inspectGameSelection = async (
     revision: number,
     preferredEntry?: string,
 ): Promise<void> => {
     try {
-        const choices = ambiguousDescriptors(await ZipDiscSource.listDescriptors(file));
-        if (entryInspectionRevision !== revision) return;
-        entrySelect.replaceChildren(...choices.map((path) => new Option(path, path)));
-        entryChoice.hidden = choices.length === 0;
-        if (preferredEntry !== undefined && choices.includes(preferredEntry)) entrySelect.value = preferredEntry;
-        setGameFeedback(
-            choices.length === 0
-                ? "Game ZIP selected. Ready to check and store."
-                : "This ZIP has multiple possible entries. Choose one, then run Check And Store.",
-            "idle",
-        );
+        const archives = [...selectedGameArchives];
+        if (archives.length === 1) {
+            const file = archives[0]!;
+            const descriptors = await ZipDiscSource.listDescriptors(file);
+            const choices = ambiguousDescriptors(descriptors);
+            if (entryInspectionRevision !== revision) return;
+            entrySelect.replaceChildren(...choices.map((path) => new Option(path, path)));
+            entryChoice.hidden = choices.length === 0;
+            if (preferredEntry !== undefined && choices.includes(preferredEntry)) entrySelect.value = preferredEntry;
+            const automaticPlaylist = descriptors.filter((path) => path.toLowerCase().endsWith(".m3u"));
+            const selectedEntry = choices.length > 0 ? entrySelect.value
+                : automaticPlaylist.length === 1 ? automaticPlaylist[0]! : null;
+            if (selectedEntry !== null && selectedEntry.toLowerCase().endsWith(".m3u")) {
+                const text = await ZipDiscSource.readDescriptor(file, selectedEntry);
+                if (entryInspectionRevision !== revision) return;
+                renderManifest({ name: selectedEntry.split("/").at(-1)!, text }, "included");
+            } else {
+                renderManifest(null);
+            }
+            setGameFeedback(
+                choices.length === 0
+                    ? "Game ZIP selected. Ready to check and store."
+                    : "This ZIP has multiple possible entries. Choose one, then run Check And Store.",
+                "idle",
+            );
+        } else {
+            const manifest = await MultiZipDiscSource.inspect(archives);
+            if (entryInspectionRevision !== revision) return;
+            entryChoice.hidden = true;
+            entrySelect.replaceChildren();
+            renderManifest(manifest);
+            setGameFeedback(
+                `${archives.length} single-disc ZIPs are ordered and ready to check and store.`,
+                "idle",
+            );
+        }
         auditButton.disabled = false;
     } catch (error) {
         if (entryInspectionRevision !== revision) return;
         const message = error instanceof Error ? error.message : String(error);
         entryChoice.hidden = true;
         entrySelect.replaceChildren();
+        renderManifest(null);
         setGameFeedback(`Game ZIP inspection failed: ${message}`, "error");
         auditButton.disabled = true;
         report(error);
     }
 };
 
-const selectGameFiles = (
-    files: ReadonlyArray<File>,
-    source: "drop" | "picker" | "preload",
-    preferredEntry?: string,
-): File | null => {
-    const file = files.length === 1 && /\.zip$/iu.test(files[0]!.name) ? files[0]! : null;
-    if (source === "drop") {
-        filesInput.value = "";
-        droppedFiles = file === null ? null : [file];
-    } else if (source === "picker") {
-        droppedFiles = null;
-    }
+const refreshGameSelection = async (preferredEntry?: string): Promise<void> => {
     const revision = ++entryInspectionRevision;
     entryChoice.hidden = true;
     entrySelect.replaceChildren();
+    renderManifest(null);
     pendingDiscCount = null;
     pendingStoredGameId = null;
     renderDiscControls();
-    if (file !== null) {
-        gameDropZone.dataset.state = "selected";
-        gameSelection.textContent = `Selected: ${file.name}`;
-        setGameFeedback("Inspecting game ZIP…", "working");
+    renderGameArchives();
+    if (selectedGameArchives.length === 0) {
+        gameDropZone.dataset.state = "idle";
+        gameSelection.textContent = "No game ZIPs selected.";
+        setGameFeedback("Choose one or more game ZIPs, then run Check And Store.", "idle");
         auditButton.disabled = true;
-        void inspectGameEntry(file, revision, preferredEntry);
-        return file;
+        return;
     }
-    const empty = files.length === 0;
-    gameDropZone.dataset.state = empty ? "idle" : "error";
-    gameSelection.textContent = empty ? "No game ZIP selected." : "Selection rejected: choose exactly one ZIP file.";
-    setGameFeedback(
-        empty ? "Choose a game ZIP, then run Check And Store." : "Choose exactly one game ZIP.",
-        empty ? "idle" : "error",
-    );
+    gameDropZone.dataset.state = "selected";
+    gameSelection.textContent = selectedGameArchives.length === 1
+        ? `Selected: ${selectedGameArchives[0]!.name}`
+        : `${selectedGameArchives.length} ZIPs selected for a ${selectedGameArchives.length}-disc game.`;
+    setGameFeedback("Inspecting game ZIP metadata…", "working");
     auditButton.disabled = true;
-    return null;
+    await inspectGameSelection(revision, preferredEntry);
+};
+
+const addGameFiles = async (
+    files: ReadonlyArray<File>,
+    replace = false,
+    preferredEntry?: string,
+): Promise<number> => {
+    if (files.length === 0) return 0;
+    if (!files.every((file) => /\.zip$/iu.test(file.name))) {
+        setGameFeedback("Selection rejected: every selected game file must be a ZIP.", "error");
+        return 0;
+    }
+    const next = replace ? [...files] : [...selectedGameArchives, ...files];
+    if (next.length > MultiZipDiscSource.MAX_ARCHIVES) {
+        setGameFeedback(`Selection rejected: multi-disc games support at most ${MultiZipDiscSource.MAX_ARCHIVES} ZIPs.`, "error");
+        return 0;
+    }
+    selectedGameArchives = next;
+    filesInput.value = "";
+    await refreshGameSelection(preferredEntry);
+    return files.length;
 };
 
 const selectedRegion = (): PsxRegion => biosRegionInput.value as PsxRegion;
@@ -1060,9 +1197,17 @@ deleteFirmwareButton.addEventListener("click", () => run(async () => {
 
 filesInput.addEventListener("change", () => {
     const files = filesInput.files === null ? [] : [...filesInput.files];
-    const file = selectGameFiles(files, "picker");
-    if (file !== null) write(`Selected game ZIP: ${file.name}`);
+    run(async () => {
+        const added = await addGameFiles(files);
+        if (added > 0) write(`Added ${added} game ZIP${added === 1 ? "" : "s"}.`);
+    });
 });
+clearGameSelectionButton.addEventListener("click", () => run(async () => {
+    selectedGameArchives = [];
+    await refreshGameSelection();
+    write("Game ZIP selection cleared.");
+}));
+entrySelect.addEventListener("change", () => run(() => refreshGameSelection(entrySelect.value)));
 
 const ensureRuntime = async (): Promise<PsxConsole> => {
     const buildUrl = buildUrlInput.value.trim();
@@ -1121,17 +1266,18 @@ const localConfig = () => {
     const first = typeof files.item === "function" ? files.item(0) : files[0];
     return {
         gameId: titleFromFile(first!),
-        ...(entryChoice.hidden || entrySelect.value.length === 0 ? {} : { entry: entrySelect.value }),
+        ...(files.length !== 1 || entryChoice.hidden || entrySelect.value.length === 0
+            ? {}
+            : { entry: entrySelect.value }),
     };
 };
 
-const run = (action: () => Promise<unknown> | unknown): void => {
-    void Promise.resolve().then(async () => {
+const run = (action: () => Promise<unknown> | unknown): Promise<void> =>
+    Promise.resolve().then(async () => {
         const pauseTask = modalPauseTask;
         if (pauseTask !== null) await pauseTask;
-        return action();
+        await action();
     }).catch(report);
-};
 
 const setStateFeedback = (message: string, state: "idle" | "working" | "success" | "error"): void => {
     stateFeedback.textContent = message;
@@ -1144,14 +1290,16 @@ const requireStatePlayer = (): PsxPlayer => {
     return current;
 };
 
-const runStateAction = (action: () => Promise<void>): void => run(async () => {
-    try {
-        await action();
-    } catch (error) {
-        setStateFeedback(`Save-state operation failed: ${error instanceof Error ? error.message : String(error)}`, "error");
-        throw error;
-    }
-});
+const runStateAction = (action: () => Promise<void>): void => {
+    void run(async () => {
+        try {
+            await action();
+        } catch (error) {
+            setStateFeedback(`Save-state operation failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+            throw error;
+        }
+    });
+};
 
 const stateIsCompatible = (record: PsxStateRecord): boolean => {
     const machine = player?.session?.machine;
@@ -1381,57 +1529,38 @@ const requireSessionAudio = (): HarnessAudio => {
     return audio;
 };
 
-const auditSelectedGame = async (console: PsxConsole): Promise<number | null> => {
-    const result = await console.auditFiles(selectedFiles(), localConfig());
-    if (result.ok) {
-        const warnings = result.issues.filter(({ severity }) => severity === "warning").length;
-        const message = `Audit passed: ${result.audit.discs.length} disc(s)${warnings === 0 ? "." : `, ${warnings} warning(s).`}`;
-        setGameFeedback(message, "success");
-        write(message);
-        return result.audit.discs.length;
-    }
-    const details = result.issues.slice(0, 3).map(({ message }) => message).join(" ");
-    const message = `Audit failed: ${result.issues.length} issue(s).${details.length === 0 ? "" : ` ${details}`}`;
-    setGameFeedback(message, "error");
-    write(message);
-    return null;
-};
-
-auditButton.addEventListener("click", () => run(async () => {
-    auditButton.disabled = true;
-    pendingStoredGameId = null;
-    setGameFeedback("Checking game ZIP…", "working");
-    try {
-        const console = await ensureRuntime();
-        const discCount = await auditSelectedGame(console);
-        if (discCount === null) {
-            pendingDiscCount = null;
-            renderDiscControls();
-            return;
-        }
-        pendingDiscCount = discCount;
-        startButton.disabled = true;
-        setGameFeedback("Game check passed. Storing game…", "working");
-        const imported = await console.importFiles(selectedFiles(), localConfig());
-        await refreshGames();
-        pendingStoredGameId = imported.gameId;
-        storedGameInput.value = imported.gameId;
-        renderStoredGameSelection();
-        renderDiscControls();
-        const message = "Game check passed and game was stored in this browser.";
-        setGameFeedback(message, "success");
-        write(message);
-    } catch (error) {
-        pendingDiscCount = null;
+auditButton.addEventListener("click", () => {
+    setGameImportInProgress(true);
+    void run(async () => {
+        auditButton.disabled = true;
         pendingStoredGameId = null;
-        renderDiscControls();
-        const message = error instanceof Error ? error.message : String(error);
-        setGameFeedback(`Game check or storage failed: ${message}`, "error");
-        report(error);
-    } finally {
-        auditButton.disabled = false;
-    }
-}));
+        setGameFeedback("Checking and storing game content…", "working");
+        try {
+            const console = await ensureRuntime();
+            const imported = await console.importFiles(selectedFiles(), localConfig());
+            await refreshGames();
+            const stored = storedGames.get(imported.gameId);
+            if (stored === undefined) throw new Error("The stored game summary could not be reloaded.");
+            pendingDiscCount = stored.discCount;
+            pendingStoredGameId = imported.gameId;
+            storedGameInput.value = imported.gameId;
+            renderStoredGameSelection();
+            renderDiscControls();
+            const message = `Game check passed: ${stored.discCount} disc${stored.discCount === 1 ? "" : "s"}; stored in this browser.`;
+            setGameFeedback(message, "success");
+            write(message);
+        } catch (error) {
+            pendingDiscCount = null;
+            pendingStoredGameId = null;
+            renderDiscControls();
+            const message = error instanceof Error ? error.message : String(error);
+            setGameFeedback(`Game check or storage failed: ${message}`, "error");
+            report(error);
+        } finally {
+            auditButton.disabled = false;
+        }
+    }).finally(() => setGameImportInProgress(false));
+});
 
 startButton.addEventListener("click", () => run(async () => {
     const activeSession = player?.session;
@@ -1449,6 +1578,7 @@ startButton.addEventListener("click", () => run(async () => {
         write(switching
             ? "Switching sessions; the first image may take a few seconds."
             : "Starting session; the first image may take a few seconds.");
+        closeDialogForSessionAction(gameDialog);
         const console = await ensureRuntime();
         const bios = await selectedBios();
         await console.startStored(gameId, startConfig(bios, Number(discSelect.value)));
@@ -1457,7 +1587,6 @@ startButton.addEventListener("click", () => run(async () => {
         renderDiscControls();
         setScreenMessage("Session is running; waiting for video…");
         watchForVisibleFrame();
-        gameDialog.close();
         launchInProgress = false;
         setGameFeedback(
             switching ? "The active game was replaced." : "Session started. The game is stored in this browser.",
@@ -1471,7 +1600,7 @@ startButton.addEventListener("click", () => run(async () => {
         startButton.disabled = true;
         startButton.textContent = "Changing disc…";
         setDiscFeedback(`Changing to Disc ${index + 1}…`, "working");
-        gameDialog.close();
+        closeDialogForSessionAction(gameDialog);
         setScreenMessage(`Changing to Disc ${index + 1}…`);
         try {
             await player?.setDisc(index);
@@ -1490,27 +1619,93 @@ startButton.addEventListener("click", () => run(async () => {
     throw new Error("Check and store the selected game before starting it.");
 }));
 
+restartDiscButton.addEventListener("click", () => run(async () => {
+    const activeSession = player?.session;
+    if (activeSession === null || activeSession === undefined) throw new Error("Start a game before restarting from a disc.");
+    const index = Number(discSelect.value);
+    const gameId = activeSession.machine.gameId;
+    const discCount = activeSession.machine.discCount;
+    if (!Number.isSafeInteger(index) || index < 0 || index >= discCount) throw new Error("Select a valid disc first.");
+    launchInProgress = true;
+    stopWatchingForVisibleFrame();
+    restartDiscButton.disabled = true;
+    restartDiscButton.textContent = "Restarting…";
+    setDiscFeedback(`Restarting from Disc ${index + 1}…`, "working");
+    setScreenMessage(`Restarting PlayStation from Disc ${index + 1}…`);
+    closeDialogForSessionAction(gameDialog);
+    const console = await ensureRuntime();
+    const bios = await selectedBios();
+    await console.startStored(gameId, startConfig(bios, index));
+    await prepareSessionAudio();
+    pendingStoredGameId = gameId;
+    pendingDiscCount = discCount;
+    renderDiscControls();
+    setScreenMessage("Session is running; waiting for video…");
+    watchForVisibleFrame();
+    launchInProgress = false;
+    setGameFeedback(`Session restarted directly from Disc ${index + 1}.`, "success");
+    showNotice(`Restarted from Disc ${index + 1}.`);
+}));
+
 const selectedStoredGame = (): string => {
     const gameId = storedGameInput.value;
     if (gameId.length === 0) throw new Error("Select a stored game first.");
     return gameId;
 };
 
+const storedM3uFilename = (title: string): string => {
+    const safe = title.replace(/[\\/:*?"<>|]/gu, "_").trim();
+    return `${safe.length === 0 ? "game" : safe}.m3u`;
+};
+
+const refreshStoredM3u = async (gameId: string): Promise<void> => {
+    const revision = ++storedM3uRevision;
+    storedM3u = null;
+    downloadStoredM3uButton.hidden = true;
+    downloadStoredM3uButton.disabled = true;
+    if (gameId.length === 0) return;
+    const game = await gameStore.get(gameId);
+    if (storedM3uRevision !== revision || game === null || !game.entry.toLowerCase().endsWith(".m3u")) return;
+    const manifest = game.files.find(({ path }) => path === game.entry);
+    const summary = storedGames.get(gameId);
+    if (manifest === undefined || summary === undefined) return;
+    storedM3u = { name: storedM3uFilename(summary.displayTitle), blob: manifest.blob };
+    downloadStoredM3uButton.hidden = false;
+    downloadStoredM3uButton.disabled = false;
+};
+
 const renderStoredGameSelection = (): void => {
     const gameId = storedGameInput.value;
     const game = storedGames.get(gameId);
     const hasSelection = game !== undefined;
+    const selectedDisc = storedDiscSelect.dataset.gameId === gameId
+        ? Number(storedDiscSelect.value)
+        : 0;
     startStoredButton.disabled = !hasSelection;
     renameStoredButton.disabled = !hasSelection;
     deleteStoredButton.disabled = !hasSelection;
     storedTitleInput.disabled = !hasSelection;
     if (game !== undefined) {
         storedTitleInput.value = game.displayTitle;
-        storedGameDetails.textContent = `${formatBytes(game.totalBytes)} · ${game.fileCount} file${game.fileCount === 1 ? "" : "s"} · ${game.discCount} disc${game.discCount === 1 ? "" : "s"} · imported ${new Date(game.importedAt).toLocaleString()}`;
+        storedGameDetails.textContent = `${formatBytes(game.totalBytes)} · ${game.fileCount} file${game.fileCount === 1 ? "" : "s"} · ${game.discCount} disc${game.discCount === 1 ? "" : "s"}${game.discCount > 1 ? " · M3U stored" : ""} · imported ${new Date(game.importedAt).toLocaleString()}`;
+        storedDiscSelect.replaceChildren(...Array.from({ length: game.discCount }, (_, index) =>
+            new Option(`Disc ${index + 1}`, String(index))));
+        storedDiscSelect.value = Number.isSafeInteger(selectedDisc)
+            && selectedDisc >= 0 && selectedDisc < game.discCount ? String(selectedDisc) : "0";
+        storedDiscSelect.dataset.gameId = gameId;
+        storedDiscSelect.disabled = game.discCount < 2;
+        storedDiscFeedback.textContent = game.discCount < 2
+            ? "This stored game has one disc."
+            : `Disc ${Number(storedDiscSelect.value) + 1} of ${game.discCount} will be used when Start stored is chosen.`;
     } else {
         storedTitleInput.value = "";
         storedGameDetails.textContent = "Select a stored game to view its storage details.";
+        storedDiscSelect.replaceChildren(new Option("No stored game", ""));
+        storedDiscSelect.dataset.gameId = "";
+        storedDiscSelect.disabled = true;
+        storedDiscFeedback.textContent = "Select a stored game to choose its starting disc.";
     }
+    void refreshStoredM3u(gameId).catch(report);
 };
 
 const refreshGames = async (): Promise<void> => {
@@ -1539,22 +1734,35 @@ const refreshGames = async (): Promise<void> => {
 libraryMenuButton.addEventListener("click", () => run(refreshGames));
 statesMenuButton.addEventListener("click", () => run(refreshStates));
 storedGameInput.addEventListener("change", renderStoredGameSelection);
+storedDiscSelect.addEventListener("change", renderStoredGameSelection);
+downloadStoredM3uButton.addEventListener("click", () => run(() => {
+    const manifest = storedM3u;
+    if (manifest === null) throw new Error("The selected stored game does not include an M3U.");
+    const url = URL.createObjectURL(manifest.blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = manifest.name;
+    link.click();
+    URL.revokeObjectURL(url);
+    showNotice(`Downloaded stored M3U “${manifest.name}”.`);
+}));
 startStoredButton.addEventListener("click", () => run(async () => {
     const gameId = selectedStoredGame();
+    const initialDiscIndex = Number(storedDiscSelect.value);
     const switching = player?.session !== null && player?.session !== undefined;
     launchInProgress = true;
     stopWatchingForVisibleFrame();
     setScreenMessage(switching ? "Switching PlayStation games…" : "Starting stored PlayStation game…");
+    closeDialogForSessionAction(libraryDialog);
     const console = await ensureRuntime();
     const bios = await selectedBios();
-    await console.startStored(gameId, startConfig(bios));
+    await console.startStored(gameId, startConfig(bios, initialDiscIndex));
     await prepareSessionAudio();
     pendingStoredGameId = gameId;
     pendingDiscCount = player?.session?.machine.discCount ?? null;
     renderDiscControls();
     setScreenMessage("Session is running; waiting for video…");
     watchForVisibleFrame();
-    libraryDialog.close();
     launchInProgress = false;
     write(switching ? "Stored session replaced the previous game." : "Stored session started.");
 }));
@@ -1616,6 +1824,8 @@ discSelect.addEventListener("change", () => {
     const selectsPendingGame = pendingStoredGameId !== null && pendingDiscCount !== null
         && (session === null || session === undefined || pendingStoredGameId !== session.machine.gameId);
     if (selectsPendingGame) {
+        restartDiscButton.hidden = true;
+        restartDiscButton.disabled = true;
         setDiscFeedback(
             `Disc ${index + 1} of ${pendingDiscCount} will be used when ${session === null || session === undefined ? "Start" : "Switch game"} is chosen.`,
             "idle",
@@ -1623,6 +1833,8 @@ discSelect.addEventListener("change", () => {
         return;
     }
     if (session === null || session === undefined) {
+        restartDiscButton.hidden = true;
+        restartDiscButton.disabled = true;
         if (pendingDiscCount !== null) {
             setDiscFeedback(
                 `Disc ${index + 1} of ${pendingDiscCount} will be used when Start is chosen.`,
@@ -1631,13 +1843,17 @@ discSelect.addEventListener("change", () => {
         }
         return;
     }
-    startButton.disabled = index === session.discIndex;
-    startButton.textContent = index === session.discIndex ? "Disc active" : "Change disc";
+    const selectedDiscIsActive = index === session.discIndex;
+    startButton.disabled = selectedDiscIsActive;
+    startButton.textContent = selectedDiscIsActive ? "Disc active" : "Change disc";
+    restartDiscButton.hidden = selectedDiscIsActive;
+    restartDiscButton.disabled = selectedDiscIsActive;
+    restartDiscButton.textContent = "Restart from disc";
     setDiscFeedback(
-        index === session.discIndex
+        selectedDiscIsActive
             ? `Disc ${index + 1} of ${session.machine.discCount} active.`
-            : `Disc ${index + 1} selected. Choose Change disc to continue.`,
-        index === session.discIndex ? "success" : "idle",
+            : `Disc ${index + 1} selected. Change disc preserves the running game for an in-game insert-disc prompt; Restart from disc boots it directly.`,
+        selectedDiscIsActive ? "success" : "idle",
     );
 });
 muteAudioButton.addEventListener("click", () => run(async () => {
@@ -1726,9 +1942,33 @@ for (const port of [1, 2] as const) {
     element(`replace-card-${port}`).addEventListener("click", () => run(async () => {
         const replacement = replacementCardInput.files?.[0];
         if (replacement === undefined) throw new Error("Select a replacement card first.");
-        await player?.replaceMemoryCard(port, new Uint8Array(await replacement.arrayBuffer()));
+        const currentPlayer = player;
+        if (currentPlayer === null) throw new Error("Check and store firmware before replacing a memory card.");
+        setMemoryCardFeedback(`Replacing card ${port} with “${replacement.name}”…`, "working");
+        try {
+            await currentPlayer.replaceMemoryCard(port, new Uint8Array(await replacement.arrayBuffer()));
+            const message = `Card ${port} was replaced with “${replacement.name}” and stored in this browser.`;
+            setMemoryCardFeedback(message, "success");
+            showNotice(message);
+        } catch (error) {
+            setMemoryCardFeedback(
+                `Card ${port} replacement failed: ${error instanceof Error ? error.message : String(error)}`,
+                "error",
+            );
+            throw error;
+        }
     }));
 }
+
+replacementCardInput.addEventListener("change", () => {
+    const replacement = replacementCardInput.files?.[0];
+    setMemoryCardFeedback(
+        replacement === undefined
+            ? "Select a card image, then choose the slot to replace."
+            : `Selected “${replacement.name}” (${formatBytes(replacement.size)}). Choose card 1 or card 2.`,
+        "idle",
+    );
+});
 
 for (const type of ["dragenter", "dragover"] as const) {
     gameDropZone.addEventListener(type, (event) => {
@@ -1746,8 +1986,10 @@ gameDropZone.addEventListener("drop", (event) => {
     event.preventDefault();
     gameDropZone.dataset.dragging = "false";
     const files = event.dataTransfer === null ? [] : [...event.dataTransfer.files];
-    const file = selectGameFiles(files, "drop");
-    write(file === null ? "Drop exactly one game ZIP." : `Selected game ZIP: ${file.name}`);
+    run(async () => {
+        const added = await addGameFiles(files);
+        if (added > 0) write(`Added ${added} dropped game ZIP${added === 1 ? "" : "s"}.`);
+    });
 });
 
 const loadStoredFirmware = async (): Promise<void> => {
@@ -1769,13 +2011,13 @@ const loadPreload = async (): Promise<void> => {
         renderFirmwareStatus();
     }
     if (manifest.files !== undefined) {
-        preloadFiles = await Promise.all(manifest.files.map(async (item) => {
+        const files = await Promise.all(manifest.files.map(async (item) => {
             const blob = await (await fetch(item.url)).blob();
             const loaded = new File([blob], item.name);
             Object.defineProperty(loaded, "webkitRelativePath", { value: item.path });
             return loaded;
         }));
-        selectGameFiles(preloadFiles, "preload", manifest.entry);
+        await addGameFiles(files, true, manifest.entry);
     }
     write("Private preload is ready.");
 };

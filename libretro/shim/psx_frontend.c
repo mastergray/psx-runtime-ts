@@ -13,6 +13,7 @@
 #define PSX_AXES 4
 #define PSX_CARD_BYTES (128u * 1024u)
 #define PSX_LOG_BYTES (32u * 1024u)
+#define PSX_DISC_EJECT_FRAMES 30u
 #define PSX_DEVICE_DUALSHOCK (((1u + 1u) << 8) | RETRO_DEVICE_ANALOG)
 
 struct psx_frontend_state {
@@ -447,6 +448,13 @@ int psx_frontend_set_disc(unsigned index) {
         || frontend.disk.set_image_index == NULL
         || index >= frontend.disk.get_num_images()) return 0;
     if (!frontend.disk.set_eject_state(true)) return 0;
+    /* PCSX-ReARMed samples the lid state during retro_run; keep it observable before replacing media. */
+    for (unsigned frame = 0; frame < PSX_DISC_EJECT_FRAMES; frame++) {
+        if (!psx_frontend_run_frame()) {
+            (void) frontend.disk.set_eject_state(false);
+            return 0;
+        }
+    }
     if (!frontend.disk.set_image_index(index)) {
         (void) frontend.disk.set_eject_state(false);
         return 0;

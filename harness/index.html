@@ -67,6 +67,13 @@
     .game-drop-zone label { margin: .35rem 0 0; }
     .game-drop-zone input { max-width: 100%; }
     #game-selection { color: #9caabc; overflow-wrap: anywhere; }
+    .archive-list { display: grid; gap: .4rem; margin: .7rem 0; padding: 0; list-style: none; }
+    .archive-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .6rem; padding: .55rem .65rem; border: 1px solid #303b49; border-radius: .45rem; background: #0b1017; }
+    .archive-name { min-width: 0; overflow: hidden; color: #c9d7e6; text-overflow: ellipsis; white-space: nowrap; }
+    .archive-actions { display: flex; gap: .3rem; }
+    .archive-actions button { border: 1px solid #425267; border-radius: .35rem; padding: .3rem .5rem; background: #1d2937; color: inherit; cursor: pointer; }
+    .archive-actions button:disabled { cursor: not-allowed; opacity: .45; }
+    #m3u-preview { max-height: 10rem; overflow: auto; padding: .65rem; border: 1px solid #303b49; border-radius: .4rem; background: #080b10; color: #bfe6ff; white-space: pre-wrap; overflow-wrap: anywhere; }
     small { color: #9caabc; }
     code { color: #bfe6ff; }
     details { margin: .6rem 0; }
@@ -163,24 +170,31 @@
 
 <dialog id="game-dialog" aria-labelledby="game-dialog-title">
   <div class="dialog-shell">
-    <header class="dialog-header"><h2 id="game-dialog-title">Game</h2><button class="dialog-close" type="button" data-close-dialog>Close</button></header>
+    <header class="dialog-header"><h2 id="game-dialog-title">Game</h2><button id="game-dialog-close" class="dialog-close" type="button" data-close-dialog>Close</button></header>
     <div class="dialog-body">
-    <fieldset>
+    <fieldset id="game-controls">
       <legend>Game</legend>
       <div id="game-drop-zone" class="game-drop-zone" data-state="idle" data-dragging="false">
-        <strong>Drop one game ZIP here</strong>
-        <span id="game-selection">No game ZIP selected.</span>
-        <label>Or choose a ZIP <input id="game-files" type="file" accept=".zip,application/zip"></label>
+        <strong>Drop one or more game ZIPs here</strong>
+        <span id="game-selection">No game ZIPs selected.</span>
+        <label>Or choose ZIPs <input id="game-files" type="file" accept=".zip,application/zip" multiple></label>
       </div>
-      <p><small>Game Check And Store validates this ZIP before adding it to the browser library.</small></p>
+      <p><small>One ZIP uses its existing CUE or M3U. Multiple single-disc ZIPs are combined in the order shown below.</small></p>
+      <ol id="game-archive-list" class="archive-list" aria-label="Selected game archives" hidden></ol>
+      <div class="buttons"><button id="clear-game-selection" type="button" hidden>Clear selection</button></div>
       <div id="entry-choice" hidden>
         <label>Disc-set entry <select id="entry-select"></select></label>
         <p><small>This archive contains more than one possible entry. Choose the CUE or M3U that should start the game.</small></p>
       </div>
+      <section id="m3u-panel" hidden>
+        <h3>M3U manifest</h3>
+        <p id="m3u-description"></p>
+        <pre id="m3u-preview"></pre>
+      </section>
       <div id="game-feedback" class="feedback" data-state="idle" role="status" aria-live="polite">Choose a game ZIP, then run Check And Store.</div>
       <label>Disc <select id="disc-index" disabled><option>No checked game</option></select></label>
       <div id="disc-feedback" class="feedback" data-state="idle" role="status" aria-live="polite">Check and store a game to select its starting disc.</div>
-      <div class="buttons"><button id="audit" aria-label="Check and store game" disabled>Check And Store</button><button id="start" class="primary" disabled>Start</button></div>
+      <div class="buttons"><button id="audit" aria-label="Check and store game" disabled>Check And Store</button><button id="start" class="primary" disabled>Start</button><button id="restart-disc" type="button" hidden disabled>Restart from disc</button></div>
     </fieldset>
     </div>
   </div>
@@ -195,9 +209,11 @@
       <p id="library-summary" role="status" aria-live="polite">No games stored.</p>
       <label>Stored game <select id="stored-game"></select></label>
       <p id="stored-game-details"><small>Select a stored game to view its storage details.</small></p>
+      <label>Starting disc <select id="stored-disc-index" disabled><option>No stored game</option></select></label>
+      <p id="stored-disc-feedback"><small>Select a stored game to choose its starting disc.</small></p>
       <label>Display title <input id="stored-title" value="Local test"></label>
       <div class="buttons">
-        <button id="start-stored">Start stored</button><button id="rename-stored">Rename</button>
+        <button id="start-stored">Start stored</button><button id="download-stored-m3u" hidden>Download stored M3U</button><button id="rename-stored">Rename</button>
         <button id="delete-stored">Delete</button>
       </div>
       <p><small>Game sizes are content payload totals and do not include IndexedDB metadata overhead.</small></p>
@@ -321,6 +337,7 @@
       <div class="buttons"><button id="download-card-1">Download card 1</button><button id="download-card-2">Download card 2</button></div>
       <label>Replacement card <input id="replacement-card" type="file"></label>
       <div class="buttons"><button id="replace-card-1">Replace card 1</button><button id="replace-card-2">Replace card 2</button></div>
+      <div id="memory-card-feedback" class="feedback" data-state="idle" role="status" aria-live="polite">Select a card image, then choose the slot to replace.</div>
     </fieldset>
     </div>
   </div>

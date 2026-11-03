@@ -15,6 +15,7 @@ static retro_input_state_t input_state;
 static struct retro_rumble_interface rumble;
 static uint8_t cards[CARD_BYTES * 2];
 static unsigned frame_count;
+static unsigned eject_frame;
 static unsigned disc_index;
 static bool tray_open;
 static int observed_button;
@@ -38,6 +39,7 @@ static void trace_disc(char operation) {
 
 static bool set_eject_state(bool ejected) {
     tray_open = ejected;
+    if (ejected) eject_frame = frame_count;
     trace_disc(ejected ? 'O' : 'C');
     return true;
 }
@@ -45,7 +47,7 @@ static bool set_eject_state(bool ejected) {
 static bool get_eject_state(void) { return tray_open; }
 static unsigned get_image_index(void) { return disc_index; }
 static bool set_image_index(unsigned index) {
-    if (!tray_open || index >= 2) return false;
+    if (!tray_open || index >= 2 || frame_count - eject_frame < 30) return false;
     disc_index = index;
     trace_disc('1' + (char) index);
     return true;
@@ -80,6 +82,7 @@ void retro_set_input_state(retro_input_state_t callback) { input_state = callbac
 
 void retro_init(void) {
     frame_count = 0;
+    eject_frame = 0;
     disc_index = 0;
     tray_open = false;
     observed_button = 0;

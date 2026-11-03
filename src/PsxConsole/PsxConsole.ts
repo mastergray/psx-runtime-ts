@@ -2,6 +2,7 @@
 import DiscSetAudit from "../DiscSetAudit/DiscSetAudit.js";              // Validates selected content before persistent import
 import GamepadSource from "../GamepadSource/GamepadSource.js";          // Polls assigned browser gamepads into the active input
 import KeyboardSource from "../KeyboardSource/KeyboardSource.js";      // Maps keyboard events into the active input
+import MultiZipDiscSource from "../MultiZipDiscSource/MultiZipDiscSource.js"; // Builds one M3U-backed set from ordered single-disc ZIPs
 import { isGamepadButtonMap } from "../GamepadSource/types.js";         // Validates runtime gamepad remapping
 import { isKeyboardMap } from "../KeyboardSource/types.js";             // Validates runtime keyboard remapping
 import PsxAudio from "../PsxAudio/PsxAudio.js";                          // Creates audio output for initialized players
@@ -327,10 +328,13 @@ export default class PsxConsole {
             typeof files.item === "function" ? files.item(index)! : files[index]!);
         const archives = selected.filter(ZipDiscSource.isArchive);
         if (archives.length === 0) return PsxConsole.normalizeFiles(files, config);
+        if (archives.length === selected.length && archives.length > 1) {
+            return (await MultiZipDiscSource.build(files, config)).game;
+        }
         if (archives.length !== 1 || selected.length !== 1) {
             throw new PsxRuntimeError({
                 code: PsxRuntimeError.CODE.ARCHIVE_INVALID,
-                message: "Select one ZIP archive by itself, or select the extracted disc files without a ZIP.",
+                message: "Do not mix ZIP archives with separately selected disc files.",
             });
         }
         const normalized = await ZipDiscSource.extract(archives[0]!);

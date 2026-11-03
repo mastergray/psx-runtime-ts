@@ -402,10 +402,10 @@ interface PsxAdapter {
 }
 ```
 
-`setDisc(index)` performs the complete disk-control transaction: eject, set
-index and close. It rejects an invalid index and serializes against reset,
-state and exit commands. A consumer never manipulates the core's disk callback
-table directly.
+`setDisc(index)` performs the complete disk-control transaction: eject,
+advance the core through an observable open-tray interval, set the index and
+close. It rejects an invalid index and serializes against reset, state and exit
+commands. A consumer never manipulates the core's disk callback table directly.
 
 `serializeState` returns core bytes only. The player/storage layer adds the
 versioned compatibility envelope in section 9. Memory-card reads always
@@ -673,10 +673,14 @@ complete. Core load failure remains `CORE_START_FAILED` with sanitized logs.
 ### 5.2 ZIP disc sources
 
 `PsxConsole.resolveFiles`, and therefore `auditFiles`, `importFiles` and
-`startFiles`, accepts either the existing raw selection or one ZIP selected by
-itself. The ZIP is a transport container: it is expanded locally and its CUE,
-BIN, M3U and SBI files enter the same `DiscSetAudit` and mount-plan path as raw
-files. The core never receives or interprets the archive.
+`startFiles`, accepts the existing raw selection, one ZIP, or an ordered set of
+two to eight ZIPs. A single ZIP may already contain a CUE or M3U set. Each ZIP
+in an ordered multi-archive selection must contain exactly one CUE and no M3U;
+`MultiZipDiscSource` namespaces each archive under `disc-N/`, generates one
+M3U in caller order, audits every source disc, and audits the combined set.
+ZIPs are transport containers: their CUE, BIN, M3U and SBI files enter the
+same `DiscSetAudit` and mount-plan path as raw files. The core never receives
+or interprets an archive.
 
 Extraction resolves exact entry ranges from the classic or ZIP64 central
 directory, then streams each stored/deflate payload. Data descriptors are
@@ -688,8 +692,8 @@ reader rejects malformed or encrypted ZIPs, other compression methods, unsafe
 or case-ambiguous paths, more than 64 files, an entry larger than 1 GiB, or
 more than 8 GiB total compressed or expanded data. A ZIP may contain one
 CUE/BIN disc or one M3U whose relative entries reach all included discs.
-Mixing a ZIP with separately selected files is an explicit `ARCHIVE_INVALID`
-error.
+The combined multi-archive expansion also has an 8 GiB limit. Mixing ZIPs with
+separately selected files is an explicit `ARCHIVE_INVALID` error.
 
 The library stores only the normalized extracted `Blob`s and descriptors; it
 does not retain a redundant copy of the ZIP. Directory selection and explicit
@@ -983,14 +987,18 @@ them.
 
 The harness is a consumer of the package, not a second runtime. It provides:
 
-- a single-ZIP game picker plus drag/drop for the release-test workflow; the
-  initial Library title is derived from the ZIP filename, while archives with
-  ambiguous descriptors reveal a contextual CUE/M3U chooser instead of a
-  permanent entry-override field;
+- a ZIP game picker plus accumulating drag/drop for the release-test workflow;
+  one ZIP follows its embedded CUE/M3U, while multiple single-disc ZIPs expose
+  ordered move/remove controls and a preview explicitly identifying the M3U
+  that Check And Store will generate and persist; the initial Library title is
+  derived from the first ZIP filename, while a single archive with ambiguous
+  descriptors reveals a contextual CUE/M3U chooser instead of a permanent
+  entry-override field;
 - an audit panel showing every missing/invalid reference;
 - separate browser-local **Check And Store** actions for firmware and games,
   with independent removal and explicit confirmation before a stored game is
-  deleted;
+  deleted; the Game surface cannot be dismissed or edited while its check and
+  atomic browser-storage import is in progress;
 - a **System** surface before **Game**; Game and Library remain disabled until
   stored firmware for the selected region matches the active core's supported
   byte lengths;
@@ -1013,16 +1021,23 @@ The harness is a consumer of the package, not a second runtime. It provides:
   the UI initiated the pause;
 - a View surface with aspect-preserving and stretched fullscreen choices;
   Escape or a same-player L3 + R3 chord exits fullscreen;
-- Library starts that replace an active session after its persistent state has
-  been flushed;
+- Library starts expose the selected game's starting disc and replace an active
+  session after its persistent state has been flushed; the initiating dialog
+  closes before replacement so its modal pause cannot cover the new session;
 - a checked Game start that likewise replaces an active session when the
-  checked content differs from the running game, while Start remains the disc
-  change action for the active multi-disc game;
+  checked content differs from the running game; for an active multi-disc
+  game, **Change disc** performs a state-preserving virtual tray cycle for an
+  in-game insert-disc prompt, while **Restart from disc** directly boots the
+  selected disc as a new session;
 - automatic Library refresh whenever its surface opens, with each game's
   content payload size and an aggregate stored-game total; mutable display
-  titles remain a Library-only concern;
+  titles remain a Library-only concern, and a selected multi-disc game exposes
+  a download of the normalized M3U actually stored with it;
 - hard reset and disc selection;
-- two card selectors, import/export and auto-save status;
+- two card selectors, import/export and auto-save status; selecting a
+  replacement identifies its filename and size, while a completed replacement
+  reports the affected slot both inside the modal and through a transient
+  notice;
 - a per-game save-state manager that lists every named state with its capture
   time, disc and active-build compatibility, and provides explicit create,
   load, confirmed overwrite and confirmed delete actions; successful save,

@@ -56,7 +56,7 @@ try {
         ],
     };
     const adapter = new LibretroPsxAdapter({
-        buildUrl: "/dist/worker",
+        buildUrl: "/dist/core",
         build,
         createWorker: (url) => new Worker(url, { type: "module" }),
     });
@@ -81,6 +81,7 @@ try {
     await session.unserializeState(state);
     await session.reset("soft");
     await session.setDisc(1);
+    const changedDiscIndex = session.discIndex;
     const cardOne = await session.readMemoryCard(1);
     const cardTwo = await session.readMemoryCard(2);
     await session.reset("hard");
@@ -91,13 +92,15 @@ try {
             && cardOne.byteLength === 131072 && cardTwo.byteLength === 131072
             && session.machine.buildId === buildId
             && session.machine.firmware === "bios"
-            && session.machine.discCount === 2,
+            && session.machine.discCount === 2
+            && changedDiscIndex === 1,
         ticks,
         frames,
         sounds,
         stateBytes: state.byteLength,
         cardBytes: [cardOne.byteLength, cardTwo.byteLength],
         discCount: session.machine.discCount,
+        changedDiscIndex,
         firmware: session.machine.firmware,
     };
     await session.exit();

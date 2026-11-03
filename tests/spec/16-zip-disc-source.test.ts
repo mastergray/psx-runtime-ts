@@ -3,6 +3,7 @@ import { deflateSync, strFromU8, strToU8, zipSync } from "fflate";
 
 import {
     DiscSetAudit,
+    MultiZipDiscSource,
     PsxConsole,
     PsxRuntimeError,
     ZipDiscSource,
@@ -19,8 +20,8 @@ const namedBlob = (name: string, contents: BlobPart | Uint8Array): PsxLocalFileL
     return blob;
 };
 
-const archive = (entries: Parameters<typeof zipSync>[0]): PsxLocalFileLike =>
-    namedBlob("diagnostics.zip", zipSync(entries));
+const archive = (entries: Parameters<typeof zipSync>[0], name = "diagnostics.zip"): PsxLocalFileLike =>
+    namedBlob(name, zipSync(entries));
 
 const cue = (track: string): Uint8Array => strToU8([
     `FILE "${track}" BINARY`,
@@ -126,10 +127,12 @@ const testFile: TestFile = {
                 .stage("resolve and audit", async () => {
                     const archive = diagnostics();
                     const descriptors = await ZipDiscSource.listDescriptors(archive);
+                    const manifestText = await ZipDiscSource.readDescriptor(archive, "psx-runtime-diagnostics.m3u");
                     const game = await PsxConsole.resolveFiles([archive], { gameId: "diagnostics" });
                     const result = await DiscSetAudit.audit(game);
                     return {
                         descriptors,
+                        manifestText,
                         entry: game.entry,
                         paths: game.files.map(({ path }) => path),
                         sizes: game.files.map(({ blob }) => blob.size),
@@ -142,6 +145,7 @@ const testFile: TestFile = {
                         "controller/controller-test.cue",
                         "audio/audio-test.cue",
                     ],
+                    manifestText: "controller/controller-test.cue\naudio/audio-test.cue\n",
                     entry: "psx-runtime-diagnostics.m3u",
                     paths: [
                         "psx-runtime-diagnostics.m3u",
@@ -153,6 +157,81 @@ const testFile: TestFile = {
                     sizes: [52, 72, 3, 67, 3],
                     audit: [2, 6],
                 }))
+                .start(undefined),
+        },
+        {
+            label: "ordered single-disc ZIPs generate one audited M3U-backed disc set",
+            run: () => CTGTest.init("multi-ZIP disc set")
+                .stage("inspect and build", async () => {
+                    const first = archive({
+                        "disc-one.cue": cue("disc-one.bin"),
+                        "disc-one.bin": new Uint8Array([1, 2, 3]),
+                    }, "Disc One.zip");
+                    const second = archive({ nested: {
+                        "disc-two.cue": cue("disc-two.bin"),
+                        "disc-two.bin": new Uint8Array([4, 5, 6]),
+                    } }, "Disc Two.zip");
+                    const manifest = await MultiZipDiscSource.inspect([first, second]);
+                    const built = await MultiZipDiscSource.build([first, second], { gameId: "combined" });
+                    const resolved = await PsxConsole.resolveFiles([first, second], { gameId: "combined" });
+                    const audit = await DiscSetAudit.audit(resolved);
+                    return {
+                        manifest,
+                        built: [built.game.gameId, built.game.entry],
+                        resolved: [resolved.gameId, resolved.entry, resolved.files.map(({ path }) => path)],
+                        audit: audit.ok ? [audit.audit.discs.length, audit.audit.totalBytes] : audit.issues,
+                    };
+                })
+                .assert("ordered combined content", ({ subject }) => subject, P.equals<unknown>({
+                    manifest: {
+                        name: "multi-disc.m3u",
+                        text: "disc-1/disc-one.cue\ndisc-2/nested/disc-two.cue\n",
+                        discs: [
+                            { archiveName: "Disc One.zip", cuePath: "disc-one.cue", manifestPath: "disc-1/disc-one.cue" },
+                            { archiveName: "Disc Two.zip", cuePath: "nested/disc-two.cue", manifestPath: "disc-2/nested/disc-two.cue" },
+                        ],
+                    },
+                    built: ["combined", "multi-disc.m3u"],
+                    resolved: ["combined", "multi-disc.m3u", [
+                        "multi-disc.m3u",
+                        "disc-1/disc-one.cue",
+                        "disc-1/disc-one.bin",
+                        "disc-2/nested/disc-two.cue",
+                        "disc-2/nested/disc-two.bin",
+                    ]],
+                    audit: [2, 6],
+                }))
+                .start(undefined),
+        },
+        {
+            label: "multi-ZIP inputs reject playlists, ambiguous discs, mixed files, and excess cardinality",
+            run: () => CTGTest.init("multi-ZIP rejection")
+                .stage("capture failures", async () => {
+                    const single = archive({
+                        "game.cue": cue("game.bin"),
+                        "game.bin": new Uint8Array([1]),
+                    }, "single.zip");
+                    const ambiguous = archive({
+                        "one.cue": cue("one.bin"), "one.bin": new Uint8Array([1]),
+                        "two.cue": cue("two.bin"), "two.bin": new Uint8Array([2]),
+                    }, "ambiguous.zip");
+                    const failures = await Promise.all([
+                        capture(() => MultiZipDiscSource.inspect([diagnostics(), single])),
+                        capture(() => MultiZipDiscSource.inspect([ambiguous, single])),
+                        capture(() => PsxConsole.resolveFiles([
+                            single,
+                            namedBlob("extra.cue", cue("extra.bin")),
+                        ], { gameId: "mixed" })),
+                        capture(() => MultiZipDiscSource.inspect(Array.from({ length: 9 }, () => single))),
+                    ]);
+                    return failures.map(errorSnapshot);
+                })
+                .assert("stable multi-ZIP errors", ({ subject }) => subject, P.equals<unknown>([
+                    { label: "ARCHIVE_INVALID", message: "Each multi-disc input must be a single-disc ZIP containing exactly one CUE and no M3U." },
+                    { label: "ARCHIVE_INVALID", message: "Each multi-disc input must be a single-disc ZIP containing exactly one CUE and no M3U." },
+                    { label: "ARCHIVE_INVALID", message: "Do not mix ZIP archives with separately selected disc files." },
+                    { label: "ARCHIVE_INVALID", message: "Select between two and eight single-disc ZIP archives." },
+                ]))
                 .start(undefined),
         },
         {
@@ -177,7 +256,7 @@ const testFile: TestFile = {
                     { label: "ARCHIVE_INVALID", message: "The ZIP archive contains an unsafe or non-normalized path." },
                     { label: "ARCHIVE_INVALID", message: "The ZIP archive contains duplicate paths when case-folded." },
                     { label: "ARCHIVE_INVALID", message: "The selected ZIP archive is malformed or truncated." },
-                    { label: "ARCHIVE_INVALID", message: "Select one ZIP archive by itself, or select the extracted disc files without a ZIP." },
+                    { label: "ARCHIVE_INVALID", message: "Do not mix ZIP archives with separately selected disc files." },
                 ]))
                 .start(undefined),
         },

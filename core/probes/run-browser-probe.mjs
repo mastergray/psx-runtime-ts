@@ -297,7 +297,7 @@ try {
                 cancelable: true,
                 dataTransfer: transfer,
             }));
-            while (document.querySelector("#game-feedback")?.textContent === "Inspecting game ZIP…") {
+            while (document.querySelector("#game-feedback")?.textContent !== "Game ZIP selected. Ready to check and store.") {
                 await new Promise((resolve) => requestAnimationFrame(resolve));
             }
             return {
@@ -313,6 +313,8 @@ try {
                 conditionalEntryHidden: document.querySelector("#entry-choice")?.hasAttribute("hidden"),
             };
         });
+        await page.evaluate(() => document.querySelector("#clear-game-selection")?.click());
+        await page.waitForFunction(() => document.querySelector("#game-selection")?.textContent === "No game ZIPs selected.");
         const ambiguousEntry = await page.evaluate(async () => {
             const zone = document.querySelector("#game-drop-zone");
             if (!(zone instanceof HTMLElement)) throw new Error("Missing game ZIP drop zone");
@@ -330,13 +332,58 @@ try {
                 cancelable: true,
                 dataTransfer: transfer,
             }));
-            while (document.querySelector("#game-feedback")?.textContent === "Inspecting game ZIP…") {
+            while (document.querySelector("#game-feedback")?.textContent
+                !== "This ZIP has multiple possible entries. Choose one, then run Check And Store.") {
                 await new Promise((resolve) => requestAnimationFrame(resolve));
             }
             return {
                 visible: document.querySelector("#entry-choice")?.hasAttribute("hidden") === false,
                 entries: [...document.querySelectorAll("#entry-select option")].map((option) => option.textContent),
                 feedback: document.querySelector("#game-feedback")?.textContent,
+            };
+        });
+        await page.evaluate(() => document.querySelector("#clear-game-selection")?.click());
+        await page.waitForFunction(() => document.querySelector("#game-selection")?.textContent === "No game ZIPs selected.");
+        const multiZip = await page.evaluate(async () => {
+            const zone = document.querySelector("#game-drop-zone");
+            if (!(zone instanceof HTMLElement)) throw new Error("Missing game ZIP drop zone");
+            const { strToU8, zipSync } = await import("fflate");
+            const cue = (track) => strToU8(`FILE "${track}" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\n`);
+            const transfer = new DataTransfer();
+            transfer.items.add(new File([zipSync({
+                "first.cue": cue("first.bin"), "first.bin": new Uint8Array(2352),
+            })], "First.zip", { type: "application/zip" }));
+            transfer.items.add(new File([zipSync({
+                "second.cue": cue("second.bin"), "second.bin": new Uint8Array(2352),
+            })], "Second.zip", { type: "application/zip" }));
+            zone.dispatchEvent(new DragEvent("drop", {
+                bubbles: true,
+                cancelable: true,
+                dataTransfer: transfer,
+            }));
+            while (document.querySelector("#game-feedback")?.textContent
+                !== "2 single-disc ZIPs are ordered and ready to check and store.") {
+                await new Promise((resolve) => requestAnimationFrame(resolve));
+            }
+            const before = {
+                selection: document.querySelector("#game-selection")?.textContent,
+                rows: [...document.querySelectorAll("#game-archive-list .archive-name")]
+                    .map((row) => row.textContent),
+                manifest: document.querySelector("#m3u-preview")?.textContent,
+                description: document.querySelector("#m3u-description")?.textContent,
+                manifestVisible: document.querySelector("#m3u-panel")?.hasAttribute("hidden") === false,
+            };
+            document.querySelector("#game-archive-list .archive-row:first-child .archive-actions button:nth-child(2)")?.click();
+            while (!document.querySelector("#m3u-preview")?.textContent?.startsWith("disc-1/second.cue")) {
+                await new Promise((resolve) => requestAnimationFrame(resolve));
+            }
+            return {
+                before,
+                after: {
+                    rows: [...document.querySelectorAll("#game-archive-list .archive-name")]
+                        .map((row) => row.textContent),
+                    manifest: document.querySelector("#m3u-preview")?.textContent,
+                },
             };
         });
         await page.click("[data-open-dialog='controllers-dialog']");
@@ -433,12 +480,107 @@ try {
             pauseOverlay: document.querySelector("#pause-overlay")?.textContent === "Paused"
                 && document.querySelector("#pause-overlay")?.hasAttribute("hidden") === true,
             libraryStorage: document.querySelector("#library-summary")?.textContent === "No games stored."
-                && document.querySelector("#stored-game-details") !== null,
+                && document.querySelector("#stored-game-details") !== null
+                && document.querySelector("#download-stored-m3u")?.hasAttribute("hidden") === true,
+            activeDiscActions: document.querySelector("#start")?.textContent === "Start"
+                && document.querySelector("#restart-disc")?.textContent === "Restart from disc"
+                && document.querySelector("#restart-disc")?.hasAttribute("hidden") === true,
+            memoryCardFeedback: document.querySelector("#memory-card-feedback")?.textContent
+                === "Select a card image, then choose the slot to replace."
+                && document.querySelector("#memory-card-feedback")?.getAttribute("aria-live") === "polite",
         }));
+        const memoryCardSelection = await page.evaluate(() => {
+            const input = document.querySelector("#replacement-card");
+            if (!(input instanceof HTMLInputElement)) throw new Error("Missing replacement-card input");
+            const transfer = new DataTransfer();
+            transfer.items.add(new File([new Uint8Array(128 * 1024)], "test-card.mcr"));
+            input.files = transfer.files;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+            const feedback = document.querySelector("#memory-card-feedback");
+            return {
+                text: feedback?.textContent,
+                state: feedback instanceof HTMLElement ? feedback.dataset.state : undefined,
+            };
+        });
+        const gameImportLock = await page.evaluate(async () => {
+            const zone = document.querySelector("#game-drop-zone");
+            const dialog = document.querySelector("#game-dialog");
+            const close = document.querySelector("#game-dialog-close");
+            const audit = document.querySelector("#audit");
+            if (!(zone instanceof HTMLElement) || !(dialog instanceof HTMLDialogElement)
+                || !(close instanceof HTMLButtonElement) || !(audit instanceof HTMLButtonElement)) {
+                throw new Error("Missing game import controls");
+            }
+            const { strToU8, zipSync } = await import("fflate");
+            const transfer = new DataTransfer();
+            transfer.items.add(new File([zipSync({
+                "one.cue": strToU8("FILE \"one.bin\" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\n"),
+                "one.bin": new Uint8Array(2352),
+            })], "Lock Test One.zip", { type: "application/zip" }));
+            transfer.items.add(new File([zipSync({
+                "two.cue": strToU8("FILE \"two.bin\" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\n"),
+                "two.bin": new Uint8Array(2352),
+            })], "Lock Test Two.zip", { type: "application/zip" }));
+            zone.dispatchEvent(new DragEvent("drop", {
+                bubbles: true,
+                cancelable: true,
+                dataTransfer: transfer,
+            }));
+            while (document.querySelector("#game-feedback")?.textContent
+                !== "2 single-disc ZIPs are ordered and ready to check and store.") {
+                await new Promise((resolve) => requestAnimationFrame(resolve));
+            }
+            dialog.showModal();
+            audit.click();
+            const cancel = new Event("cancel", { cancelable: true });
+            dialog.dispatchEvent(cancel);
+            dialog.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            close.click();
+            const locked = {
+                busy: dialog.getAttribute("aria-busy"),
+                controlsDisabled: document.querySelector("#game-controls")?.hasAttribute("disabled"),
+                closeDisabled: close.disabled,
+                cancelPrevented: cancel.defaultPrevented,
+                remainedOpen: dialog.open,
+            };
+            while (dialog.hasAttribute("aria-busy")) {
+                await new Promise((resolve) => requestAnimationFrame(resolve));
+            }
+            const importFeedback = document.querySelector("#game-feedback")?.textContent ?? "";
+            if (!importFeedback.startsWith("Game check passed:")) {
+                throw new Error(`Game import did not finish successfully: ${importFeedback}`);
+            }
+            const storedDisc = document.querySelector("#stored-disc-index");
+            if (!(storedDisc instanceof HTMLSelectElement)) throw new Error("Missing stored-game disc selector");
+            while (storedDisc.options.length !== 2
+                || document.querySelector("#download-stored-m3u")?.hasAttribute("hidden") === true) {
+                await new Promise((resolve) => requestAnimationFrame(resolve));
+            }
+            const options = [...storedDisc.options].map((option) => option.textContent);
+            storedDisc.value = "1";
+            storedDisc.dispatchEvent(new Event("change", { bubbles: true }));
+            const selected = storedDisc.value;
+            const feedback = document.querySelector("#stored-disc-feedback")?.textContent;
+            dialog.close();
+            return {
+                ...locked,
+                options,
+                selected,
+                feedback,
+            };
+        });
         resolveResult({
             ok: harness.canvas && harness.buttons >= 10 && harness.status === "idle"
                 && harness.topLevelSessionControls && harness.viewControls && harness.deleteConfirmation
-                && harness.stateManager && harness.pauseOverlay && harness.libraryStorage
+                && harness.stateManager && harness.pauseOverlay && harness.libraryStorage && harness.activeDiscActions
+                && harness.memoryCardFeedback
+                && memoryCardSelection.text === "Selected “test-card.mcr” (128 KiB). Choose card 1 or card 2."
+                && memoryCardSelection.state === "idle"
+                && gameImportLock.busy === "" && gameImportLock.controlsDisabled
+                && gameImportLock.closeDisabled && gameImportLock.cancelPrevented && gameImportLock.remainedOpen
+                && gameImportLock.options.join(",") === "Disc 1,Disc 2"
+                && gameImportLock.selected === "1"
+                && gameImportLock.feedback === "Disc 2 of 2 will be used when Start stored is chosen."
                 && gameDrop.accepted && gameDrop.highlighted === "true"
                 && gameDrop.dialog === "game-dialog" && gameDrop.state === "selected"
                 && gameDrop.dragging === "false" && gameDrop.selection === "Selected: Dragged Game.zip"
@@ -446,6 +588,13 @@ try {
                 && gameDrop.titleRemoved && gameDrop.overrideRemoved && gameDrop.conditionalEntryHidden
                 && ambiguousEntry.visible && ambiguousEntry.entries.join(",") === "disc-a.cue,disc-b.cue"
                 && ambiguousEntry.feedback === "This ZIP has multiple possible entries. Choose one, then run Check And Store."
+                && multiZip.before.selection === "2 ZIPs selected for a 2-disc game."
+                && multiZip.before.rows.join(",") === "Disc 1 · First.zip,Disc 2 · Second.zip"
+                && multiZip.before.manifest === "disc-1/first.cue\ndisc-2/second.cue\n"
+                && multiZip.before.description === "A new M3U will be generated and stored with this multi-disc game during Check And Store."
+                && multiZip.before.manifestVisible
+                && multiZip.after.rows.join(",") === "Disc 1 · Second.zip,Disc 2 · First.zip"
+                && multiZip.after.manifest === "disc-1/second.cue\ndisc-2/first.cue\n"
                 && tabSelected === "true" && playerOneHidden === "" && playerTwoHidden === null
                 && keyboardListening === "Press a key or button…"
                 && gamepadListening === "Press a key or button…"
@@ -467,11 +616,14 @@ try {
             ...harness,
             gameDrop,
             ambiguousEntry,
+            multiZip,
             automaticallyAssigned,
             captured,
             persisted,
             restored,
             invalidIgnored,
+            memoryCardSelection,
+            gameImportLock,
             tabSelected,
             playerOneHidden: playerOneHidden === "",
             playerTwoHidden: playerTwoHidden !== null,

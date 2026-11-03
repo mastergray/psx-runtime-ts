@@ -1,6 +1,7 @@
 export { default as PsxRuntimeError } from "./PsxRuntimeError/PsxRuntimeError.js";
 export { default as DiscSetAudit } from "./DiscSetAudit/DiscSetAudit.js";
 export { default as LibretroPsxAdapter } from "./LibretroPsxAdapter/LibretroPsxAdapter.js";
+export { default as MultiZipDiscSource } from "./MultiZipDiscSource/MultiZipDiscSource.js";
 export { default as PsxInput } from "./PsxInput/PsxInput.js";
 export { default as KeyboardSource, DEFAULT_KEYBOARD_MAP } from "./KeyboardSource/KeyboardSource.js";
 export { default as GamepadSource, DEFAULT_GAMEPAD_BUTTON_MAP } from "./GamepadSource/GamepadSource.js";
@@ -13,6 +14,12 @@ export { default as PsxConsole } from "./PsxConsole/PsxConsole.js";
 export { default as ZipDiscSource } from "./ZipDiscSource/ZipDiscSource.js";
 export { default as ZipFirmwareSource } from "./ZipFirmwareSource/ZipFirmwareSource.js";
 export type { PsxFirmwareFile } from "./ZipFirmwareSource/types.js";
+export {
+    isPsxMultiZipManifest,
+    type PsxMultiZipBuild,
+    type PsxMultiZipDisc,
+    type PsxMultiZipManifest,
+} from "./MultiZipDiscSource/types.js";
 export {
     isPsxRuntimeErrorConfig,
     type PsxRuntimeErrorConfig,

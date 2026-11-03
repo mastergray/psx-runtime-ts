@@ -75,6 +75,7 @@ export default class ZipDiscSource {
     static readonly MAX_ENTRY_BYTES = GIBIBYTE;                           // Maximum expanded size of one entry
     static readonly MAX_EXPANDED_BYTES = 8 * GIBIBYTE;                    // Maximum combined expanded size
     static readonly MAX_FILES = 64;                                       // Maximum normalized file count
+    static readonly MAX_DESCRIPTOR_BYTES = 256 * 1024;                    // Maximum descriptor size exposed for preview/export
 
     // CONSTRUCTOR :: VOID -> zipDiscSource
     // Prevents instances because archive operations are stateless.
@@ -101,6 +102,23 @@ export default class ZipDiscSource {
             .filter((path) => /\.(?:cue|m3u)$/iu.test(path)));
     }
 
+    // METHOD :: psxLocalFileLike, STRING -> PROMISE(STRING)
+    // Reads one validated CUE or M3U without expanding unrelated track content.
+    static async readDescriptor(archive: PsxLocalFileLike, path: string): Promise<string> {
+        if (!isDiscPath(path) || !/\.(?:cue|m3u)$/iu.test(path)) {
+            throw invalid("The requested ZIP descriptor path is invalid.", path);
+        }
+        const { Inflate, strFromU8 } = await import("fflate");
+        const entries = validateEntries(await archiveEntries(archive, strFromU8));
+        const selected = entries.find((entry) => entry.path === path);
+        if (selected === undefined) throw invalid("The requested ZIP descriptor does not exist.", path);
+        if (selected.entry.originalSize > ZipDiscSource.MAX_DESCRIPTOR_BYTES) {
+            throw invalid("The requested ZIP descriptor exceeds the 256 KiB preview limit.", path);
+        }
+        const blob = await expandEntry(archive, selected.entry, selected.path, (onData) => new Inflate(onData));
+        return blob.text();
+    }
+
     // METHOD :: psxLocalFileLike -> PROMISE([discFile])
     // Streams, bounds, validates, and expands one ZIP archive.
     static async extract(archive: PsxLocalFileLike): Promise<ReadonlyArray<DiscFile>> {
@@ -110,22 +128,7 @@ export default class ZipDiscSource {
         let expandedBytes = 0;
 
         for (const { entry, path } of entries) {
-            const compressed = await entryPayload(archive, entry);
-            let blob: Blob;
-            try {
-                blob = entry.compression === 0
-                    ? compressed
-                    : await inflateBlob(compressed, entry.originalSize, (onData) => new Inflate(onData));
-            } catch (error) {
-                throw invalid("A ZIP entry could not be decompressed.", reasonOf(error));
-            }
-            if (blob.size !== entry.originalSize) {
-                throw invalid("A ZIP entry expanded to an unexpected byte length.", {
-                    path,
-                    expected: entry.originalSize,
-                    actual: blob.size,
-                });
-            }
+            const blob = await expandEntry(archive, entry, path, (onData) => new Inflate(onData));
             expandedBytes += blob.size;
             if (!Number.isSafeInteger(expandedBytes)
                 || expandedBytes > ZipDiscSource.MAX_EXPANDED_BYTES) {
@@ -205,6 +208,33 @@ const validateEntries = (entries: ReadonlyArray<ZipEntryRecord>): ReadonlyArray<
     }
     if (validated.length === 0) throw invalid("The ZIP archive contains no files.");
     return Object.freeze(validated);
+};
+
+// HELPER :: psxLocalFileLike, zipEntryRecord, STRING, rawInflateFactory -> PROMISE(blob)
+// Expands one exact central-directory range and verifies its declared output length.
+const expandEntry = async (
+    archive: PsxLocalFileLike,
+    entry: ZipEntryRecord,
+    path: string,
+    createInflate: RawInflateFactory,
+): Promise<Blob> => {
+    const compressed = await entryPayload(archive, entry);
+    let blob: Blob;
+    try {
+        blob = entry.compression === 0
+            ? compressed
+            : await inflateBlob(compressed, entry.originalSize, createInflate);
+    } catch (error) {
+        throw invalid("A ZIP entry could not be decompressed.", reasonOf(error));
+    }
+    if (blob.size !== entry.originalSize) {
+        throw invalid("A ZIP entry expanded to an unexpected byte length.", {
+            path,
+            expected: entry.originalSize,
+            actual: blob.size,
+        });
+    }
+    return blob;
 };
 
 // HELPER :: psxLocalFileLike, zipStringDecoder -> PROMISE([zipEntryRecord])
