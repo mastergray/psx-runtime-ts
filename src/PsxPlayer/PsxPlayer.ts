@@ -4,6 +4,7 @@ import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";    // Repor
 import PsxCardAutoSave from "../PsxStorage/PsxCardAutoSave.js";        // Periodically persists active session memory cards
 import {
     isControllerPort,     // Validates memory-card slot requests
+    isPsxPlaybackRate,    // Validates normal and fast-forward multipliers
     isPsxStartConfig,     // Validates complete session startup input
 } from "../shared.types.js";
 import {
@@ -16,6 +17,7 @@ import type {
     ControllerPort,    // Physical memory-card and controller slot
     Listener,          // Observer accepted by player event streams
     PsxSession,        // Active emulation session owned by the player
+    PsxPlaybackRate,   // Normal or accelerated emulation-time multiplier
     PsxStartConfig,    // Firmware, content, controller, and card startup input
     Unsubscribe,       // Cleanup returned by player and session subscriptions
 } from "../shared.types.js";
@@ -99,6 +101,10 @@ export default class PsxPlayer {
     // GETTER :: VOID -> psxPlayerDisplayLike
     // Returns the display so browser shells can control presentation without owning its lifecycle.
     get display(): PsxPlayerConfig["display"] { return this._display; }
+
+    // GETTER :: VOID -> psxPlaybackRate
+    // Returns the active session multiplier or normal speed while idle.
+    get playbackRate(): PsxPlaybackRate { return this._session?.playbackRate ?? 1; }
 
     /**
      *
@@ -228,6 +234,16 @@ export default class PsxPlayer {
         this._setStatus("running");
     }
 
+    // METHOD :: psxPlaybackRate -> VOID
+    // Changes execution speed and clears queued audio at the rate boundary.
+    setPlaybackRate(rate: PsxPlaybackRate): void {
+        const session = this._requireActive();
+        if (!isPsxPlaybackRate(rate)) throw invalid(rate);
+        if (session.playbackRate === rate) return;
+        this._audio?.resetQueue();
+        session.setPlaybackRate(rate);
+    }
+
     // METHOD :: "soft"|"hard" -> PROMISE(VOID)
     // Resets the active session after flushing transient and persistent state.
     async reset(kind: "soft" | "hard"): Promise<void> {
@@ -306,10 +322,19 @@ export default class PsxPlayer {
     }
 
     // METHOD :: controllerPort -> PROMISE(uint8Array)
-    // Reads a defensive memory-card image from the active session.
-    downloadMemoryCard(slot: ControllerPort): Promise<Uint8Array> {
-        if (!isControllerPort(slot)) return Promise.reject(invalid(slot));
-        return this._requireActive().readMemoryCard(slot);
+    // Reads a defensive memory-card image from the active session or stopped player's persistent storage.
+    async downloadMemoryCard(slot: ControllerPort): Promise<Uint8Array> {
+        if (!isControllerPort(slot)) throw invalid(slot);
+        if (this._status !== "idle") return this._requireActive().readMemoryCard(slot);
+        this._assertNotDestroyed();
+        const storage = this._requireStorage();
+        const record = await storage.loadMemoryCard(this._profileId!, this._cardIds![slot]);
+        if (record === null) throw new PsxRuntimeError({
+            code: PsxRuntimeError.CODE.NOT_STARTED,
+            message: `Memory card ${slot} has no active or stored image to download.`,
+            data: slot,
+        });
+        return record.bytes.slice();
     }
 
     // METHOD :: controllerPort, uint8Array -> PROMISE(psxMemoryCardRecord)

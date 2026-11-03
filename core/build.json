@@ -38,7 +38,8 @@
     "-f",
     "Makefile.libretro",
     "platform=emscripten",
-    "HAVE_CHD=0"
+    "HAVE_CHD=0",
+    "CFLAGS_OPT=-O3"
   ],
   "compileFlags": [
     "-O2",

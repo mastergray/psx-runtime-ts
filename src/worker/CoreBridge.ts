@@ -12,6 +12,7 @@ import type {
     PsxRumbleEvent,    // Normalized controller motor output
 } from "../shared.types.js";
 import type {
+    CoreRunOptions,   // Selects large frame payloads that must cross the bridge
     CoreRunOutput,    // Video, audio, and rumble produced by one frame
     WorkerCore,       // Backend contract implemented by this bridge
 } from "./WorkerRuntime.js";
@@ -42,7 +43,7 @@ export interface EmscriptenPsxModule {
     stringToUTF8(value: string, pointer: number, capacity: number): void; // Copies a terminated UTF-8 string into memory
     lengthBytesUTF8(value: string): number; // Measures UTF-8 bytes excluding the terminator
     _psx_start(contentPath: number, optionsJson: number): number;         // Starts the shim from string pointers
-    _psx_run_frame(): number;                                        // Executes one emulation frame
+    _psx_run_frame(captureVideo: number, captureAudio: number, frameskipInterval: number): number; // Executes one configured emulation frame
     _psx_set_button(port: number, id: number, pressed: number): void; // Sets one native digital input
     _psx_set_axis(port: number, id: number, value: number): void;     // Sets one native analog input
     _psx_reset(): number;                                            // Performs a soft core reset
@@ -223,34 +224,41 @@ export default class EmscriptenPsxCore implements WorkerCore {
         }
     }
 
-    // METHOD :: VOID -> coreRunOutput
-    // Executes one frame and copies current video, audio, and changed rumble output.
-    runFrame(): CoreRunOutput {
+    // METHOD :: coreRunOptions -> coreRunOutput
+    // Executes one frame and copies only requested AV payloads plus changed rumble output.
+    runFrame(options: CoreRunOptions): CoreRunOutput {
         const module = this._liveModule();
-        if (module._psx_run_frame() !== 1) throw new PsxRuntimeError({
+        if (module._psx_run_frame(
+            options.video ? 1 : 0,
+            options.audio ? 1 : 0,
+            options.frameskipInterval,
+        ) !== 1) throw new PsxRuntimeError({
             code: PsxRuntimeError.CODE.WORKER_FAILED,
             message: "The PlayStation core failed while running a frame.",
             data: this._sanitizedLog(),
         });
-        const width = module._psx_video_width();
-        const height = module._psx_video_height();
-        const videoPointer = module._psx_video_data();
-        const videoBytes = module._psx_video_size();
-        const video = module._psx_video_duplicate() !== 0 || videoPointer === 0 || videoBytes === 0
-            ? null
-            : {
-                data: module.HEAPU8.slice(videoPointer, videoPointer + videoBytes),
-                width,
-                height,
-                pitch: module._psx_video_pitch(),
-                aspectRatio: module._psx_aspect_ratio(),
-                format: this._pixelFormat(module._psx_video_format()),
-            } as const;
-        const audioFrames = module._psx_audio_frames();
-        const audioPointer = module._psx_audio_data();
-        const audio = audioFrames === 0 || audioPointer === 0
+        const videoPointer = options.video ? module._psx_video_data() : 0;
+        const videoBytes = options.video ? module._psx_video_size() : 0;
+        const video = !options.video
             ? undefined
-            : module.HEAP16.slice(audioPointer / Int16Array.BYTES_PER_ELEMENT, audioPointer / Int16Array.BYTES_PER_ELEMENT + audioFrames * 2);
+            : module._psx_video_duplicate() !== 0 || videoPointer === 0 || videoBytes === 0
+                ? null
+                : {
+                    data: module.HEAPU8.slice(videoPointer, videoPointer + videoBytes),
+                    width: module._psx_video_width(),
+                    height: module._psx_video_height(),
+                    pitch: module._psx_video_pitch(),
+                    aspectRatio: module._psx_aspect_ratio(),
+                    format: this._pixelFormat(module._psx_video_format()),
+                } as const;
+        const audioFrames = options.audio ? module._psx_audio_frames() : 0;
+        const audioPointer = options.audio ? module._psx_audio_data() : 0;
+        const audio = !options.audio || audioFrames === 0 || audioPointer === 0
+            ? undefined
+            : module.HEAP16.slice(
+                audioPointer / Int16Array.BYTES_PER_ELEMENT,
+                audioPointer / Int16Array.BYTES_PER_ELEMENT + audioFrames * 2,
+            );
         const rumble: PsxRumbleEvent[] = [];
         for (let port = 0; port < 2; port++) {
             const strong = module._psx_rumble(port, 0);
@@ -260,7 +268,11 @@ export default class EmscriptenPsxCore implements WorkerCore {
                 rumble.push({ port: (port + 1) as ControllerPort, strong: strong / 0xffff, weak: weak / 0xffff });
             }
         }
-        return { video, ...(audio === undefined ? {} : { audio }), ...(rumble.length === 0 ? {} : { rumble }) };
+        return {
+            ...(video === undefined ? {} : { video }),
+            ...(audio === undefined ? {} : { audio }),
+            ...(rumble.length === 0 ? {} : { rumble }),
+        };
     }
 
     // METHOD :: controllerPort, psxButton, BOOLEAN -> VOID

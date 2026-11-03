@@ -479,6 +479,10 @@ try {
                 && document.querySelector("#notice-toast")?.getAttribute("popover") === "manual",
             pauseOverlay: document.querySelector("#pause-overlay")?.textContent === "Paused"
                 && document.querySelector("#pause-overlay")?.hasAttribute("hidden") === true,
+            runtimeShortcuts: document.querySelector("#speed-indicator")?.hasAttribute("hidden") === true
+                && document.querySelector("#fast-forward-selection")?.textContent === "×2"
+                && document.querySelector("#controllers-dialog")?.textContent?.includes("L3 + R2 (press)") === true
+                && document.querySelector("#controllers-dialog")?.textContent?.includes("Quick State 2") === true,
             libraryStorage: document.querySelector("#library-summary")?.textContent === "No games stored."
                 && document.querySelector("#stored-game-details") !== null
                 && document.querySelector("#download-stored-m3u")?.hasAttribute("hidden") === true,
@@ -488,6 +492,10 @@ try {
             memoryCardFeedback: document.querySelector("#memory-card-feedback")?.textContent
                 === "Select a card image, then choose the slot to replace."
                 && document.querySelector("#memory-card-feedback")?.getAttribute("aria-live") === "polite",
+            idleCardDownloads: ["download-card-1", "download-card-2"].every((id) =>
+                document.querySelector(`#${id}`)?.hasAttribute("disabled") === false)
+                && document.querySelector("#memory-card-status")?.textContent
+                    === "Download stored cards or select a replacement while no game is running.",
         }));
         const memoryCardSelection = await page.evaluate(() => {
             const input = document.querySelector("#replacement-card");
@@ -572,8 +580,9 @@ try {
         resolveResult({
             ok: harness.canvas && harness.buttons >= 10 && harness.status === "idle"
                 && harness.topLevelSessionControls && harness.viewControls && harness.deleteConfirmation
-                && harness.stateManager && harness.pauseOverlay && harness.libraryStorage && harness.activeDiscActions
-                && harness.memoryCardFeedback
+                && harness.stateManager && harness.pauseOverlay && harness.runtimeShortcuts
+                && harness.libraryStorage && harness.activeDiscActions
+                && harness.memoryCardFeedback && harness.idleCardDownloads
                 && memoryCardSelection.text === "Selected “test-card.mcr” (128 KiB). Choose card 1 or card 2."
                 && memoryCardSelection.state === "idle"
                 && gameImportLock.busy === "" && gameImportLock.controlsDisabled

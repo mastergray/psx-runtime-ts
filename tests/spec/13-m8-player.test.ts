@@ -16,6 +16,7 @@ import type {
     PsxMachineInfo,
     PsxMemoryCardRecord,
     PsxMemoryCardSaveConfig,
+    PsxPlaybackRate,
     PsxRumbleEvent,
     PsxSession,
     PsxSoundEvent,
@@ -62,6 +63,7 @@ class FakeSession implements PsxSession {
     readonly machine = machine;
     discIndex = 0;
     trayOpen = false;
+    playbackRate: PsxPlaybackRate = 1;
     readonly calls: string[] = [];
     readonly frameListeners = new Set<Listener<PsxFrameEvent>>();
     readonly exitListeners = new Set<Listener<void>>();
@@ -78,6 +80,10 @@ class FakeSession implements PsxSession {
     }
     setAxis(control: PsxAxisControl, value: number): void {
         this.calls.push(`axis:${control.port}:${control.axis}:${value}`);
+    }
+    setPlaybackRate(rate: PsxPlaybackRate): void {
+        this.playbackRate = rate;
+        this.calls.push(`rate:${rate}`);
     }
     pause(): void { this.calls.push("pause"); }
     resume(): void { this.calls.push("resume"); }
@@ -261,6 +267,10 @@ const testFile: TestFile = {
                     await player.start({ game, bios });
                     const first = adapter.sessions[0]!;
                     const initialCards = [first.cards[1][0], first.cards[2][0]];
+                    const initialRate = player.playbackRate;
+                    player.setPlaybackRate(5);
+                    const acceleratedRate = player.playbackRate;
+                    player.setPlaybackRate(1);
                     player.input!.press({ port: 1, button: "cross" });
                     first.cards[1].fill(3);
                     await player.pause();
@@ -272,6 +282,7 @@ const testFile: TestFile = {
                     const downloaded = await player.downloadMemoryCard(2);
                     await player.deleteState("slot");
                     await player.stop();
+                    const stoppedDownload = await player.downloadMemoryCard(2);
                     const replacement = await player.replaceMemoryCard(1, bytes(8));
                     await player.start({ game, bios });
                     const second = adapter.sessions[1]!;
@@ -283,9 +294,11 @@ const testFile: TestFile = {
                     return {
                         valid: isPsxPlayerConfig(config),
                         initialCards,
+                        playbackRates: [initialRate, acceleratedRate, player.playbackRate],
                         state: [state.name, state.metadata.discIndex, [...state.payload]],
                         calls: first.calls.filter((call) => !call.startsWith("card:")),
                         downloaded: downloaded[0],
+                        stoppedDownload: stoppedDownload[0],
                         replacement: [replacement.revision, replacement.bytes[0]],
                         restartedCard,
                         statuses,
@@ -299,8 +312,11 @@ const testFile: TestFile = {
                 .assert("player behavior", ({ subject }) => subject, P.equals<unknown>({
                     valid: true,
                     initialCards: [1, 2],
+                    playbackRates: [1, 5, 1],
                     state: ["slot", 0, [5, 6]],
                     calls: [
+                        "rate:5",
+                        "rate:1",
                         "button:1:cross:true",
                         "button:1:cross:false",
                         "pause",
@@ -316,6 +332,7 @@ const testFile: TestFile = {
                         "exit",
                     ],
                     downloaded: 7,
+                    stoppedDownload: 7,
                     replacement: [3, 8],
                     restartedCard: 8,
                     statuses: [
@@ -324,7 +341,7 @@ const testFile: TestFile = {
                     ],
                     displayExposed: true,
                     display: [2, 3, 1],
-                    audioSummary: [[5, 1], [1, 1]],
+                    audioSummary: [[7, 1], [1, 1]],
                     timers: 0,
                     destroyed: 11,
                 }))

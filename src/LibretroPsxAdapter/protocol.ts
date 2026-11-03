@@ -5,6 +5,7 @@ import {
     isPsxBuildInfo,
     isPsxControllerType,
     isPsxMachineInfo,
+    isPsxPlaybackRate,
     isPsxRegion,
 } from "../shared.types.js";
 import { isMountPlan } from "../worker/MountPlan.js";
@@ -16,6 +17,7 @@ import type {
     PsxBuildInfo,
     PsxControllerType,
     PsxMachineInfo,
+    PsxPlaybackRate,
     PsxRegion,
 } from "../shared.types.js";
 import type { MountPlan } from "../worker/MountPlan.js";
@@ -41,7 +43,7 @@ export interface WorkerStartPayload {
 
 export type WorkerCommand =
     | (WorkerEnvelope & { readonly type: "start"; readonly payload: WorkerStartPayload })
-    | (WorkerEnvelope & { readonly type: "tick"; readonly timestamp: number })
+    | (WorkerEnvelope & { readonly type: "tick"; readonly timestamp: number; readonly playbackRate?: PsxPlaybackRate })
     | (WorkerEnvelope & { readonly type: "set-button"; readonly port: ControllerPort; readonly button: PsxButton; readonly pressed: boolean })
     | (WorkerEnvelope & { readonly type: "set-axis"; readonly port: ControllerPort; readonly axis: PsxAxis; readonly value: number })
     | (WorkerEnvelope & { readonly type: "pause" })
@@ -86,6 +88,7 @@ export type WorkerResponse =
 
 export type WorkerEvent =
     | { readonly type: "tick"; readonly generation: number }
+    | { readonly type: "pacing"; readonly generation: number; readonly frames: number }
     | { readonly type: "geometry"; readonly generation: number; readonly width: number; readonly height: number; readonly aspectRatio: number }
     | { readonly type: "frame"; readonly generation: number; readonly bufferId: number; readonly width: number; readonly height: number; readonly aspectRatio: number; readonly rgba: ArrayBuffer }
     | { readonly type: "sound"; readonly generation: number; readonly samples: ArrayBuffer; readonly frames: number }
@@ -170,7 +173,8 @@ export function isWorkerCommand(value: unknown): value is WorkerCommand {
         || !COMMAND_TYPES.includes(value.type as WorkerCommand["type"])) return false;
     switch (value.type) {
         case "start": return isWorkerStartPayload(value.payload);
-        case "tick": return isFiniteNumber(value.timestamp) && value.timestamp >= 0;
+        case "tick": return isFiniteNumber(value.timestamp) && value.timestamp >= 0
+            && (value.playbackRate === undefined || isPsxPlaybackRate(value.playbackRate));
         case "set-button": return isControllerPort(value.port)
             && isPsxButton(value.button) && typeof value.pressed === "boolean";
         case "set-axis": return isControllerPort(value.port) && isPsxAxis(value.axis)
@@ -218,6 +222,7 @@ export function isWorkerOutput(value: unknown): value is WorkerOutput {
     switch (value.type) {
         case "tick":
         case "exit": return true;
+        case "pacing": return isNonNegativeInteger(value.frames);
         case "geometry": return isGeometry(value);
         case "frame": return isGeometry(value) && isNonNegativeInteger(value.bufferId)
             && isArrayBuffer(value.rgba)

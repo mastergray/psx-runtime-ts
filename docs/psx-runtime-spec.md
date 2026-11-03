@@ -81,6 +81,7 @@ The first release includes:
 - a required real retail BIOS supplied by the user;
 - ports 1 and 2 with digital pad and DualShock input;
 - keyboard and Gamepad API sources;
+- best-effort `×2`, `×5` and `×7` fast-forward controls;
 - two persistent 128 KiB memory-card images;
 - named save states with strict core-build and game identity checks;
 - raw-file, directory and ZIP loading, optional IndexedDB firmware and game
@@ -375,12 +376,16 @@ interface PsxStartConfig {
     readonly options?: Readonly<Record<string, string | number | boolean>>;
 }
 
+type PsxPlaybackRate = 1 | 2 | 5 | 7;
+
 interface PsxSession {
     readonly machine: PsxMachineInfo;
     readonly discIndex: number;
     readonly trayOpen: boolean;
+    readonly playbackRate: PsxPlaybackRate;
     setButton(control: PsxButtonControl, pressed: boolean): void;
     setAxis(control: PsxAxisControl, value: number): void;
+    setPlaybackRate(rate: PsxPlaybackRate): void;
     pause(): void;
     resume(): void;
     reset(kind: "soft" | "hard"): Promise<void>;
@@ -572,7 +577,7 @@ The generated module exports C functions equivalent to:
 
 ```c
 int psx_start(const char *content_path, const char *options_json);
-int psx_run_frame(void);
+int psx_run_frame(int capture_video, int capture_audio, unsigned frameskip_interval);
 void psx_set_button(unsigned port, unsigned id, int pressed);
 void psx_set_axis(unsigned port, unsigned id, int16_t value);
 int psx_reset(void);
@@ -603,14 +608,25 @@ must be preserved.
 
 The main thread sends animation timestamps. The worker maintains an elapsed
 time accumulator using the core-reported FPS and calls `psx_run_frame()` once
-per complete emulated period, up to four frames per browser tick. It discards
-excess backlog after the cap and reports a dropped-time counter. PAL therefore
-runs at its reported ~50 Hz and NTSC at the core's reported rate on 60, 90,
-120 and 144 Hz displays. Timing never assumes exactly 60 Hz.
+per complete emulated period, up to four frames per normal-speed browser tick.
+Only one pacing tick may be in flight. Fast-forward scales elapsed emulation
+time by `×2`, `×5` or `×7` and raises the bounded per-tick work cap for
+that batch. It discards excess backlog after the applicable cap and reports a
+dropped-time counter, so accelerated rates remain best effort instead of
+building an unbounded Worker queue. PAL therefore runs at its reported ~50 Hz
+and NTSC at the core's reported rate on 60, 90, 120 and 144 Hz displays.
+Timing never assumes exactly 60 Hz.
 
 `onTick` fires for each completed `retro_run`, even when video is duplicate or
 dropped. Pause stops `retro_run`, releases effective input and trims queued
 audio. Resume resets the time accumulator so paused wall time is not replayed.
+Accelerated batches discard core audio, and the player clears its queued Web
+Audio at every playback-rate boundary so stale sound cannot continue after
+returning to normal speed. Accelerated frames suppress native and JavaScript
+audio copies and select the core's bounded fixed-interval frameskip to reduce
+rendering work. Each frame still accepts a video callback so rendered frames are
+not lost when the core's internal skip phase differs from a worker batch boundary.
+Normal speed disables core frameskip and captures every AV batch.
 
 The worker converts the negotiated pixel format and pitch to tightly packed
 RGBA8888. It transfers buffers from a pool of three; the main thread returns a
@@ -877,10 +893,17 @@ The player exposes its composed display so a browser shell can select
 presentation scaling and enter or leave fullscreen without taking ownership
 of display attachment or teardown.
 
-The player provides `setDisc`, `saveState(name)`, `loadState(name)`,
+The player provides `setPlaybackRate`, `setDisc`, `saveState(name)`, `loadState(name)`,
 `deleteState(name)`, `downloadMemoryCard(slot)` and
 `replaceMemoryCard(slot, bytes)`. Replacing a card requires a stopped player;
-ordinary writes come from the running session.
+ordinary writes come from the running session. Card downloads read current
+core bytes while a session is active and the latest persisted revision while
+the player is stopped.
+
+`setPlaybackRate` accepts only `1`, `2`, `5` or `7`, resets queued
+audio when the value changes and exposes the active value through
+`playbackRate`. `1` is normal speed. Higher values are best-effort because the
+actual multiplier depends on the core workload and host hardware.
 
 Card auto-save runs after a configurable dirty-check interval (default 5 s)
 and on pause, reset, state save and stop. Overlapping saves collapse into one
@@ -1021,6 +1044,13 @@ The harness is a consumer of the package, not a second runtime. It provides:
   the UI initiated the pause;
 - a View surface with aspect-preserving and stretched fullscreen choices;
   Escape or a same-player L3 + R3 chord exits fullscreen;
+- same-player runtime shortcuts: hold L3 + R1 for the selected fast-forward
+  rate, press L3 + R2 to cycle `×2`, `×5` and `×7`, hold L3 + L1 for direct
+  `×2`, or hold L3 + L2 for direct `×7`; releasing the hold returns to
+  `×1`, and an on-canvas indicator shows the active accelerated rate;
+- controller quick states named **Quick State 1** and **Quick State 2**: R3 +
+  L1/L2 saves the corresponding state and R3 + R1/R2 loads it, with edge
+  triggering and visible success or failure notices;
 - Library starts expose the selected game's starting disc and replace an active
   session after its persistent state has been flushed; the initiating dialog
   closes before replacement so its modal pause cannot cover the new session;
@@ -1181,7 +1211,7 @@ The following are intentionally outside v1:
 - CHD/PBP and non-CUE descriptor families;
 - multitap (players 3–8), light gun, mouse, NegCon and specialty controllers;
 - enhanced internal resolution, texture replacement, shaders and WebGL;
-- rewind, run-ahead, fast-forward, cheats, achievements and netplay;
+- rewind, run-ahead, cheats, achievements and netplay;
 - BIOS boot/menu without content; and
 - guaranteed save-state compatibility across core builds.
 

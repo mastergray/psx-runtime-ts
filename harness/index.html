@@ -36,6 +36,7 @@
     canvas { max-width: 100%; max-height: 100%; image-rendering: auto; }
     #screen-message { position: absolute; z-index: 2; inset: 50% auto auto 50%; max-width: min(30rem, calc(100% - 2rem)); transform: translate(-50%, -50%); padding: .8rem 1rem; border: 1px solid #3a4656; border-radius: .55rem; background: #0d131dcc; color: #c7d2de; text-align: center; backdrop-filter: blur(8px); }
     #pause-overlay { position: absolute; z-index: 3; inset: 0; display: grid; place-items: center; background: #02050a99; color: #f5f8fb; font-size: clamp(1.65rem, 4vw, 2.6rem); font-weight: 800; letter-spacing: .18em; pointer-events: none; text-transform: uppercase; }
+    #speed-indicator { position: absolute; z-index: 2; top: .7rem; right: .7rem; padding: .3rem .55rem; border: 1px solid #79d7ad; border-radius: .45rem; background: #07110dd9; color: #8be8bd; font-weight: 800; letter-spacing: .04em; pointer-events: none; }
     [hidden] { display: none !important; }
     dialog { width: min(46rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); margin: auto; padding: 0; overflow: hidden; border: 1px solid #3a4656; border-radius: .75rem; background: #111720; color: #edf2f7; box-shadow: 0 1.5rem 5rem #000c; }
     dialog::backdrop { background: #020407b8; backdrop-filter: blur(5px); }
@@ -146,6 +147,7 @@
     <div id="screen-stage">
       <canvas id="screen"></canvas>
       <div id="screen-message">Open <strong>System</strong> and check/store firmware, then open Game.</div>
+      <div id="speed-indicator" role="status" aria-live="polite" hidden>×2</div>
       <div id="pause-overlay" role="status" aria-live="polite" hidden>Paused</div>
     </div>
   </section>
@@ -321,6 +323,24 @@
         <p id="binding-status-2" class="binding-status" role="status" aria-live="polite">Choose Change beside a control, then press a key or gamepad button.</p>
       </section>
       <p><small id="controller-type-status">Emulated controller types apply when the next game starts. Left-stick D-pad compatibility lets digital-only games use a modern gamepad stick.</small></p>
+      <section aria-labelledby="runtime-shortcuts-title">
+        <h3 id="runtime-shortcuts-title">Runtime shortcuts</h3>
+        <p>Selected fast-forward speed: <code id="fast-forward-selection" role="status" aria-live="polite">×2</code></p>
+        <table class="key-map">
+          <thead><tr><th>Controller chord</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td>L3 + R1 (hold)</td><td>Fast-forward at the selected speed</td></tr>
+            <tr><td>L3 + R2 (press)</td><td>Cycle ×2, ×5, and ×7</td></tr>
+            <tr><td>L3 + L1 (hold)</td><td>Fast-forward at ×2</td></tr>
+            <tr><td>L3 + L2 (hold)</td><td>Fast-forward at ×7</td></tr>
+            <tr><td>R3 + L1</td><td>Save Quick State 1</td></tr>
+            <tr><td>R3 + L2</td><td>Save Quick State 2</td></tr>
+            <tr><td>R3 + R1</td><td>Load Quick State 1</td></tr>
+            <tr><td>R3 + R2</td><td>Load Quick State 2</td></tr>
+          </tbody>
+        </table>
+        <p><small>Fast-forward is best effort and returns to ×1 when the hold chord is released. Audio is skipped while fast-forwarding.</small></p>
+      </section>
       <div class="buttons"><button id="restore-controls" type="button">Restore default bindings</button></div>
       <p><small id="control-storage-status" role="status" aria-live="polite">Control bindings are stored in this browser.</small></p>
     </div>

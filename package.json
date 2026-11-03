@@ -30,7 +30,7 @@
     "compile:package": "tsc -p tsconfig.package.json",
     "build": "run-s clean compile",
     "build:package": "run-s clean compile:package",
-    "build:core": "run-s build:package compile:core",
+    "build:core": "run-s build:package compile:core build:harness",
     "compile:core": "node --import tsx scripts/build-core.ts",
     "build:harness": "tsc -p tsconfig.harness.json",
     "build:fixture": "node scripts/build-fixture.mjs",

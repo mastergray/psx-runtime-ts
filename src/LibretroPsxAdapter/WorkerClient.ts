@@ -11,6 +11,7 @@ import type {
     PsxAxis,           // Closed set of analog controls
     PsxButton,         // Closed set of digital controls
     PsxMachineInfo,    // Validated startup metadata returned by the worker
+    PsxPlaybackRate,   // Normal or accelerated emulation-time multiplier
     PsxRumbleEvent,    // Browser-ready rumble output
     PsxSoundEvent,     // Browser-ready stereo audio output
     Unsubscribe,       // Cleanup returned by client subscriptions
@@ -92,6 +93,11 @@ export default class WorkerClient {
     };
     private _requestId = 0;                                                // Monotonic command correlation identity
     private _schedulerHandle: number | null = null;                        // Outstanding animation-frame callback
+    private _tickPending = false;                                          // Whether one pacing tick is still executing in the worker
+    private _playbackRate: PsxPlaybackRate = 1;                            // Multiplier applied to elapsed host time
+    private _lastHostTimestamp: number | null = null;                      // Host timestamp used by the last posted tick
+    private _emulationTimestamp: number | null = null;                     // Rate-scaled timestamp sent to worker pacing
+    private _paused = false;                                                // Whether accelerated batches must stop chaining immediately
     private _terminated = false;                                           // Whether worker ownership has ended
     private _firstFrameSeen = false;                                       // Whether startup presentation has completed
     private _startupFrame: PsxFrameEvent | null = null;                    // Defensive first frame retained for late display attachment
@@ -171,15 +177,34 @@ export default class WorkerClient {
         this._post({ type: "set-axis", port, axis, value });
     }
 
+    // METHOD :: psxPlaybackRate -> VOID
+    // Changes the elapsed-time multiplier used by subsequently posted worker ticks.
+    setPlaybackRate(rate: PsxPlaybackRate): void {
+        if (rate === this._playbackRate) return;
+        const time = this._clock();
+        if (Number.isFinite(time) && time >= 0
+            && this._lastHostTimestamp !== null && this._emulationTimestamp !== null) {
+            this._emulationTimestamp += Math.max(0, time - this._lastHostTimestamp) * this._playbackRate;
+            this._lastHostTimestamp = time;
+        } else {
+            this._lastHostTimestamp = null;
+        }
+        this._playbackRate = rate;
+    }
+
     // METHOD :: VOID -> VOID
     // Requests worker pacing pause and routes asynchronous failure to the client.
     pause(): void {
+        this._paused = true;
+        this._lastHostTimestamp = null;
         void this._request("pause", { type: "pause" }).catch((error) => this._fail(error));
     }
 
     // METHOD :: VOID -> VOID
     // Requests worker pacing resume and routes asynchronous failure to the client.
     resume(): void {
+        this._paused = false;
+        this._lastHostTimestamp = null;
         void this._request("resume", { type: "resume" }).catch((error) => this._fail(error));
     }
 
@@ -268,16 +293,37 @@ export default class WorkerClient {
      */
 
     // METHOD :: VOID -> VOID
-    // Maintains a single animation-frame loop that posts timestamped ticks.
+    // Maintains one animation-frame loop with one rate-scaled worker tick in flight at a time.
     private _schedule(): void {
         if (this._terminated || this._schedulerHandle !== null) return;
         this._schedulerHandle = this._scheduler.request((timestamp) => {
             this._schedulerHandle = null;
             if (this._terminated) return;
             const time = Number.isFinite(timestamp) && timestamp >= 0 ? timestamp : this._clock();
-            this._post({ type: "tick", timestamp: time });
+            if (!this._tickPending) this._postPacingTick(time);
             this._schedule();
         });
+    }
+
+    // METHOD :: NUMBER -> VOID
+    // Posts one rate-scaled tick while preserving the single-in-flight pacing boundary.
+    private _postPacingTick(time: number): void {
+        if (this._emulationTimestamp === null) this._emulationTimestamp = time;
+        if (this._lastHostTimestamp !== null) {
+            this._emulationTimestamp += Math.max(0, time - this._lastHostTimestamp) * this._playbackRate;
+        }
+        this._lastHostTimestamp = time;
+        this._tickPending = true;
+        try {
+            this._post({
+                type: "tick",
+                timestamp: this._emulationTimestamp,
+                playbackRate: this._playbackRate,
+            });
+        } catch (error) {
+            this._tickPending = false;
+            this._fail(error);
+        }
     }
 
     // METHOD :: workerRequestType, commandBody -> PROMISE(workerResponseResult)
@@ -356,6 +402,17 @@ export default class WorkerClient {
     private _receiveEvent(output: Exclude<WorkerOutput, { type: "response" }>): void {
         switch (output.type) {
             case "tick": this._emit("tick", undefined); break;
+            case "pacing": {
+                this._tickPending = false;
+                if (!this._paused && this._playbackRate > 1 && output.frames > 0) {
+                    const time = this._clock();
+                    if (Number.isFinite(time) && time >= 0
+                        && this._lastHostTimestamp !== null && time > this._lastHostTimestamp) {
+                        this._postPacingTick(time);
+                    }
+                }
+                break;
+            }
             case "geometry": this._emit("geometry", {
                 width: output.width,
                 height: output.height,

@@ -35,6 +35,10 @@ export type FetchLike = (url: string) => Promise<FetchResponseLike>;
 // PlayStation firmware and video region identifier.
 export type PsxRegion = "ntsc-u" | "ntsc-j" | "pal";
 
+// TYPE :: 1|2|5|7
+// Emulation-time multiplier applied while a session is running.
+export type PsxPlaybackRate = 1 | 2 | 5 | 7;
+
 // TYPE :: STRING
 // Normalized, relative, forward-slash path within one imported disc set.
 export type DiscPath = string;
@@ -190,8 +194,10 @@ export interface PsxSession {
     readonly machine: PsxMachineInfo;      // Immutable realized machine description
     readonly discIndex: number;            // Currently mounted zero-based disc index
     readonly trayOpen: boolean;            // True while a disc swap transaction has the virtual tray open
+    readonly playbackRate: PsxPlaybackRate; // Requested emulation-time multiplier
     setButton(control: PsxButtonControl, pressed: boolean): void;              // Changes one digital control state
     setAxis(control: PsxAxisControl, value: number): void;                     // Changes one normalized analog axis
+    setPlaybackRate(rate: PsxPlaybackRate): void;                              // Changes the best-effort execution multiplier
     pause(): void;                                                              // Suspends frame execution
     resume(): void;                                                             // Resumes frame execution
     reset(kind: "soft" | "hard"): Promise<void>;                              // Resets the emulated machine
@@ -251,6 +257,7 @@ export interface PsxBuildInfo {
  */
 
 const PSX_REGIONS: ReadonlyArray<PsxRegion> = ["ntsc-u", "ntsc-j", "pal"];
+const PSX_PLAYBACK_RATES: ReadonlyArray<PsxPlaybackRate> = [1, 2, 5, 7];
 const CONTROLLER_PORTS: ReadonlyArray<ControllerPort> = [1, 2];
 const CONTROLLER_TYPES: ReadonlyArray<PsxControllerType> = ["none", "digital", "dualshock"];
 const PSX_BUTTONS: ReadonlyArray<PsxButton> = [
@@ -368,6 +375,12 @@ export function isFetchResponseLike(value: unknown): value is FetchResponseLike 
 // True when value is one of the runtime's supported PlayStation regions.
 export function isPsxRegion(value: unknown): value is PsxRegion {
     return PSX_REGIONS.includes(value as PsxRegion);
+}
+
+// PREDICATE :: UNKNOWN -> BOOLEAN
+// True when value is one of the supported normal or fast-forward multipliers.
+export function isPsxPlaybackRate(value: unknown): value is PsxPlaybackRate {
+    return PSX_PLAYBACK_RATES.includes(value as PsxPlaybackRate);
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN
@@ -550,8 +563,9 @@ export function isPsxSession(value: unknown): value is PsxSession {
     return isObject(value) && isPsxMachineInfo(value.machine)
         && isNonNegativeInteger(value.discIndex) && value.discIndex < value.machine.discCount
         && typeof value.trayOpen === "boolean"
+        && isPsxPlaybackRate(value.playbackRate)
         && [
-            "setButton", "setAxis", "pause", "resume", "reset", "setDisc", "readMemoryCard",
+            "setButton", "setAxis", "setPlaybackRate", "pause", "resume", "reset", "setDisc", "readMemoryCard",
             "serializeState", "unserializeState", "exit", "onTick", "onFrame", "onSound",
             "onRumble", "onExit",
         ].every((method) => typeof value[method] === "function");

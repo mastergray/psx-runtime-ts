@@ -74,7 +74,29 @@ try {
     session.setButton({ port: 1, button: "cross" }, true);
     session.setButton({ port: 2, button: "start" }, true);
     session.setAxis({ port: 1, axis: "left-x" }, 0.5);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const playbackSamples = [];
+    for (const rate of [1, 2, 5, 7]) {
+        session.setPlaybackRate(rate);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const tickStart = ticks;
+        const frameStart = frames;
+        const soundStart = sounds;
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        playbackSamples.push({
+            rate,
+            ticks: ticks - tickStart,
+            frames: frames - frameStart,
+            sounds: sounds - soundStart,
+        });
+    }
+    const normalTicks = playbackSamples[0].ticks;
+    const acceleratedTicks = playbackSamples[2].ticks;
+    const acceleratedSounds = playbackSamples.slice(1)
+        .reduce((total, sample) => total + sample.sounds, 0);
+    const acceleratedRate = session.playbackRate;
+    session.setPlaybackRate(1);
+    const restoredRate = session.playbackRate;
+    await new Promise((resolve) => setTimeout(resolve, 100));
     session.setButton({ port: 1, button: "cross" }, false);
     session.setButton({ port: 2, button: "start" }, false);
     const state = await session.serializeState();
@@ -88,6 +110,8 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 250));
     const result = {
         ok: ticks > 0 && frames > 0 && sounds > 0
+            && acceleratedRate === 7 && restoredRate === 1
+            && acceleratedTicks > normalTicks && acceleratedSounds <= 4
             && state.byteLength > 0
             && cardOne.byteLength === 131072 && cardTwo.byteLength === 131072
             && session.machine.buildId === buildId
@@ -97,6 +121,14 @@ try {
         ticks,
         frames,
         sounds,
+        playback: {
+            samples: playbackSamples,
+            normalTicks,
+            acceleratedTicks,
+            acceleratedSounds,
+            acceleratedRate,
+            restoredRate,
+        },
         stateBytes: state.byteLength,
         cardBytes: [cardOne.byteLength, cardTwo.byteLength],
         discCount: session.machine.discCount,

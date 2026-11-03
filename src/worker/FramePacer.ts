@@ -60,11 +60,14 @@ export default class FramePacer {
      *
      */
 
-    // METHOD :: NUMBER -> framePacerAdvance
-    // Advances the host clock and returns bounded due-frame work.
-    advance(timestamp: number): FramePacerAdvance {
+    // METHOD :: NUMBER, NUMBER? -> framePacerAdvance
+    // Advances the host clock and returns due-frame work under the configured or supplied cap.
+    advance(timestamp: number, maximumFramesPerTick = this._maximumFramesPerTick): FramePacerAdvance {
         if (!Number.isFinite(timestamp) || timestamp < 0) {
             throw new TypeError("timestamp must be finite and non-negative");
+        }
+        if (!Number.isSafeInteger(maximumFramesPerTick) || maximumFramesPerTick <= 0) {
+            throw new TypeError("maximumFramesPerTick must be a positive integer");
         }
         if (this._paused) return { frames: 0, droppedMilliseconds: 0 };
         if (this._lastTimestamp === null) {
@@ -79,7 +82,7 @@ export default class FramePacer {
         const tolerance = period * 1e-9;
         const due = Math.floor((this._accumulator + tolerance) / period);
         if (due === 0) return { frames: 0, droppedMilliseconds: 0 };
-        const frames = Math.min(due, this._maximumFramesPerTick);
+        const frames = Math.min(due, maximumFramesPerTick);
         const droppedFrames = due - frames;
         this._accumulator -= due * period;
         if (this._accumulator < 0 && this._accumulator > -tolerance) this._accumulator = 0;

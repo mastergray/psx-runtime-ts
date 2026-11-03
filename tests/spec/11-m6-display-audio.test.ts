@@ -46,11 +46,13 @@ class FakeSession implements PsxSession {
     readonly machine = machine;
     readonly discIndex = 0;
     readonly trayOpen = false;
+    playbackRate = 1 as const;
     readonly frames = new Set<Listener<PsxFrameEvent>>();
     readonly sounds = new Set<Listener<PsxSoundEvent>>();
 
     setButton(): void {}
     setAxis(): void {}
+    setPlaybackRate(): void {}
     pause(): void {}
     resume(): void {}
     async reset(): Promise<void> {}

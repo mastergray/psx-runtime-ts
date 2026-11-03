@@ -22,6 +22,10 @@ struct psx_frontend_state {
     bool started;
     bool failed;
     bool video_duplicate;
+    bool capture_video;
+    bool capture_audio;
+    bool variables_updated;
+    unsigned frameskip_interval;
     enum retro_pixel_format pixel_format;
     struct retro_system_av_info av_info;
     struct retro_disk_control_ext_callback disk;
@@ -93,7 +97,23 @@ static const char *option_value(const char *key) {
     if (strcmp(key, "pcsx_rearmed_memcard2") == 0) return "shared";
     if (strcmp(key, "pcsx_rearmed_region") == 0) return "auto";
     if (strcmp(key, "pcsx_rearmed_rgb32_output") == 0) return "disabled";
-    if (strcmp(key, "pcsx_rearmed_frameskip_type") == 0) return "disabled";
+    if (strcmp(key, "pcsx_rearmed_frameskip_type") == 0) {
+        return frontend.frameskip_interval == 0 ? "disabled" : "fixed_interval";
+    }
+    if (strcmp(key, "pcsx_rearmed_frameskip_interval") == 0) {
+        switch (frontend.frameskip_interval) {
+            case 1: return "1";
+            case 2: return "2";
+            case 3: return "3";
+            case 4: return "4";
+            case 5: return "5";
+            case 6: return "6";
+            case 7: return "7";
+            case 8: return "8";
+            case 9: return "9";
+            default: return "10";
+        }
+    }
     if (strcmp(key, "pcsx_rearmed_cd_readahead") == 0) return "0";
     if (strcmp(key, "pcsx_rearmed_drc") == 0) return "disabled";
     return NULL;
@@ -119,7 +139,8 @@ static bool environment_callback(unsigned command, void *data) {
         }
         case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
             if (data == NULL) return false;
-            *(bool *) data = false;
+            *(bool *) data = frontend.variables_updated;
+            frontend.variables_updated = false;
             return true;
         case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
             if (data == NULL) return false;
@@ -204,6 +225,7 @@ static bool environment_callback(unsigned command, void *data) {
 }
 
 static void video_callback(const void *data, unsigned width, unsigned height, size_t pitch) {
+    if (!frontend.capture_video) return;
     if (data == NULL) {
         frontend.video_duplicate = true;
         return;
@@ -226,6 +248,7 @@ static void video_callback(const void *data, unsigned width, unsigned height, si
 }
 
 static void audio_sample_callback(int16_t left, int16_t right) {
+    if (!frontend.capture_audio) return;
     if (frontend.audio_frame_count > SIZE_MAX / (2 * sizeof(int16_t)) - 1) {
         frontend.failed = true;
         return;
@@ -241,6 +264,7 @@ static void audio_sample_callback(int16_t left, int16_t right) {
 }
 
 static size_t audio_batch_callback(const int16_t *data, size_t frames) {
+    if (!frontend.capture_audio) return frames;
     if (frames > SIZE_MAX / (2 * sizeof(int16_t)) - frontend.audio_frame_count) {
         frontend.failed = true;
         return 0;
@@ -366,9 +390,17 @@ int psx_frontend_start(const char *content_path, const char *options_json) {
     return 1;
 }
 
-int psx_frontend_run_frame(void) {
+int psx_frontend_run_frame(int capture_video, int capture_audio, unsigned frameskip_interval) {
     if (!frontend.started) return 0;
+    unsigned next_frameskip = frameskip_interval > 10 ? 10 : frameskip_interval;
+    if (frontend.frameskip_interval != next_frameskip) {
+        frontend.frameskip_interval = next_frameskip;
+        frontend.variables_updated = true;
+    }
+    frontend.capture_video = capture_video != 0;
+    frontend.capture_audio = capture_audio != 0;
     frontend.audio_frame_count = 0;
+    frontend.video_size = 0;
     frontend.video_duplicate = false;
     frontend.failed = false;
     retro_run();
@@ -450,7 +482,7 @@ int psx_frontend_set_disc(unsigned index) {
     if (!frontend.disk.set_eject_state(true)) return 0;
     /* PCSX-ReARMed samples the lid state during retro_run; keep it observable before replacing media. */
     for (unsigned frame = 0; frame < PSX_DISC_EJECT_FRAMES; frame++) {
-        if (!psx_frontend_run_frame()) {
+        if (!psx_frontend_run_frame(0, 0, 0)) {
             (void) frontend.disk.set_eject_state(false);
             return 0;
         }

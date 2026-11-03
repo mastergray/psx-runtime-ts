@@ -39,7 +39,7 @@ int main(void) {
 
     psx_set_button(0, 0, 1);
     psx_set_axis(0, 0, -1234);
-    assert(psx_run_frame() == 1);
+    assert(psx_run_frame(1, 1, 0) == 1);
     assert(fake_observed_button() == 1);
     assert(fake_observed_axis() == -1234);
     assert(psx_video_width() == 2 && psx_video_height() == 1);
@@ -54,13 +54,16 @@ int main(void) {
     assert(state_size == sizeof(unsigned));
     uint8_t state[sizeof(unsigned)];
     assert(psx_serialize(state, sizeof(state)) == 1);
-    assert(psx_run_frame() == 1);
+    assert(psx_run_frame(1, 1, 0) == 1);
     assert(psx_video_width() == 1 && psx_video_height() == 1);
     assert(psx_video_pitch() == 2 && psx_aspect_ratio() == 1.0f);
     assert(psx_unserialize(state, sizeof(state)) == 1);
-    assert(psx_run_frame() == 1);
+    assert(psx_run_frame(1, 1, 0) == 1);
     assert(psx_video_width() == 1 && psx_video_duplicate() == 0);
-    assert(psx_run_frame() == 1 && psx_video_duplicate() == 1);
+    assert(psx_run_frame(1, 1, 0) == 1 && psx_video_duplicate() == 1);
+    assert(psx_run_frame(0, 0, 3) == 1);
+    assert(psx_audio_frames() == 0 && psx_video_size() == 0 && psx_video_duplicate() == 0);
+    assert(psx_run_frame(1, 1, 0) == 1 && psx_audio_frames() == 3);
 
     assert(psx_memory_card_size(0) == 128u * 1024u);
     assert(psx_memory_card_size(1) == 128u * 1024u);
@@ -83,7 +86,7 @@ int main(void) {
     psx_stop();
     psx_stop();
     assert(fake_unload_count() == 1 && fake_deinit_count() == 1);
-    assert(psx_run_frame() == 0);
+    assert(psx_run_frame(1, 1, 0) == 0);
     assert(psx_start("/content/index/game.cue", "{}") == 1);
     psx_stop();
     assert(fake_unload_count() == 2 && fake_deinit_count() == 2);

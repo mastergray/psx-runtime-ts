@@ -19,6 +19,7 @@ import {
     isPsxGeometry,
     isPsxMachineInfo,
     isPsxOptions,
+    isPsxPlaybackRate,
     isPsxRegion,
     isPsxRumbleEvent,
     isPsxSession,
@@ -75,8 +76,10 @@ const session: PsxSession = {
     machine,
     discIndex: 0,
     trayOpen: false,
+    playbackRate: 1,
     setButton: () => undefined,
     setAxis: () => undefined,
+    setPlaybackRate: () => undefined,
     pause: () => undefined,
     resume: () => undefined,
     reset: async () => undefined,
@@ -130,6 +133,7 @@ const testFile: TestFile = {
             run: () => CTGTest.init("vocabularies")
                 .assert("accepted and rejected values", () => ({
                     regions: ["ntsc-u", "ntsc-j", "pal", "PAL"].map(isPsxRegion),
+                    playbackRates: [1, 2, 5, 7, 10, 20, 3].map(isPsxPlaybackRate),
                     ports: [1, 2, 0, 3].map(isControllerPort),
                     controllers: ["none", "digital", "dualshock", "analog"].map(isPsxControllerType),
                     buttons: ["cross", "l3", "coin"].map(isPsxButton),
@@ -144,6 +148,7 @@ const testFile: TestFile = {
                     ],
                 }), P.equals({
                     regions: [true, true, true, false],
+                    playbackRates: [true, true, true, true, false, false, false],
                     ports: [true, true, false, false],
                     controllers: [true, true, true, false],
                     buttons: [true, true, false],
@@ -250,13 +255,18 @@ const testFile: TestFile = {
                         isPsxStartConfig({ game, bios, controllers: { 3: "digital" } }),
                         isPsxStartConfig({ game, bios, memoryCards: { 1: new Uint8Array(2) } }),
                     ],
-                    session: [isPsxSession(session), isPsxSession(withKey(session, "discIndex", 2)), isPsxSession(withKey(session, "exit", null))],
+                    session: [
+                        isPsxSession(session),
+                        isPsxSession(withKey(session, "discIndex", 2)),
+                        isPsxSession(withKey(session, "playbackRate", 3)),
+                        isPsxSession(withKey(session, "exit", null)),
+                    ],
                     adapter: [isPsxAdapter({ type: "libretro-psx", start: async () => session }), isPsxAdapter({ type: "", start: async () => session })],
                 }), P.equals({
                     machine: [true, false, false, false, false],
                     options: [true, false, false],
                     start: [true, true, false, false, false],
-                    session: [true, false, false],
+                    session: [true, false, false, false],
                     adapter: [true, false],
                 }))
                 .start(undefined),

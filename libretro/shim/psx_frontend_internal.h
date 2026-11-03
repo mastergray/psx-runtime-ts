@@ -4,7 +4,7 @@
 #include "psx_frontend.h"
 
 int psx_frontend_start(const char *content_path, const char *options_json);
-int psx_frontend_run_frame(void);
+int psx_frontend_run_frame(int capture_video, int capture_audio, unsigned frameskip_interval);
 void psx_frontend_set_button(unsigned port, unsigned id, int pressed);
 void psx_frontend_set_axis(unsigned port, unsigned id, int16_t value);
 int psx_frontend_reset(void);

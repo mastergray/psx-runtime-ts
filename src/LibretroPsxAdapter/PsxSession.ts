@@ -4,6 +4,7 @@ import {
     isControllerPort,      // Validates memory-card slot requests
     isPsxAxisControl,      // Validates analog input coordinates
     isPsxButtonControl,    // Validates digital input coordinates
+    isPsxPlaybackRate,     // Validates normal and fast-forward multipliers
 } from "../shared.types.js";
 
 // Type dependencies:
@@ -14,6 +15,7 @@ import type {
     PsxButtonControl,                  // Port and digital-button coordinate
     PsxFrameEvent,                     // RGBA video output from the worker
     PsxMachineInfo,                    // Active core, build, geometry, and content identity
+    PsxPlaybackRate,                   // Normal or accelerated emulation-time multiplier
     PsxRumbleEvent,                    // Strong and weak motor output from the worker
     PsxSession as PsxSessionContract,  // Public session contract implemented by this class
     PsxSoundEvent,                     // Interleaved stereo output from the worker
@@ -64,6 +66,7 @@ export default class PsxSession implements PsxSessionContract {
     private _exitPromise: Promise<void> | null = null;                             // Idempotent terminal cleanup result
     private _destroyed = false;                                                    // Whether the session has exited or failed
     private _paused = false;                                                       // Requested worker pacing state
+    private _playbackRate: PsxPlaybackRate = 1;                                    // Requested normal or fast-forward multiplier
     private _discIndex = 0;                                                        // Active zero-based disc index
     private _trayOpen = false;                                                     // Core-reported virtual tray state
     private _exitEmitted = false;                                                  // Whether terminal observers were already notified
@@ -104,6 +107,12 @@ export default class PsxSession implements PsxSessionContract {
         return this._trayOpen;
     }
 
+    // GETTER :: VOID -> psxPlaybackRate
+    // Returns the requested normal or fast-forward multiplier.
+    get playbackRate(): PsxPlaybackRate {
+        return this._playbackRate;
+    }
+
     // GETTER :: VOID -> ARRAY<controllerPort, uint8Array>?
     // Returns defensive final card snapshots after exit cleanup.
     get finalMemoryCards(): Readonly<Record<ControllerPort, Uint8Array>> | null {
@@ -131,6 +140,16 @@ export default class PsxSession implements PsxSessionContract {
         this._assertLive();
         if (!isPsxAxisControl(control) || !Number.isFinite(value)) throw invalid({ control, value });
         this._client.setAxis(control.port, control.axis, Math.max(-1, Math.min(1, value)));
+    }
+
+    // METHOD :: psxPlaybackRate -> VOID
+    // Selects the session's best-effort execution multiplier.
+    setPlaybackRate(rate: PsxPlaybackRate): void {
+        this._assertLive();
+        if (!isPsxPlaybackRate(rate)) throw invalid(rate);
+        if (rate === this._playbackRate) return;
+        this._playbackRate = rate;
+        this._client.setPlaybackRate(rate);
     }
 
     // METHOD :: VOID -> VOID
@@ -172,6 +191,7 @@ export default class PsxSession implements PsxSessionContract {
                 this._discIndex = replacement.discIndex;
                 this._trayOpen = false;
                 this._paused = false;
+                replacement.client.setPlaybackRate(this._playbackRate);
                 this._attachClient();
             } catch (error) {
                 this._destroyed = true;

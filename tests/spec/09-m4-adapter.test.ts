@@ -21,7 +21,7 @@ import type {
     WorkerMessageEventLike,
 } from "../../src/index.ts";
 import type { WorkerStartPayload } from "../../src/LibretroPsxAdapter/protocol.ts";
-import type { CoreRunOutput, WorkerCore } from "../../src/worker/WorkerRuntime.ts";
+import type { CoreRunOptions, CoreRunOutput, WorkerCore } from "../../src/worker/WorkerRuntime.ts";
 import type { TestFile } from "../run.ts";
 
 const buildId = "c".repeat(64);
@@ -138,33 +138,33 @@ class LoopbackCore implements WorkerCore {
         };
     }
 
-    runFrame(): CoreRunOutput {
+    runFrame(options: CoreRunOptions): CoreRunOutput {
         this.frames++;
         this.cards[1][20] = 42;
         if (this.frames === 1) {
             return {
-                video: {
+                ...(options.video ? { video: {
                     data: new Uint8Array([0x00, 0xf8]),
                     width: 1,
                     height: 1,
                     pitch: 2,
                     aspectRatio: 1,
                     format: "rgb565",
-                },
-                audio: new Int16Array([0, 1]),
+                } as const } : {}),
+                ...(options.audio ? { audio: new Int16Array([0, 1]) } : {}),
                 rumble: [{ port: 1, strong: 1, weak: 0.5 }],
             };
         }
         return {
-            video: {
+            ...(options.video ? { video: {
                 data: new Uint8Array([0x00, 0xf8, 0xe0, 0x07]),
                 width: 2,
                 height: 1,
                 pitch: 4,
                 aspectRatio: 2,
                 format: "rgb565",
-            },
-            audio: new Int16Array([2, 3]),
+            } as const } : {}),
+            ...(options.audio ? { audio: new Int16Array([2, 3]) } : {}),
         };
     }
 
@@ -418,6 +418,38 @@ const testFile: TestFile = {
                     finalCard: 42,
                     destroyed: 11,
                     schedulerHandles: 0,
+                }))
+                .start(undefined),
+        },
+        {
+            label: "session fast-forward scales worker time without queuing accelerated audio",
+            run: () => CTGTest.init("session fast-forward")
+                .stage("change playback rates", async () => {
+                    LoopbackCore.instances.length = 0;
+                    LoopbackWorker.instances.length = 0;
+                    const scheduler = new ManualScheduler();
+                    const session = await drive(freshAdapter(scheduler).start({ game, bios }), scheduler);
+                    const core = LoopbackCore.instances[0]!;
+                    let sounds = 0;
+                    session.onSound(() => { sounds++; });
+                    const beforeFast = core.frames;
+                    session.setPlaybackRate(5);
+                    const acceleratedRate = session.playbackRate;
+                    await scheduler.pulse();
+                    const fastFrames = core.frames - beforeFast;
+                    const beforeNormal = core.frames;
+                    session.setPlaybackRate(1);
+                    await scheduler.pulse();
+                    const normalFrames = core.frames - beforeNormal;
+                    await session.exit();
+                    return { acceleratedRate, finalRate: session.playbackRate, fastFrames, normalFrames, sounds };
+                })
+                .assert("rate behavior", ({ subject }) => subject, P.equals<unknown>({
+                    acceleratedRate: 5,
+                    finalRate: 1,
+                    fastFrames: 5,
+                    normalFrames: 1,
+                    sounds: 1,
                 }))
                 .start(undefined),
         },

@@ -29,6 +29,7 @@ import type {
     PsxAxis,            // Closed set of analog controls
     PsxButton,          // Closed set of digital controls
     PsxMachineInfo,     // Core startup identity and capabilities
+    PsxPlaybackRate,    // Normal or accelerated emulation-time multiplier
     PsxRumbleEvent,     // Strong and weak motor output
 } from "../shared.types.js";
 import type { CoreVideoFrame } from "./av.js";    // Raw core video frame accepted by the converter
@@ -52,15 +53,23 @@ export interface CoreRunOutput {
     readonly rumble?: ReadonlyArray<PsxRumbleEvent>;      // Motor states changed during the frame
 }
 
+// INTERFACE :: {video:BOOLEAN, audio:BOOLEAN, frameskipInterval:NUMBER}
+// Selects which large AV payloads must be copied out of a completed core frame.
+export interface CoreRunOptions {
+    readonly video: boolean;    // True when the current video buffer must be returned
+    readonly audio: boolean;    // True when the current audio batch must be returned
+    readonly frameskipInterval: number; // Zero disables core frameskip; otherwise renders after this many skipped frames
+}
+
 // TYPE :: worker-facing emulation core lifecycle
 // Backend contract serialized by WorkerRuntime.
 export interface WorkerCore {
     // METHOD :: workerStartPayload -> maybePromise<psxMachineInfo>
     // Starts a core from fully resolved content and firmware.
     start(payload: WorkerStartPayload): MaybePromise<PsxMachineInfo>;
-    // METHOD :: VOID -> maybePromise<coreRunOutput>
-    // Executes one emulation frame and returns its outputs.
-    runFrame(): MaybePromise<CoreRunOutput>;
+    // METHOD :: coreRunOptions -> maybePromise<coreRunOutput>
+    // Executes one emulation frame and returns only the selected large AV payloads.
+    runFrame(options: CoreRunOptions): MaybePromise<CoreRunOutput>;
     // METHOD :: controllerPort, psxButton, BOOLEAN -> VOID
     // Sets one digital controller state.
     setButton(port: ControllerPort, button: PsxButton, pressed: boolean): void;
@@ -168,7 +177,7 @@ export default class WorkerRuntime {
         }
         try {
             switch (command.type) {
-                case "tick": return this._tick(command.timestamp);
+                case "tick": return this._tick(command.timestamp, command.playbackRate ?? 1);
                 case "set-button":
                     this._core.setButton(command.port, command.button, command.pressed);
                     return [];
@@ -261,15 +270,22 @@ export default class WorkerRuntime {
         }))];
     }
 
-    // METHOD :: NUMBER -> PROMISE([workerOutput])
+    // METHOD :: NUMBER, psxPlaybackRate -> PROMISE([workerOutput])
     // Advances pacing and converts core video, audio, rumble, and timing outputs.
-    private async _tick(timestamp: number): Promise<WorkerOutput[]> {
-        if (this._state !== "running") return [];
-        const pacing = this._pacer!.advance(timestamp);
+    private async _tick(timestamp: number, playbackRate: PsxPlaybackRate): Promise<WorkerOutput[]> {
+        if (this._state !== "running") return [{ type: "pacing", generation: this._generation, frames: 0 }];
+        const maximumFrames = playbackRate === 1
+            ? this._pacer!.maximumFramesPerTick
+            : playbackRate + this._pacer!.maximumFramesPerTick;
+        const pacing = this._pacer!.advance(timestamp, maximumFrames);
         const output: WorkerOutput[] = [];
         let droppedVideoFrames = 0;
         for (let frameIndex = 0; frameIndex < pacing.frames; frameIndex++) {
-            const frame = await this._core.runFrame();
+            const frame = await this._core.runFrame({
+                video: true,
+                audio: playbackRate === 1,
+                frameskipInterval: playbackRate === 1 ? 0 : Math.min(playbackRate - 1, 10),
+            });
             if (frame.video !== undefined && frame.video !== null) {
                 const videoBytes = frame.video.width * frame.video.height * 4;
                 const lease = this._videoPool.acquire(videoBytes);
@@ -299,7 +315,7 @@ export default class WorkerRuntime {
                     });
                 }
             }
-            if (frame.audio !== undefined && frame.audio.length > 0) {
+            if (playbackRate === 1 && frame.audio !== undefined && frame.audio.length > 0) {
                 if (frame.audio.length % 2 !== 0) throw new Error("Core returned non-stereo audio");
                 const samples = convertAudioSamples(frame.audio);
                 output.push({
@@ -323,6 +339,7 @@ export default class WorkerRuntime {
                 videoFrames: droppedVideoFrames,
             });
         }
+        output.push({ type: "pacing", generation: this._generation, frames: pacing.frames });
         return output;
     }
 

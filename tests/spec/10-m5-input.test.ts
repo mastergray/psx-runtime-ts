@@ -45,6 +45,7 @@ class FakeSession implements PsxSession {
     readonly machine = machine;
     readonly discIndex = 0;
     readonly trayOpen = false;
+    playbackRate = 1 as const;
     readonly buttons: string[] = [];
     readonly axes: string[] = [];
     readonly ticks = new Set<Listener<void>>();
@@ -58,6 +59,7 @@ class FakeSession implements PsxSession {
         this.axes.push(control.port + ":" + control.axis + ":" + Number(value.toFixed(3)));
     }
 
+    setPlaybackRate(): void {}
     pause(): void {}
     resume(): void {}
     async reset(): Promise<void> {}

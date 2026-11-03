@@ -29,6 +29,7 @@ import type {
     PsxStateRecord,
     PsxStoredGame,
     PsxMultiZipManifest,
+    PsxPlaybackRate,
 } from "../src/index.js";
 
 interface PreloadManifest {
@@ -42,6 +43,8 @@ interface PreloadManifest {
 const DEFAULT_FIRMWARE_REGION: PsxRegion = "ntsc-u";
 const CONTROL_PROFILE_STORAGE_KEY = "psx-runtime:ui:controls";
 const HARNESS_PROFILE_ID = "harness";
+const FAST_FORWARD_RATES = [2, 5, 7] as const;
+const QUICK_STATE_NAMES = ["Quick State 1", "Quick State 2"] as const;
 
 const element = <T extends HTMLElement>(id: string): T => {
     const value = document.querySelector(`#${id}`);
@@ -55,6 +58,7 @@ const statusStrip = element<HTMLElement>("status-strip");
 const statusDetail = element<HTMLElement>("status-detail");
 const screenMessage = element<HTMLElement>("screen-message");
 const pauseOverlay = element<HTMLElement>("pause-overlay");
+const speedIndicator = element<HTMLElement>("speed-indicator");
 const noticeToast = element<HTMLDivElement>("notice-toast");
 const gameMenuButton = element<HTMLButtonElement>("game-menu");
 const libraryMenuButton = element<HTMLButtonElement>("library-menu");
@@ -117,6 +121,7 @@ const bindingViews: Record<ControllerPort, Map<PsxButton, {
     readonly change: HTMLButtonElement;
 }>> = { 1: new Map(), 2: new Map() };
 const controllerTypeStatus = element<HTMLElement>("controller-type-status");
+const fastForwardSelection = element<HTMLElement>("fast-forward-selection");
 const controlStorageStatus = element<HTMLElement>("control-storage-status");
 const restoreControlsButton = element<HTMLButtonElement>("restore-controls");
 const memoryCardStatus = element<HTMLElement>("memory-card-status");
@@ -189,6 +194,9 @@ let pendingDeleteGameId: string | null = null;
 let screenMessageRevision = 0;
 let entryInspectionRevision = 0;
 let fullscreenExitChordHeld = false;
+let selectedFastForwardRate: PsxPlaybackRate = 2;
+let quickStateOperationInProgress = false;
+const heldRuntimeShortcuts = new Set<string>();
 let stateRecords: ReadonlyArray<PsxStateRecord> = [];
 let pendingStateAction: { readonly kind: "overwrite" | "delete"; readonly name: string } | null = null;
 let modalPauseOwner: PsxPlayer | null = null;
@@ -1408,6 +1416,11 @@ interface HarnessDisplay {
     exitFullscreen(): Promise<void>;
 }
 
+interface HarnessInputControl {
+    readonly port: number;
+    readonly button: string;
+}
+
 const sessionDisplay = (): HarnessDisplay | null => {
     const display = player?.display;
     return display !== undefined && typeof display.isFullscreen === "boolean"
@@ -1428,15 +1441,102 @@ const enterFullscreen = async (scaling: "fit" | "stretch"): Promise<void> => {
     write(`Fullscreen ${scaling} view enabled.`);
 };
 
+const hasRuntimeButton = (
+    snapshot: ReadonlyArray<HarnessInputControl>,
+    port: ControllerPort,
+    button: PsxButton,
+): boolean => snapshot.some((control) => control.port === port && control.button === button);
+
+const cycleFastForwardRate = (): void => {
+    const index = FAST_FORWARD_RATES.indexOf(selectedFastForwardRate as typeof FAST_FORWARD_RATES[number]);
+    selectedFastForwardRate = FAST_FORWARD_RATES[(index + 1) % FAST_FORWARD_RATES.length]!;
+    fastForwardSelection.textContent = `×${selectedFastForwardRate}`;
+    showNotice(`Fast-forward speed selected: ×${selectedFastForwardRate}.`);
+};
+
+const runQuickStateShortcut = (action: "save" | "load", slot: 1 | 2): void => {
+    if (quickStateOperationInProgress) {
+        showNotice("Another quick-state operation is still in progress.");
+        return;
+    }
+    const name = slot === 1 ? QUICK_STATE_NAMES[0] : QUICK_STATE_NAMES[1];
+    quickStateOperationInProgress = true;
+    void run(async () => {
+        const current = requireStatePlayer();
+        try {
+            if (action === "save") await current.saveState(name);
+            else await current.loadState(name);
+            await refreshStates();
+            renderDiscControls();
+            const message = action === "save"
+                ? `Saved ${name}.`
+                : `Loaded ${name}.`;
+            setStateFeedback(message, "success");
+            showNotice(message);
+        } catch (error) {
+            const message = `${action === "save" ? "Save" : "Load"} ${name} failed: `
+                + (error instanceof Error ? error.message : String(error));
+            setStateFeedback(message, "error");
+            showNotice(message, 5_000);
+            throw error;
+        }
+    }).finally(() => {
+        quickStateOperationInProgress = false;
+    });
+};
+
+const updateRuntimeShortcuts = (snapshot: ReadonlyArray<HarnessInputControl>): void => {
+    const current = player;
+    if (current?.session === null || current?.session === undefined
+        || (current.status !== "running" && current.status !== "paused")) {
+        heldRuntimeShortcuts.clear();
+        speedIndicator.hidden = true;
+        return;
+    }
+    const activeShortcuts = new Set<string>();
+    const onPress = (key: string, action: () => void): void => {
+        activeShortcuts.add(key);
+        if (!heldRuntimeShortcuts.has(key)) action();
+    };
+    for (const port of [1, 2] as const) {
+        const l3 = hasRuntimeButton(snapshot, port, "l3");
+        const r3 = hasRuntimeButton(snapshot, port, "r3");
+        const l1 = hasRuntimeButton(snapshot, port, "l1");
+        const l2 = hasRuntimeButton(snapshot, port, "l2");
+        const r1 = hasRuntimeButton(snapshot, port, "r1");
+        const r2 = hasRuntimeButton(snapshot, port, "r2");
+        if (l3 && r2) onPress(`${port}:cycle-fast-forward`, cycleFastForwardRate);
+        if (r3 && l1) onPress(`${port}:save-quick-state-1`, () => runQuickStateShortcut("save", 1));
+        if (r3 && l2) onPress(`${port}:save-quick-state-2`, () => runQuickStateShortcut("save", 2));
+        if (r3 && r1) onPress(`${port}:load-quick-state-1`, () => runQuickStateShortcut("load", 1));
+        if (r3 && r2) onPress(`${port}:load-quick-state-2`, () => runQuickStateShortcut("load", 2));
+    }
+    heldRuntimeShortcuts.clear();
+    activeShortcuts.forEach((shortcut) => heldRuntimeShortcuts.add(shortcut));
+
+    const requestedRates: PsxPlaybackRate[] = [1];
+    for (const port of [1, 2] as const) {
+        if (!hasRuntimeButton(snapshot, port, "l3")) continue;
+        if (hasRuntimeButton(snapshot, port, "l1")) requestedRates.push(2);
+        if (hasRuntimeButton(snapshot, port, "l2")) requestedRates.push(7);
+        if (hasRuntimeButton(snapshot, port, "r1")) requestedRates.push(selectedFastForwardRate);
+    }
+    const requestedRate = Math.max(...requestedRates) as PsxPlaybackRate;
+    if (current.playbackRate !== requestedRate) current.setPlaybackRate(requestedRate);
+    speedIndicator.textContent = `×${requestedRate}`;
+    speedIndicator.hidden = requestedRate === 1;
+};
+
 const updateDiagnostics = (): void => {
     const input = player?.input as ({
-        readonly snapshot?: ReadonlyArray<{ readonly port: number; readonly button: string }>;
+        readonly snapshot?: ReadonlyArray<HarnessInputControl>;
         readonly axes?: ReadonlyArray<{
             readonly control: { readonly port: number; readonly axis: string };
             readonly value: number;
         }>;
     } | null);
     const snapshot = input?.snapshot ?? [];
+    updateRuntimeShortcuts(snapshot);
     const buttons = snapshot.map(({ port, button }) => `${port}:${button}`);
     const axes = input?.axes?.filter(({ value }) => Math.abs(value) > 0.01)
         .map(({ control, value }) => `${control.port}:${control.axis}=${value.toFixed(2)}`) ?? [];
@@ -1484,12 +1584,12 @@ const updateDiagnostics = (): void => {
     controllerTypeStatus.textContent = sessionActive
         ? "Controller types are fixed for the active session; stop the game to change them."
         : "Emulated controller types apply when the next game starts.";
-    downloadCardButtons.forEach((button) => { button.disabled = !sessionActive; });
+    downloadCardButtons.forEach((button) => { button.disabled = false; });
     replaceCardButtons.forEach((button) => { button.disabled = sessionActive; });
     replacementCardInput.disabled = sessionActive;
     memoryCardStatus.textContent = sessionActive
         ? "Download the current cards now; stop the game before replacing either card."
-        : "Replacement cards can be selected while no game is running.";
+        : "Download stored cards or select a replacement while no game is running.";
     requestAnimationFrame(updateDiagnostics);
 };
 
@@ -1929,15 +2029,30 @@ stateConfirmDialog.addEventListener("close", () => {
 
 for (const port of [1, 2] as const) {
     element(`download-card-${port}`).addEventListener("click", () => run(async () => {
-        const bytes = await player?.downloadMemoryCard(port);
-        if (bytes === undefined) return;
-        const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-        const url = URL.createObjectURL(new Blob([copy]));
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `card-${port}.mcd`;
-        link.click();
-        URL.revokeObjectURL(url);
+        const currentPlayer = player;
+        if (currentPlayer === null) throw new Error("Check and store firmware before downloading a memory card.");
+        setMemoryCardFeedback(`Preparing card ${port} download…`, "working");
+        try {
+            const bytes = await currentPlayer.downloadMemoryCard(port);
+            const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+            const url = URL.createObjectURL(new Blob([copy]));
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `card-${port}.mcd`;
+            document.body.append(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 0);
+            const message = `Downloaded card ${port} (${formatBytes(bytes.byteLength)}).`;
+            setMemoryCardFeedback(message, "success");
+            showNotice(message);
+        } catch (error) {
+            setMemoryCardFeedback(
+                `Card ${port} download failed: ${error instanceof Error ? error.message : String(error)}`,
+                "error",
+            );
+            throw error;
+        }
     }));
     element(`replace-card-${port}`).addEventListener("click", () => run(async () => {
         const replacement = replacementCardInput.files?.[0];

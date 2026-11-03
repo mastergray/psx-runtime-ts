@@ -16,7 +16,7 @@ import type {
     WorkerStartPayload,
 } from "../../src/LibretroPsxAdapter/protocol.ts";
 import type { PsxBuildInfo, PsxMachineInfo } from "../../src/index.ts";
-import type { CoreRunOutput, WorkerCore } from "../../src/worker/WorkerRuntime.ts";
+import type { CoreRunOptions, CoreRunOutput, WorkerCore } from "../../src/worker/WorkerRuntime.ts";
 import type { TestFile } from "../run.ts";
 
 const buildId = "a".repeat(64);
@@ -80,6 +80,7 @@ const command = <T extends WorkerCommand>(value: T): T => value;
 
 class SyntheticCore implements WorkerCore {
     readonly calls: string[] = [];
+    readonly runOptions: CoreRunOptions[] = [];
     frames = 0;
     stops = 0;
     failReset = false;
@@ -89,33 +90,34 @@ class SyntheticCore implements WorkerCore {
         return machine;
     }
 
-    runFrame(): CoreRunOutput {
+    runFrame(options: CoreRunOptions): CoreRunOutput {
         this.frames++;
+        this.runOptions.push(options);
         this.calls.push(`frame:${this.frames}`);
         if (this.frames === 1) {
             return {
-                video: {
+                ...(options.video ? { video: {
                     data: new Uint8Array([0x00, 0xf8, 0x1f, 0x00]),
                     width: 2,
                     height: 1,
                     pitch: 4,
                     aspectRatio: 2,
                     format: "rgb565",
-                },
-                audio: new Int16Array([-32768, 32767]),
+                } as const } : {}),
+                ...(options.audio ? { audio: new Int16Array([-32768, 32767]) } : {}),
                 rumble: [{ port: 1, strong: 1, weak: 0.5 }],
             };
         }
         return {
-            video: {
+            ...(options.video ? { video: {
                 data: new Uint8Array([0x00, 0xff, 0x00, 0x00]),
                 width: 1,
                 height: 1,
                 pitch: 4,
                 aspectRatio: 1,
                 format: "xrgb8888",
-            },
-            audio: new Int16Array([0, 0]),
+            } as const } : {}),
+            ...(options.audio ? { audio: new Int16Array([0, 0]) } : {}),
         };
     }
 
@@ -189,20 +191,27 @@ const testFile: TestFile = {
                     { ...start, payload: { ...startPayload, initialDiscIndex: 1 } },
                     command({ type: "tick", requestId: 2, generation: 1, timestamp: 10 }),
                     { type: "tick", requestId: 2, generation: 1, timestamp: -1 },
+                    command({ type: "tick", requestId: 2, generation: 1, timestamp: 10, playbackRate: 7 }),
+                    { type: "tick", requestId: 2, generation: 1, timestamp: 10, playbackRate: 3 },
                     command({ type: "set-button", requestId: 3, generation: 1, port: 1, button: "cross", pressed: true }),
                     { type: "set-axis", requestId: 4, generation: 1, port: 1, axis: "left-x", value: 2 },
-                ].map(isWorkerCommand), P.equals<boolean[]>([true, false, false, false, true, false, true, false]))
+                ].map(isWorkerCommand), P.equals<boolean[]>([
+                    true, false, false, false, true, false, true, false, true, false,
+                ]))
                 .assert("output verdicts", () => [
                     { type: "response", command: "start", requestId: 1, generation: 1, ok: true, result: machine },
                     { type: "response", command: "reset", requestId: 2, generation: 1, ok: false, error: { code: 19, message: "failed", data: null } },
                     { type: "tick", generation: 1 },
+                    { type: "pacing", generation: 1, frames: 0 },
                     { type: "geometry", generation: 1, width: 2, height: 1, aspectRatio: 2 },
                     { type: "frame", generation: 1, bufferId: 0, width: 2, height: 1, aspectRatio: 2, rgba: new ArrayBuffer(8) },
                     { type: "sound", generation: 1, frames: 1, samples: new ArrayBuffer(8) },
                     { type: "rumble", generation: 1, port: 1, strong: 1, weak: 0 },
                     { type: "dropped-time", generation: 1, milliseconds: 1, videoFrames: 0 },
                     { type: "frame", generation: 1, bufferId: 0, width: 2, height: 1, aspectRatio: 2, rgba: new ArrayBuffer(4) },
-                ].map(isWorkerOutput), P.equals<boolean[]>([true, true, true, true, true, true, true, true, false]))
+                ].map(isWorkerOutput), P.equals<boolean[]>([
+                    true, true, true, true, true, true, true, true, true, false,
+                ]))
                 .start(undefined),
         },
         {
@@ -258,6 +267,9 @@ const testFile: TestFile = {
                     const backlog = new FramePacer(60);
                     backlog.advance(0);
                     const capped = backlog.advance(200);
+                    const accelerated = new FramePacer(60);
+                    accelerated.advance(0);
+                    const acceleratedBatch = accelerated.advance(200, 10);
                     const paused = new FramePacer(60);
                     paused.advance(0);
                     paused.pause();
@@ -272,6 +284,8 @@ const testFile: TestFile = {
                         pal120: framesFor(50, 120),
                         cappedFrames: capped.frames,
                         droppedFrames: Math.round(capped.droppedMilliseconds / (1000 / 60)),
+                        acceleratedFrames: acceleratedBatch.frames,
+                        acceleratedDroppedFrames: Math.round(acceleratedBatch.droppedMilliseconds / (1000 / 60)),
                         paused: whilePaused.frames,
                         resumed: [resumedFirst.frames, resumedSecond.frames],
                     };
@@ -282,8 +296,44 @@ const testFile: TestFile = {
                     pal120: 50,
                     cappedFrames: 4,
                     droppedFrames: 8,
+                    acceleratedFrames: 10,
+                    acceleratedDroppedFrames: 2,
                     paused: 0,
                     resumed: [0, 1],
+                }))
+                .start(undefined),
+        },
+        {
+            label: "fast-forward runs bounded extra frames, drops audio, and acknowledges pacing",
+            run: () => CTGTest.init("fast-forward")
+                .stage("run one seven-times batch", async () => {
+                    const core = new SyntheticCore();
+                    const runtime = new WorkerRuntime(core);
+                    await runtime.dispatch(start);
+                    await runtime.dispatch(command({
+                        type: "tick", requestId: 2, generation: 1, timestamp: 0, playbackRate: 7,
+                    }));
+                    const outputs = await runtime.dispatch(command({
+                        type: "tick", requestId: 3, generation: 1, timestamp: 1000 / 3, playbackRate: 7,
+                    }));
+                    return { core, outputs };
+                })
+                .assert("accelerated output", ({ subject }) => ({
+                    framesRun: subject.core.frames,
+                    tickEvents: subject.outputs.filter((output) => output.type === "tick").length,
+                    soundEvents: subject.outputs.filter((output) => output.type === "sound").length,
+                    pacingEvents: subject.outputs.filter((output) => output.type === "pacing").length,
+                    videoCopies: subject.core.runOptions.filter(({ video }) => video).length,
+                    audioCopies: subject.core.runOptions.filter(({ audio }) => audio).length,
+                    outputValid: subject.outputs.every(isWorkerOutput),
+                }), P.equals<unknown>({
+                    framesRun: 11,
+                    tickEvents: 11,
+                    soundEvents: 0,
+                    pacingEvents: 1,
+                    videoCopies: 11,
+                    audioCopies: 0,
+                    outputValid: true,
                 }))
                 .start(undefined),
         },

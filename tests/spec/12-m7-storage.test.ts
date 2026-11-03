@@ -79,6 +79,7 @@ class FakeSession implements PsxSession {
     readonly machine = machine;
     readonly discIndex = 0;
     readonly trayOpen = false;
+    playbackRate = 1 as const;
     readonly cards = {
         1: new Uint8Array(128 * 1024),
         2: new Uint8Array(128 * 1024),
@@ -87,6 +88,7 @@ class FakeSession implements PsxSession {
 
     setButton(): void {}
     setAxis(): void {}
+    setPlaybackRate(): void {}
     pause(): void {}
     resume(): void {}
     async reset(): Promise<void> {}

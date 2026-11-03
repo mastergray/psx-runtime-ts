@@ -4,7 +4,9 @@ int psx_start(const char *content_path, const char *options_json) {
     return psx_frontend_start(content_path, options_json);
 }
 
-int psx_run_frame(void) { return psx_frontend_run_frame(); }
+int psx_run_frame(int capture_video, int capture_audio, unsigned frameskip_interval) {
+    return psx_frontend_run_frame(capture_video, capture_audio, frameskip_interval);
+}
 
 void psx_set_button(unsigned port, unsigned id, int pressed) {
     psx_frontend_set_button(port, id, pressed);

@@ -5,6 +5,8 @@ the browser. It follows the lifecycle and package boundaries established by
 [`arcade-runtime-ts`](https://github.com/mastergray/arcade-runtime-ts), with a
 PlayStation-specific libretro bridge, Worker-hosted WebAssembly core, disc
 handling, controller ports, memory cards and save states.
+The developer harness also provides bounded best-effort fast-forward and two
+controller-accessible quick-state slots.
 
 M0 feasibility, the M1 public-contract foundation, the M2 bridge/Worker
 foundation, the M3 content pipeline and the M4 adapter/session are complete.
@@ -81,6 +83,12 @@ can download the normalized M3U actually stored with a multi-disc game. During
 an active multi-disc session, **Change disc** preserves the running game for
 its insert-disc prompt, while **Restart from disc** directly boots the selected
 disc as a new session.
+
+Runtime controller shortcuts use L3 with the shoulder buttons for fast-forward:
+R1 holds the selected speed, R2 cycles `×2`, `×5` and `×7`, L1 holds direct
+`×2`, and L2 holds direct `×7`. R3 with L1/L2 saves Quick State 1/2;
+R3 with R1/R2 loads Quick State 1/2. Accelerated execution skips audio and
+returns to normal speed when the hold chord is released.
 
 Firmware may be supplied as a raw image or as a small ZIP. When a ZIP contains
 multiple supported images, the runtime requires exactly one filename that can
