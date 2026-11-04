@@ -95,6 +95,7 @@ export interface PsxConsoleInitConfig {
     readonly adapter: PsxAdapter;                                               // Backend used to start sessions
     readonly canvas: PsxCanvasLike;                                             // Video presentation surface
     readonly container: PsxContainerLike;                                       // Responsive display boundary
+    readonly fullscreenTarget?: object;                                         // Optional wrapper requested for fullscreen presentation
     readonly gestureSource: PsxGestureSourceLike;                               // Audio authorization event source
     readonly storage?: PsxPlayerStorageLike;                                    // Optional cards, firmware, and states persistence
     readonly profileId?: string;                                                // Persistence namespace required with storage
@@ -167,6 +168,7 @@ export function isPsxConsoleConfig(value: unknown): value is PsxConsoleConfig {
 export function isPsxConsoleInitConfig(value: unknown): value is PsxConsoleInitConfig {
     if (!isObject(value) || !isPsxAdapter(value.adapter) || !isPsxCanvasLike(value.canvas)
         || !isPsxContainerLike(value.container) || !isPsxGestureSourceLike(value.gestureSource)
+        || (value.fullscreenTarget !== undefined && !isObject(value.fullscreenTarget))
         || (value.storage !== undefined && !isPsxPlayerStorageLike(value.storage))
         || (value.profileId !== undefined
             && (typeof value.profileId !== "string" || value.profileId.trim().length === 0))

@@ -6,6 +6,7 @@ import { basename, extname, resolve, sep } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const preloadPath = resolve(root, "harness/preload.local.json");
 const port = Number(process.env.PORT ?? 4173);
+const host = process.env.PSX_HARNESS_HOST ?? "127.0.0.1";
 const mime = new Map([
     [".html", "text/html; charset=utf-8"], [".js", "text/javascript; charset=utf-8"],
     [".json", "application/json; charset=utf-8"], [".wasm", "application/wasm"],
@@ -81,6 +82,6 @@ const server = createServer((request, response) => {
     });
 });
 
-server.listen(port, "127.0.0.1", () => {
-    console.log(`Harness: http://127.0.0.1:${port}`);
+server.listen(port, host, () => {
+    console.log(`Harness: http://${host}:${port}`);
 });

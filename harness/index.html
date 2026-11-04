@@ -8,7 +8,7 @@
   <style>
     :root { color-scheme: dark; font: 14px/1.45 Inter, ui-sans-serif, system-ui, sans-serif; background: #07090d; color: #edf2f7; }
     * { box-sizing: border-box; }
-    body { margin: 0; min-width: 20rem; min-height: 100vh; background: #07090d; }
+    body { margin: 0; min-width: 20rem; height: 100dvh; overflow: hidden; background: #07090d; }
     button, input, select { font: inherit; }
     button { color: inherit; }
     button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid #66c7ff; outline-offset: 2px; }
@@ -30,9 +30,10 @@
     #notice-toast { position: fixed; inset: auto 1rem 1rem auto; max-width: min(28rem, calc(100vw - 2rem)); margin: 0; padding: .75rem .9rem; border: 1px solid #3d906d; border-radius: .5rem; background: #10221bcc; color: #a9f0ce; box-shadow: 0 .8rem 2.5rem #0009; backdrop-filter: blur(10px); }
     #status { flex: 0 0 auto; color: #cde9ff; font-weight: 700; text-transform: capitalize; }
     #status-detail { max-width: 28rem; overflow: hidden; color: #aeb9c7; text-overflow: ellipsis; white-space: nowrap; }
-    main { min-height: calc(100vh - 4rem); }
-    .screen-workspace { min-height: calc(100vh - 4rem); display: grid; place-items: center; padding: 1rem; background: radial-gradient(circle at 50% 40%, #17202d 0, #090c11 45%, #050608 100%); }
-    #screen-stage { position: relative; width: min(100%, 1280px); max-height: calc(100vh - 6rem); aspect-ratio: 4 / 3; display: grid; place-items: center; overflow: hidden; border: 1px solid #283343; border-radius: .7rem; background: #000; box-shadow: 0 1.2rem 4rem #0009; }
+    main { height: calc(100dvh - 4rem); min-height: 0; overflow: hidden; }
+    .screen-workspace { height: 100%; min-height: 0; display: grid; place-items: center; padding: 1rem; overflow: hidden; background: radial-gradient(circle at 50% 40%, #17202d 0, #090c11 45%, #050608 100%); }
+    #play-stage { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; width: min(100%, 1280px); height: 100%; min-width: 0; min-height: 0; gap: .75rem; }
+    #screen-stage { position: relative; width: 100%; height: 100%; min-height: 0; display: grid; place-items: center; overflow: hidden; border: 1px solid #283343; border-radius: .7rem; background: #000; box-shadow: 0 1.2rem 4rem #0009; }
     canvas { max-width: 100%; max-height: 100%; image-rendering: auto; }
     #screen-message { position: absolute; z-index: 2; inset: 50% auto auto 50%; max-width: min(30rem, calc(100% - 2rem)); transform: translate(-50%, -50%); padding: .8rem 1rem; border: 1px solid #3a4656; border-radius: .55rem; background: #0d131dcc; color: #c7d2de; text-align: center; backdrop-filter: blur(8px); }
     #pause-overlay { position: absolute; z-index: 3; inset: 0; display: grid; place-items: center; background: #02050a99; color: #f5f8fb; font-size: clamp(1.65rem, 4vw, 2.6rem); font-weight: 800; letter-spacing: .18em; pointer-events: none; text-transform: uppercase; }
@@ -103,20 +104,82 @@
     .binding-change:hover { border-color: #67a3cc; background: #26384a; }
     .binding-change[data-capturing="true"] { border-color: #b5843f; color: #ffd99b; }
     .binding-status { min-height: 1.4rem; margin: .65rem 0; color: #9caabc; }
+    .touch-controller { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "label label" "shoulders-left shoulders-right" "controls controls"; gap: .55rem clamp(.75rem, 3vw, 2rem); width: 100%; padding: .65rem max(.75rem, env(safe-area-inset-right)) max(.65rem, env(safe-area-inset-bottom)) max(.75rem, env(safe-area-inset-left)); border: 1px solid #303b49; border-radius: .7rem; background: #0b1017e8; box-shadow: 0 .8rem 2rem #0008; touch-action: none; user-select: none; -webkit-touch-callout: none; }
+    .touch-controller[data-active="false"] { opacity: .58; }
+    .touch-shoulders, .touch-center-controls { display: flex; justify-content: center; gap: .45rem; }
+    .touch-shoulders { justify-content: stretch; }
+    .touch-shoulders-left { grid-area: shoulders-left; }
+    .touch-shoulders-right { grid-area: shoulders-right; }
+    .touch-controller[data-swapped="true"] .touch-shoulders-left { grid-area: shoulders-right; }
+    .touch-controller[data-swapped="true"] .touch-shoulders-right { grid-area: shoulders-left; }
+    .touch-button { min-width: 44px; min-height: 44px; border: 1px solid #60758c; border-radius: 999px; background: #1a2633dd; color: #f1f6fb; font-weight: 750; box-shadow: inset 0 -.18rem .35rem #0008, 0 .2rem .4rem #0007; touch-action: none; }
+    .touch-button[data-pressed="true"] { transform: translateY(1px); border-color: #8bd7ff; background: #2d6688; box-shadow: inset 0 .12rem .3rem #0008; }
+    .touch-shoulders .touch-button { flex: 1 1 0; border-radius: .55rem; }
+    .touch-center-controls .touch-button { min-width: 4.5rem; min-height: 44px; border-radius: .55rem; font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; }
+    .touch-control-row { position: relative; grid-area: controls; display: grid; grid-template-columns: minmax(7.75rem, 9.25rem) 4rem auto 4rem minmax(7.75rem, 9.25rem); grid-template-areas: "dpad left-stick center right-stick face"; align-items: center; justify-content: space-between; gap: clamp(.4rem, 1.5vw, 1.25rem); min-width: 0; }
+    .touch-controller[data-swapped="true"] .touch-control-row { grid-template-areas: "face right-stick center left-stick dpad"; }
+    .touch-dpad, .touch-face { position: relative; width: min(31vw, 9.25rem); min-width: 7.75rem; aspect-ratio: 1; justify-self: center; touch-action: none; }
+    .touch-dpad { display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); border-radius: 50%; background: #080c12cc; }
+    .touch-dpad { grid-area: dpad; }
+    .touch-face { grid-area: face; }
+    .touch-dpad-direction { display: grid; place-items: center; border: 1px solid #56697c; background: #18222edd; color: #cbd7e2; font-size: 1.1rem; font-weight: 900; pointer-events: none; }
+    .touch-dpad-up { grid-area: 1 / 2; border-radius: .45rem .45rem 0 0; }
+    .touch-dpad-right { grid-area: 2 / 3; border-radius: 0 .45rem .45rem 0; }
+    .touch-dpad-down { grid-area: 3 / 2; border-radius: 0 0 .45rem .45rem; }
+    .touch-dpad-left { grid-area: 2 / 1; border-radius: .45rem 0 0 .45rem; }
+    .touch-dpad-center { grid-area: 2 / 2; background: #18222edd; pointer-events: none; }
+    .touch-dpad[data-directions~="up"] .touch-dpad-up,
+    .touch-dpad[data-directions~="right"] .touch-dpad-right,
+    .touch-dpad[data-directions~="down"] .touch-dpad-down,
+    .touch-dpad[data-directions~="left"] .touch-dpad-left { border-color: #8bd7ff; background: #2d6688; }
+    .touch-face .touch-button { position: absolute; width: 3.15rem; height: 3.15rem; padding: 0; }
+    .touch-face .touch-triangle { inset: 0 auto auto 50%; transform: translateX(-50%); color: #6be3a5; }
+    .touch-face .touch-circle { inset: 50% 0 auto auto; transform: translateY(-50%); color: #ff8790; }
+    .touch-face .touch-cross { inset: auto auto 0 50%; transform: translateX(-50%); color: #82baff; }
+    .touch-face .touch-square { inset: 50% auto auto 0; transform: translateY(-50%); color: #e9a1d5; }
+    .touch-face .touch-button[data-pressed="true"] { filter: brightness(1.25); }
+    .touch-stick { position: relative; width: 4rem; min-width: 44px; aspect-ratio: 1; border: 1px solid #52677d; border-radius: 50%; background: #080c12dd; box-shadow: inset 0 .2rem .7rem #000c; touch-action: none; }
+    .touch-stick-knob { position: absolute; inset: 50% auto auto 50%; display: grid; place-items: center; width: 2.25rem; aspect-ratio: 1; transform: translate(calc(-50% + var(--touch-stick-x, 0px)), calc(-50% + var(--touch-stick-y, 0px))); border: 1px solid #70869d; border-radius: 50%; background: #273545; color: #b9c8d8; font-size: .68rem; font-weight: 800; pointer-events: none; }
+    .touch-stick-group { display: grid; justify-items: center; gap: .35rem; }
+    .touch-stick-group-left { grid-area: left-stick; }
+    .touch-stick-group-right { grid-area: right-stick; }
+    .touch-center-controls { grid-area: center; }
+    .touch-stick-group > .touch-button { width: 44px; height: 44px; padding: 0; }
+    .touch-controller:not([data-controller-type="dualshock"]) .touch-stick { visibility: hidden; }
+    .touch-port-label { grid-area: label; margin: 0; color: #aebdcb; text-align: center; }
+    #play-stage:fullscreen { width: 100%; height: 100%; max-width: none; padding: max(.5rem, env(safe-area-inset-top)) max(.5rem, env(safe-area-inset-right)) max(.5rem, env(safe-area-inset-bottom)) max(.5rem, env(safe-area-inset-left)); place-content: center; background: #000; }
+    #play-stage:fullscreen #screen-stage { width: 100%; max-height: 100%; border: 0; border-radius: 0; box-shadow: none; }
     @media (max-width: 900px) {
       .menu-bar { flex-wrap: wrap; }
       .brand { width: 100%; }
       .menu-actions { order: 2; width: 100%; }
       .status-strip { position: absolute; top: .55rem; right: .7rem; max-width: calc(100% - 12rem); }
       #status-detail { max-width: 15rem; }
-      main, .screen-workspace { min-height: calc(100vh - 7rem); }
-      #screen-stage { max-height: calc(100vh - 9rem); }
+      main { height: calc(100dvh - 7rem); }
     }
     @media (max-width: 560px) {
       #status-detail { display: none; }
       .diagnostic-grid { grid-template-columns: 1fr; }
       dialog { width: calc(100vw - 1rem); max-height: calc(100vh - 1rem); }
       .dialog-shell { max-height: calc(100vh - 1rem); }
+      .touch-controller { gap: .4rem; padding: .45rem .2rem; }
+      .touch-control-row { grid-template-columns: 7.625rem 44px 44px 44px 7.625rem; gap: .175rem; }
+      .touch-dpad, .touch-face { width: 7.625rem; min-width: 7.625rem; }
+      .touch-face .touch-button { width: 44px; height: 44px; }
+      .touch-stick { width: 44px; }
+      .touch-center-controls { flex-direction: column; gap: .25rem; }
+      .touch-center-controls .touch-button { min-width: 44px; padding-inline: 0; font-size: .6rem; }
+    }
+    @media (orientation: landscape) and (max-height: 700px), (pointer: coarse) and (orientation: landscape) {
+      #play-stage { width: min(100%, 1280px); }
+      .touch-controller { position: absolute; z-index: 4; inset: 0; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-content: end; border: 0; background: transparent; box-shadow: none; pointer-events: none; }
+      .touch-shoulders { width: min(100%, 19rem); padding: .35rem; border-radius: .55rem; background: #080c1273; backdrop-filter: blur(2px); pointer-events: auto; }
+      .touch-shoulders-right { justify-self: end; }
+      .touch-control-row { width: 100%; grid-template-columns: minmax(6.8rem, 8rem) 4rem auto 4rem minmax(7.75rem, 8rem); padding: .35rem; border-radius: .7rem; background: #080c1273; backdrop-filter: blur(2px); pointer-events: auto; }
+      .touch-dpad { width: min(25vh, 8rem); min-width: 6.8rem; }
+      .touch-face { width: min(28vh, 8rem); min-width: 7.75rem; }
+      .touch-button { background: #182533b8; }
+      .touch-port-label { position: absolute; top: max(.4rem, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); padding: .25rem .45rem; border-radius: .35rem; background: #080c12a8; }
     }
   </style>
 </head>
@@ -128,6 +191,7 @@
     <button id="game-menu" type="button" aria-haspopup="dialog" aria-controls="game-dialog" aria-expanded="false" data-open-dialog="game-dialog" disabled title="Check and store valid firmware in System first.">Game</button>
     <button id="library-menu" type="button" aria-haspopup="dialog" aria-controls="library-dialog" aria-expanded="false" data-open-dialog="library-dialog" disabled title="Check and store valid firmware in System first.">Library</button>
     <button id="view-menu" type="button" aria-haspopup="dialog" aria-controls="view-dialog" aria-expanded="false" data-open-dialog="view-dialog">View</button>
+    <button id="touch-controller-toggle" type="button" aria-controls="touch-controller" aria-pressed="false">Show Controls</button>
     <button id="pause" type="button" disabled>Pause</button>
     <button id="soft-reset" type="button" disabled>Reset</button>
     <button id="mute-audio" type="button" disabled>Mute</button>
@@ -145,12 +209,28 @@
 </header>
 <div id="notice-toast" popover="manual" role="status" aria-live="polite"></div>
 <main>
-  <section class="screen-workspace" aria-label="PlayStation display">
-    <div id="screen-stage">
-      <canvas id="screen"></canvas>
-      <div id="screen-message">Open <strong>System</strong> and check/store firmware, then open Game.</div>
-      <div id="speed-indicator" role="status" aria-live="polite" hidden>×2</div>
-      <div id="pause-overlay" role="status" aria-live="polite" hidden>Paused</div>
+  <section class="screen-workspace" aria-label="PlayStation display and controls">
+    <div id="play-stage">
+      <div id="screen-stage">
+        <canvas id="screen"></canvas>
+        <div id="screen-message">Open <strong>System</strong> and check/store firmware, then open Game.</div>
+        <div id="speed-indicator" role="status" aria-live="polite" hidden>×2</div>
+        <div id="pause-overlay" role="status" aria-live="polite" hidden>Paused</div>
+      </div>
+      <section id="touch-controller" class="touch-controller" aria-label="On-screen PlayStation controller" aria-disabled="true" data-active="false" data-controller-type="digital" data-port="1" data-swapped="false" hidden>
+        <p id="touch-port-label" class="touch-port-label" aria-live="polite">On-screen controller · player 1</p>
+        <div class="touch-shoulders touch-shoulders-left"><button class="touch-button" type="button" data-touch-button="l2">L2</button><button class="touch-button" type="button" data-touch-button="l1">L1</button></div>
+        <div class="touch-shoulders touch-shoulders-right"><button class="touch-button" type="button" data-touch-button="r1">R1</button><button class="touch-button" type="button" data-touch-button="r2">R2</button></div>
+        <div class="touch-control-row">
+          <div class="touch-dpad" data-touch-dpad role="group" aria-label="Rolling directional pad" data-directions="">
+            <span class="touch-dpad-direction touch-dpad-up" aria-hidden="true">▲</span><span class="touch-dpad-direction touch-dpad-right" aria-hidden="true">▶</span><span class="touch-dpad-direction touch-dpad-down" aria-hidden="true">▼</span><span class="touch-dpad-direction touch-dpad-left" aria-hidden="true">◀</span><span class="touch-dpad-center" aria-hidden="true"></span>
+          </div>
+          <div class="touch-stick-group touch-stick-group-left"><div class="touch-stick" data-touch-stick="left" role="group" aria-label="Left analog stick"><span class="touch-stick-knob">LS</span></div><button class="touch-button" type="button" data-touch-button="l3">L3</button></div>
+          <div class="touch-center-controls"><button class="touch-button" type="button" data-touch-button="select">Select</button><button class="touch-button" type="button" data-touch-button="start">Start</button></div>
+          <div class="touch-stick-group touch-stick-group-right"><div class="touch-stick" data-touch-stick="right" role="group" aria-label="Right analog stick"><span class="touch-stick-knob">RS</span></div><button class="touch-button" type="button" data-touch-button="r3">R3</button></div>
+          <div class="touch-face" role="group" aria-label="Face buttons"><button class="touch-button touch-triangle" type="button" data-touch-button="triangle" aria-label="Triangle">△</button><button class="touch-button touch-circle" type="button" data-touch-button="circle" aria-label="Circle">○</button><button class="touch-button touch-cross" type="button" data-touch-button="cross" aria-label="Cross">×</button><button class="touch-button touch-square" type="button" data-touch-button="square" aria-label="Square">□</button></div>
+        </div>
+      </section>
     </div>
   </section>
 </main>
@@ -247,6 +327,14 @@
         <div class="buttons"><button id="fullscreen-fit" type="button">Fullscreen (Fit)</button><button id="fullscreen-stretch" type="button">Fullscreen (Stretch)</button></div>
         <p>View status: <code id="view-status" role="status" aria-live="polite">windowed · fit</code></p>
         <p><small>Press Escape or both controller stick buttons (L3 + R3) to leave fullscreen.</small></p>
+      </fieldset>
+      <fieldset>
+        <legend>On-screen controller</legend>
+        <label>Visibility <select id="touch-controller-view"><option value="auto" selected>Automatic</option><option value="show">Always show</option><option value="hide">Always hide</option></select></label>
+        <label>Player <select id="touch-controller-port"><option value="1" selected>Player 1</option><option value="2">Player 2</option></select></label>
+        <label class="check-option"><input id="touch-controller-swap" type="checkbox"><span>Swap left and right controls</span></label>
+        <p>Touch status: <code id="touch-controller-status" role="status" aria-live="polite">automatic · player 1</code></p>
+        <p><small>Automatic shows the controller on touch devices when no standard gamepad is connected. DualShock sessions add both analog sticks and explicit L3/R3 buttons.</small></p>
       </fieldset>
     </div>
   </div>

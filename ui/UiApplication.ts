@@ -1,0 +1,1212 @@
+// Dependencies:
+import {
+    DEFAULT_KEYBOARD_MAP,
+    LibretroPsxAdapter,
+    PsxAudio,
+    PsxConsole,
+    PsxPlayer,
+    ZipDiscSource,
+    ZipFirmwareSource,
+} from "../src/index.js";
+import { isUiDialogId } from "./types.js";    // Validates declarative dialog targets before opening them
+
+// Type dependencies:
+import type {
+    BiosImage,          // Stored firmware supplied when a session starts
+    ControllerPort,     // Physical port used by automatic browser-gamepad binding
+    PsxFirmwareRecord,  // Stored firmware metadata rendered by System
+    PsxPlayerStatus,    // Lifecycle status rendered by the stage
+    PsxRegion,          // Selected firmware region
+    PsxScalingMode,     // Display layout selected in View
+    PsxStoredGame,      // Lightweight game metadata rendered by Library
+} from "../src/index.js";
+import type {
+    UiApplicationConfig,    // Browser and runtime dependencies supplied by main
+    UiDialogId,             // Supported production dialog identifiers
+    UiFeedbackState,        // Operation feedback severity
+    UiStageState,           // Closed central-stage presentation state
+} from "./types.js";
+
+const PROFILE_ID = "web-emulator";
+const CARD_IDS = Object.freeze({ 1: "card-1", 2: "card-2" });
+const REGIONS = Object.freeze(["ntsc-u", "ntsc-j", "pal"] as const);
+
+/**
+ *
+ * Class
+ *
+ */
+
+// Owns the production browser interface and delegates emulation concerns to the runtime package.
+export default class UiApplication {
+
+    /* Instance Fields */
+    private readonly _document: Document;                         // Production document containing the required DOM contract
+    private readonly _storage: UiApplicationConfig["storage"];   // Firmware and memory-card persistence
+    private readonly _gameStore: UiApplicationConfig["gameStore"]; // Audited game-library persistence
+    private readonly _buildUrl: string;                           // PlayStation core build root
+    private readonly _firmware = new Map<PsxRegion, PsxFirmwareRecord>(); // Stored firmware records by region
+    private _adapter: LibretroPsxAdapter | null = null;           // Loaded core metadata and worker factory
+    private _runtime: PsxConsole | null = null;                   // Composed browser runtime
+    private _player: PsxPlayer | null = null;                     // Concrete player surface used by supported UI controls
+    private _games: ReadonlyArray<PsxStoredGame> = [];            // Current ordered browser library
+    private _selectedArchives: File[] = [];                       // Ordered ZIP selection awaiting import
+    private _importedGameId: string | null = null;                // Stored identity produced by the current selection
+    private _selectedLibraryGameId: string | null = null;         // Game currently displayed in Library details
+    private _selectedLibraryDiscIndex = 0;                        // Initial or replacement disc selected in Library
+    private _busyDialog: UiDialogId | null = null;                // Dialog protected from dismissal during a mutation
+    private _resumeAfterDialog = false;                           // Whether the active dialog paused a running session
+    private _switchingDialogs = false;                            // Prevents transient resume between modal surfaces
+    private _noticeTimer: ReturnType<typeof globalThis.setTimeout> | null = null; // Pending notice dismissal timer
+    private _muted = false;                                      // Requested audio mute state for the active session
+    private readonly _boundGamepads = new Set<number>();          // Browser gamepad indices currently assigned by this shell
+    private _firmwareBusy = false;                               // Whether one firmware validation/storage operation is active
+
+    // CONSTRUCTOR :: uiApplicationConfig -> uiApplication
+    // Retains validated composition dependencies; initialize() binds the document and loads persistent state.
+    constructor(config: UiApplicationConfig) {
+        this._document = config.document;
+        this._storage = config.storage;
+        this._gameStore = config.gameStore;
+        this._buildUrl = config.buildUrl;
+    }
+
+    /**
+     *
+     * Instance Methods
+     *
+     */
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Binds the production document, loads the core and storage, and renders the first actionable state.
+    async initialize(): Promise<void> {
+        this._bindDocument();
+        this._renderStage("loading");
+        try {
+            this._adapter = await LibretroPsxAdapter.init({ buildUrl: this._buildUrl });
+            this._createRuntime(this._adapter);
+            await Promise.all([this._refreshFirmware(), this._refreshLibrary(), this._refreshMemoryCards()]);
+            this._renderStage(this._firmware.size === 0 ? "firmware-required" : "ready");
+        } catch (error) {
+            this._renderStage("failed", errorMessage(error));
+            throw error;
+        }
+    }
+
+    // METHOD :: VOID -> VOID
+    // Binds declarative navigation and supported workflow controls exactly once.
+    private _bindDocument(): void {
+        for (const trigger of this._document.querySelectorAll<HTMLElement>("[data-open-dialog]")) {
+            trigger.addEventListener("click", () => {
+                const dialog = trigger.dataset.openDialog;
+                if (isUiDialogId(dialog)) void this._openDialog(dialog);
+            });
+        }
+        for (const dialogId of ["system", "game", "library", "memory", "view"] as const) {
+            const dialog = element<HTMLDialogElement>(this._document, `${dialogId}-dialog`);
+            dialog.addEventListener("cancel", (event) => {
+                if (this._busyDialog === dialogId) event.preventDefault();
+            });
+            dialog.addEventListener("close", () => { void this._dialogClosed(); });
+        }
+
+        element<HTMLSelectElement>(this._document, "firmware-region").addEventListener("change", () => {
+            this._renderFirmware();
+        });
+        element<HTMLButtonElement>(this._document, "store-firmware").addEventListener("click", () => {
+            void this._storeFirmware();
+        });
+        element<HTMLButtonElement>(this._document, "forget-firmware").addEventListener("click", () => {
+            void this._forgetFirmware();
+        });
+
+        const screenStage = element<HTMLElement>(this._document, "screen-stage");
+        for (const eventName of ["dragenter", "dragover"]) {
+            screenStage.addEventListener(eventName, (event) => {
+                if (!this._acceptsStageDrop()) return;
+                event.preventDefault();
+                screenStage.dataset.dragging = "true";
+            });
+        }
+        for (const eventName of ["dragleave", "dragend"]) {
+            screenStage.addEventListener(eventName, () => { screenStage.dataset.dragging = "false"; });
+        }
+        screenStage.addEventListener("drop", (event) => {
+            if (!this._acceptsStageDrop()) return;
+            event.preventDefault();
+            screenStage.dataset.dragging = "false";
+            const files = event.dataTransfer === null ? [] : [...event.dataTransfer.files];
+            if (this._acceptsFirmwareDrop()) {
+                if (files.length !== 1) {
+                    this._showNotice("Drop exactly one firmware image or ZIP.");
+                    return;
+                }
+                void this._storeFirmwareFile(files[0]!, false);
+                return;
+            }
+            void this._addArchives(files).then(() => this._openDialog("game"));
+        });
+
+        const gameInput = element<HTMLInputElement>(this._document, "game-files");
+        gameInput.addEventListener("change", () => {
+            void this._addArchives(gameInput.files === null ? [] : [...gameInput.files]);
+            gameInput.value = "";
+        });
+        const dropZone = element<HTMLElement>(this._document, "game-drop-zone");
+        const gameDialog = element<HTMLDialogElement>(this._document, "game-dialog");
+        for (const eventName of ["dragenter", "dragover"]) {
+            dropZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                dropZone.dataset.dragging = "true";
+                gameDialog.dataset.dragging = "true";
+            });
+            gameDialog.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                dropZone.dataset.dragging = "true";
+                gameDialog.dataset.dragging = "true";
+            });
+        }
+        for (const eventName of ["dragleave", "dragend"]) {
+            dropZone.addEventListener(eventName, (event) => {
+                event.stopPropagation();
+                dropZone.dataset.dragging = "false";
+                gameDialog.dataset.dragging = "false";
+            });
+            gameDialog.addEventListener(eventName, () => {
+                dropZone.dataset.dragging = "false";
+                gameDialog.dataset.dragging = "false";
+            });
+        }
+        dropZone.addEventListener("drop", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            dropZone.dataset.dragging = "false";
+            gameDialog.dataset.dragging = "false";
+            void this._addArchives(event.dataTransfer === null ? [] : [...event.dataTransfer.files]);
+        });
+        gameDialog.addEventListener("drop", (event) => {
+            event.preventDefault();
+            dropZone.dataset.dragging = "false";
+            gameDialog.dataset.dragging = "false";
+            void this._addArchives(event.dataTransfer === null ? [] : [...event.dataTransfer.files]);
+        });
+        element<HTMLButtonElement>(this._document, "clear-game").addEventListener("click", () => {
+            this._selectedArchives = [];
+            this._importedGameId = null;
+            void this._renderArchiveSelection();
+        });
+        element<HTMLButtonElement>(this._document, "store-game").addEventListener("click", () => {
+            void this._storeSelectedGame(false);
+        });
+        element<HTMLButtonElement>(this._document, "start-imported-game").addEventListener("click", () => {
+            void this._storeSelectedGame(true);
+        });
+        element<HTMLSelectElement>(this._document, "entry-select").addEventListener("change", () => {
+            this._importedGameId = null;
+            this._renderGameActions();
+            this._feedback("game", "Entry changed. Check and store the updated selection.", "idle");
+        });
+
+        element<HTMLButtonElement>(this._document, "pause-session").addEventListener("click", () => {
+            void this._togglePause();
+        });
+        element<HTMLButtonElement>(this._document, "reset-session").addEventListener("click", () => {
+            void this._resetSession();
+        });
+        element<HTMLButtonElement>(this._document, "mute-session").addEventListener("click", () => {
+            void this._toggleMute();
+        });
+        element<HTMLButtonElement>(this._document, "stop-session").addEventListener("click", () => {
+            void this._stopSession();
+        });
+
+        element<HTMLSelectElement>(this._document, "scaling-mode").addEventListener("change", (event) => {
+            const value = (event.currentTarget as HTMLSelectElement).value as PsxScalingMode;
+            if (this._player !== null) this._player.display.scaling = value;
+            this._setText("view-feedback", `Scaling changed to ${displayScaling(value)}.`);
+        });
+        element<HTMLButtonElement>(this._document, "fullscreen-fit").addEventListener("click", () => {
+            void this._enterFullscreen("fit");
+        });
+        element<HTMLButtonElement>(this._document, "fullscreen-stretch").addEventListener("click", () => {
+            void this._enterFullscreen("stretch");
+        });
+        for (const port of [1, 2] as const) {
+            element<HTMLButtonElement>(this._document, `download-card-${port}`).addEventListener("click", () => {
+                void this._downloadMemoryCard(port);
+            });
+        }
+
+        globalThis.addEventListener("gamepadconnected", () => this._syncGamepads());
+        globalThis.addEventListener("gamepaddisconnected", () => this._syncGamepads());
+    }
+
+    // METHOD :: libretroPsxAdapter -> VOID
+    // Creates the reusable runtime and binds its lifecycle to the production stage.
+    private _createRuntime(adapter: LibretroPsxAdapter): void {
+        const canvas = element<HTMLCanvasElement>(this._document, "screen");
+        const screenStage = element<HTMLElement>(this._document, "screen-stage");
+        const playStage = element<HTMLElement>(this._document, "play-stage");
+        this._runtime = PsxConsole.init({
+            adapter,
+            canvas,
+            container: screenStage,
+            fullscreenTarget: playStage,
+            gestureSource: this._document,
+            storage: this._storage,
+            profileId: PROFILE_ID,
+            memoryCardIds: CARD_IDS,
+            keyboard: { target: globalThis, map: DEFAULT_KEYBOARD_MAP },
+            gamepad: {
+                provider: { getGamepads: () => navigator.getGamepads() },
+                scheduler: {
+                    request: requestAnimationFrame.bind(globalThis),
+                    cancel: cancelAnimationFrame.bind(globalThis),
+                },
+                target: this._document,
+            },
+            gameStore: this._gameStore,
+        });
+        this._player = this._runtime.player as PsxPlayer;
+        this._player.on("status", (status) => this._playerStatusChanged(status));
+        this._player.on("error", (error) => {
+            this._showNotice(errorMessage(error));
+            this._renderStage("failed", errorMessage(error));
+        });
+        this._syncGamepads();
+    }
+
+    // METHOD :: psxPlayerStatus -> VOID
+    // Synchronizes stage presentation and session controls with one lifecycle transition.
+    private _playerStatusChanged(status: PsxPlayerStatus): void {
+        this._renderStage(status === "idle"
+            ? (this._firmware.size === 0 ? "firmware-required" : "ready")
+            : status);
+        if (status === "running") {
+            const audio = this._sessionAudio();
+            if (audio !== null) {
+                audio.volume = 0.15;
+                if (this._muted) audio.mute();
+                void audio.unlock().catch(() => undefined);
+            }
+        }
+        void this._refreshMemoryCards();
+    }
+
+    // METHOD :: uiStageState, STRING? -> VOID
+    // Renders one closed central-stage state and all dependent command availability.
+    private _renderStage(state: UiStageState, detail = ""): void {
+        const app = element<HTMLElement>(this._document, "ui-app");
+        app.dataset.stage = state;
+        const hasFirmware = this._firmware.size > 0;
+        element<HTMLButtonElement>(this._document, "game-nav").disabled = !hasFirmware;
+        element<HTMLButtonElement>(this._document, "library-nav").disabled = !hasFirmware;
+        const sessionActive = state === "running" || state === "paused" || state === "failed";
+        element<HTMLButtonElement>(this._document, "pause-session").disabled = state !== "running" && state !== "paused";
+        element<HTMLButtonElement>(this._document, "pause-session").textContent = state === "paused" ? "Resume" : "Pause";
+        element<HTMLButtonElement>(this._document, "reset-session").disabled = state !== "running" && state !== "paused";
+        element<HTMLButtonElement>(this._document, "mute-session").disabled = state !== "running" && state !== "paused";
+        element<HTMLButtonElement>(this._document, "stop-session").disabled = !sessionActive;
+        element<HTMLButtonElement>(this._document, "fullscreen-fit").disabled = state !== "running" && state !== "paused";
+        element<HTMLButtonElement>(this._document, "fullscreen-stretch").disabled = state !== "running" && state !== "paused";
+        element<HTMLElement>(this._document, "pause-overlay").hidden = state !== "paused";
+        this._setText("runtime-status", this._runtimeLabel(state));
+
+        const presentation = stagePresentation(state, detail, this._games.length);
+        this._setText("stage-code", presentation.code);
+        this._setText("stage-title", presentation.title);
+        this._setText("stage-description", presentation.description);
+        const primary = element<HTMLButtonElement>(this._document, "stage-primary");
+        primary.hidden = presentation.primary === null;
+        primary.textContent = presentation.primary?.label ?? "";
+        primary.onclick = presentation.primary === null ? null : () => { void this._openDialog(presentation.primary!.dialog); };
+        const secondary = element<HTMLButtonElement>(this._document, "stage-secondary");
+        secondary.hidden = presentation.secondary === null;
+        secondary.textContent = presentation.secondary?.label ?? "";
+        secondary.onclick = presentation.secondary === null ? null : () => { void this._openDialog(presentation.secondary!.dialog); };
+        const formats = element<HTMLElement>(this._document, "stage-formats");
+        formats.hidden = state !== "ready" && state !== "firmware-required";
+        formats.textContent = state === "firmware-required"
+            ? "DROP BIN · ROM · ZIP"
+            : "DROP ONE OR MORE GAME ZIPS";
+        this._renderTelemetry();
+    }
+
+    // METHOD :: uiDialogId -> PROMISE(VOID)
+    // Pauses a running session and opens one supported modal surface.
+    private async _openDialog(dialogId: UiDialogId): Promise<void> {
+        if (dialogId !== "system" && this._firmware.size === 0 && (dialogId === "game" || dialogId === "library")) {
+            await this._openDialog("system");
+            return;
+        }
+        const openDialog = this._document.querySelector<HTMLDialogElement>("dialog[open]");
+        if (openDialog !== null) {
+            this._switchingDialogs = true;
+            openDialog.close();
+            this._switchingDialogs = false;
+        }
+        if (this._player?.status === "running") {
+            await this._player.pause();
+            this._resumeAfterDialog = true;
+        }
+        if (dialogId === "library") this._renderLibrary();
+        if (dialogId === "memory") await this._refreshMemoryCards();
+        element<HTMLDialogElement>(this._document, `${dialogId}-dialog`).showModal();
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Resumes only sessions paused by modal entry after the final dialog closes.
+    private async _dialogClosed(): Promise<void> {
+        if (this._switchingDialogs || this._document.querySelector("dialog[open]") !== null) return;
+        if (this._resumeAfterDialog && this._player?.status === "paused") {
+            this._resumeAfterDialog = false;
+            this._player.resume();
+        } else {
+            this._resumeAfterDialog = false;
+        }
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Reloads all regional firmware slots and updates gated navigation.
+    private async _refreshFirmware(): Promise<void> {
+        this._firmware.clear();
+        for (const record of await this._storage.listFirmware()) this._firmware.set(record.region, record);
+        if (!this._firmware.has(this._selectedRegion()) && this._firmware.size > 0) {
+            element<HTMLSelectElement>(this._document, "firmware-region").value = this._firmware.keys().next().value!;
+        }
+        this._renderFirmware();
+    }
+
+    // METHOD :: VOID -> VOID
+    // Renders regional firmware availability and selected-region actions.
+    private _renderFirmware(): void {
+        const slots = element<HTMLElement>(this._document, "firmware-slots");
+        slots.replaceChildren(...REGIONS.map((region) => {
+            const record = this._firmware.get(region);
+            const slot = this._document.createElement("div");
+            slot.className = "firmware-slot";
+            slot.dataset.stored = String(record !== undefined);
+            const title = this._document.createElement("strong");
+            title.textContent = regionLabel(region);
+            const status = this._document.createElement("span");
+            status.textContent = record === undefined ? "EMPTY" : `${formatBytes(record.blob.size)} · STORED`;
+            slot.append(title, status);
+            return slot;
+        }));
+        const record = this._firmware.get(this._selectedRegion());
+        const forget = element<HTMLButtonElement>(this._document, "forget-firmware");
+        forget.hidden = record === undefined;
+        forget.disabled = record === undefined;
+        this._renderTelemetry();
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Validates and stores the selected user-supplied firmware in its regional slot.
+    private async _storeFirmware(): Promise<void> {
+        const input = element<HTMLInputElement>(this._document, "firmware-file");
+        const file = input.files?.[0];
+        if (file === undefined) {
+            this._feedback("firmware", "Select a firmware image or ZIP first.", "error");
+            return;
+        }
+        await this._storeFirmwareFile(file, true);
+        input.value = "";
+    }
+
+    // METHOD :: FILE, BOOLEAN -> PROMISE(VOID)
+    // Validates and stores firmware selected in System or dropped on the firmware-required stage.
+    private async _storeFirmwareFile(file: File, protectDialog: boolean): Promise<void> {
+        if (this._firmwareBusy) {
+            this._showNotice("Firmware validation is already in progress.");
+            return;
+        }
+        const adapter = this._adapter;
+        if (adapter === null) {
+            this._feedback("firmware", "Core metadata is unavailable; reload the application and try again.", "error");
+            return;
+        }
+        const operation = async (): Promise<void> => {
+            this._firmwareBusy = true;
+            this._feedback("firmware", `Checking “${file.name}”…`, "working");
+            if (!protectDialog) this._showNotice(`Checking “${file.name}”…`);
+            try {
+                const region = this._selectedRegion();
+                const image = await firmwareImage(file, region, adapter.build.firmware.byteLengths);
+                await this._storage.saveFirmware(image);
+                await this._refreshFirmware();
+                const message = `Firmware passed validation and was stored for ${regionLabel(region)}.`;
+                this._feedback("firmware", message, "success");
+                if (!protectDialog) this._showNotice(message);
+                if (this._player?.status === "idle") this._renderStage("ready");
+            } catch (error) {
+                const message = `Check or storage failed: ${errorMessage(error)}`;
+                this._feedback("firmware", message, "error");
+                if (!protectDialog) {
+                    this._renderStage("firmware-required");
+                    this._showNotice(message);
+                }
+            } finally {
+                this._firmwareBusy = false;
+            }
+        };
+        if (protectDialog) await this._withBusyDialog("system", operation);
+        else await operation();
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Removes firmware from the selected regional slot after explicit confirmation.
+    private async _forgetFirmware(): Promise<void> {
+        const region = this._selectedRegion();
+        if (!this._firmware.has(region)) return;
+        if (!globalThis.confirm(`Forget the stored ${regionLabel(region)} firmware?`)) return;
+        await this._storage.deleteFirmware(region);
+        await this._refreshFirmware();
+        this._feedback("firmware", `Stored ${regionLabel(region)} firmware was removed.`, "success");
+        if (this._player?.status === "idle") {
+            this._renderStage(this._firmware.size === 0 ? "firmware-required" : "ready");
+        }
+    }
+
+    // METHOD :: [FILE] -> PROMISE(VOID)
+    // Appends valid ZIPs to the ordered import selection and inspects supported entry choices.
+    private async _addArchives(files: ReadonlyArray<File>): Promise<void> {
+        const archives = files.filter((file) => ZipDiscSource.isArchive(file));
+        if (archives.length !== files.length) {
+            this._feedback("game", "Game import accepts ZIP archives only.", "error");
+        }
+        if (archives.length === 0) return;
+        this._selectedArchives.push(...archives);
+        this._importedGameId = null;
+        await this._renderArchiveSelection();
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Renders ordered selected archives and any explicit entry choice needed for one ZIP.
+    private async _renderArchiveSelection(): Promise<void> {
+        const list = element<HTMLOListElement>(this._document, "game-archives");
+        const selection = element<HTMLElement>(this._document, "game-selection");
+        const clear = element<HTMLButtonElement>(this._document, "clear-game");
+        const entryChoice = element<HTMLElement>(this._document, "entry-choice");
+        const entrySelect = element<HTMLSelectElement>(this._document, "entry-select");
+        const hasSelection = this._selectedArchives.length > 0;
+        selection.textContent = hasSelection
+            ? `${this._selectedArchives.length} ZIP${this._selectedArchives.length === 1 ? "" : "s"} selected in disc order.`
+            : "No game ZIPs selected.";
+        list.hidden = !hasSelection;
+        clear.hidden = !hasSelection;
+        this._renderGameActions();
+        list.replaceChildren(...this._selectedArchives.map((file, index) => {
+            const item = this._document.createElement("li");
+            const fileDetails = this._document.createElement("div");
+            fileDetails.className = "archive-file";
+            const name = this._document.createElement("span");
+            name.textContent = file.name;
+            const size = this._document.createElement("small");
+            size.textContent = formatBytes(file.size);
+            fileDetails.append(name, size);
+            const actions = this._document.createElement("div");
+            actions.className = "archive-actions";
+            const up = button(this._document, "Move Up");
+            up.dataset.archiveAction = "up";
+            up.disabled = index === 0;
+            up.setAttribute("aria-label", `Move ${file.name} up`);
+            up.addEventListener("click", () => this._moveArchive(index, -1));
+            const down = button(this._document, "Move Down");
+            down.dataset.archiveAction = "down";
+            down.disabled = index === this._selectedArchives.length - 1;
+            down.setAttribute("aria-label", `Move ${file.name} down`);
+            down.addEventListener("click", () => this._moveArchive(index, 1));
+            const remove = button(this._document, "Remove");
+            remove.dataset.archiveAction = "remove";
+            remove.setAttribute("aria-label", `Remove ${file.name}`);
+            remove.addEventListener("click", () => this._removeArchive(index));
+            actions.append(up, down, remove);
+            item.append(fileDetails, actions);
+            return item;
+        }));
+        entryChoice.hidden = true;
+        entrySelect.replaceChildren();
+        if (!hasSelection) {
+            this._feedback("game", "Choose game content to begin.", "idle");
+            return;
+        }
+        if (this._selectedArchives.length > 1) {
+            this._feedback(
+                "game",
+                `All ${this._selectedArchives.length} ZIPs will be checked and stored together as one ${this._selectedArchives.length}-disc Library game with a generated M3U.`,
+                "idle",
+            );
+            return;
+        }
+        try {
+            const descriptors = await ZipDiscSource.listDescriptors(this._selectedArchives[0]!);
+            if (descriptors.length > 1) {
+                entrySelect.replaceChildren(...descriptors.map((path) => option(this._document, path, path)));
+                const playlist = descriptors.find((path) => path.toLowerCase().endsWith(".m3u"));
+                if (playlist !== undefined) entrySelect.value = playlist;
+                entryChoice.hidden = false;
+                this._feedback("game", "Choose the disc-set entry, then check and store the game.", "idle");
+            } else {
+                this._feedback("game", "ZIP recognized. Check and store it before launch, or choose Start to do both.", "idle");
+            }
+        } catch (error) {
+            this._feedback("game", `ZIP inspection failed: ${errorMessage(error)}`, "error");
+            element<HTMLButtonElement>(this._document, "store-game").disabled = true;
+            element<HTMLButtonElement>(this._document, "start-imported-game").disabled = true;
+        }
+    }
+
+    // METHOD :: BOOLEAN -> PROMISE(VOID)
+    // Audits and stores the current selection, optionally launching the resulting library game.
+    private async _storeSelectedGame(startAfterStore: boolean): Promise<void> {
+        const runtime = this._runtime;
+        if (runtime === null || this._selectedArchives.length === 0) return;
+        await this._withBusyDialog("game", async () => {
+            let phase: "storage" | "start" = "storage";
+            try {
+                let gameId = this._importedGameId;
+                if (gameId === null) {
+                    const title = titleFromArchive(this._selectedArchives[0]!.name);
+                    const entryChoice = element<HTMLElement>(this._document, "entry-choice");
+                    const entry = element<HTMLSelectElement>(this._document, "entry-select").value;
+                    this._renderGameActions();
+                    this._feedback(
+                        "game",
+                        this._selectedArchives.length === 1
+                            ? `Checking and storing “${title}”…`
+                            : `Checking and storing all ${this._selectedArchives.length} ZIPs as one multi-disc game…`,
+                        "working",
+                    );
+                    const game = await runtime.importFiles(this._selectedArchives, {
+                        gameId: title,
+                        ...(this._selectedArchives.length === 1 && !entryChoice.hidden && entry.length > 0
+                            ? { entry }
+                            : {}),
+                    });
+                    gameId = game.gameId;
+                    this._importedGameId = gameId;
+                    await this._refreshLibrary();
+                    this._feedback(
+                        "game",
+                        this._selectedArchives.length === 1
+                            ? `“${title}” passed validation and was stored in Library.`
+                            : `All ${this._selectedArchives.length} ZIPs passed validation and were stored as one ${this._selectedArchives.length}-disc Library game, “${title}”.`,
+                        "success",
+                    );
+                }
+                if (startAfterStore) {
+                    phase = "start";
+                    await this._startStoredGame(gameId, 0);
+                    element<HTMLDialogElement>(this._document, "game-dialog").close();
+                }
+            } catch (error) {
+                this._feedback(
+                    "game",
+                    `${phase === "start" ? "Start" : "Game check or storage"} failed: ${errorMessage(error)}`,
+                    "error",
+                );
+            }
+        });
+        this._renderGameActions();
+    }
+
+    // METHOD :: VOID -> VOID
+    // Aligns and gates Game actions around selection, storage completion, and active mutations.
+    private _renderGameActions(): void {
+        const hasSelection = this._selectedArchives.length > 0;
+        const stored = this._importedGameId !== null;
+        const busy = this._busyDialog === "game";
+        const store = element<HTMLButtonElement>(this._document, "store-game");
+        const start = element<HTMLButtonElement>(this._document, "start-imported-game");
+        const clear = element<HTMLButtonElement>(this._document, "clear-game");
+        store.textContent = stored ? "Checked And Stored" : "Check And Store";
+        store.disabled = !hasSelection || stored || busy;
+        start.hidden = !stored;
+        start.disabled = !stored || busy;
+        clear.hidden = !hasSelection;
+        clear.disabled = busy;
+        const rows = [...this._document.querySelectorAll<HTMLElement>("#game-archives li")];
+        rows.forEach((row, index) => {
+            for (const action of row.querySelectorAll<HTMLButtonElement>("[data-archive-action]")) {
+                action.disabled = busy
+                    || (action.dataset.archiveAction === "up" && index === 0)
+                    || (action.dataset.archiveAction === "down" && index === rows.length - 1);
+            }
+        });
+    }
+
+    // METHOD :: NUMBER, -1|1 -> VOID
+    // Moves one selected ZIP while preserving the exact displayed disc order.
+    private _moveArchive(index: number, offset: -1 | 1): void {
+        const destination = index + offset;
+        if (this._busyDialog === "game" || index < 0 || destination < 0
+            || index >= this._selectedArchives.length || destination >= this._selectedArchives.length) return;
+        const reordered = [...this._selectedArchives];
+        const [archive] = reordered.splice(index, 1);
+        reordered.splice(destination, 0, archive!);
+        this._selectedArchives = reordered;
+        this._importedGameId = null;
+        void this._renderArchiveSelection();
+    }
+
+    // METHOD :: NUMBER -> VOID
+    // Removes one selected ZIP and invalidates any previously stored selection result.
+    private _removeArchive(index: number): void {
+        if (this._busyDialog === "game" || index < 0 || index >= this._selectedArchives.length) return;
+        this._selectedArchives = this._selectedArchives.filter((_, archiveIndex) => archiveIndex !== index);
+        this._importedGameId = null;
+        void this._renderArchiveSelection();
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Reloads the persistent library and retains a valid details selection.
+    private async _refreshLibrary(): Promise<void> {
+        this._games = await this._gameStore.list();
+        if (this._selectedLibraryGameId === null
+            || !this._games.some(({ gameId }) => gameId === this._selectedLibraryGameId)) {
+            this._selectedLibraryGameId = this._games[0]?.gameId ?? null;
+            this._selectedLibraryDiscIndex = 0;
+        }
+        this._renderLibrary();
+        this._renderTelemetry();
+        if (this._player?.session !== null && this._player?.session !== undefined) {
+            this._setText("runtime-status", this._runtimeLabel(this._player.status));
+        }
+    }
+
+    // METHOD :: VOID -> VOID
+    // Renders stored games, total storage, and the selected game's supported actions.
+    private _renderLibrary(): void {
+        const list = element<HTMLElement>(this._document, "library-list");
+        this._setText("library-count", `${String(this._games.length).padStart(2, "0")} TITLES`);
+        list.replaceChildren(...this._games.map((game) => {
+            const item = this._document.createElement("button");
+            item.type = "button";
+            item.className = "library-item";
+            item.setAttribute("role", "option");
+            item.setAttribute("aria-selected", String(game.gameId === this._selectedLibraryGameId));
+            const title = this._document.createElement("strong");
+            title.textContent = game.displayTitle;
+            const discs = this._document.createElement("span");
+            discs.textContent = `${game.discCount} DISC${game.discCount === 1 ? "" : "S"}`;
+            const size = this._document.createElement("span");
+            size.textContent = formatBytes(game.totalBytes);
+            item.append(title, discs, size);
+            item.addEventListener("click", () => {
+                this._selectedLibraryGameId = game.gameId;
+                this._selectedLibraryDiscIndex = 0;
+                this._renderLibrary();
+            });
+            return item;
+        }));
+        const detail = element<HTMLElement>(this._document, "library-detail");
+        const game = this._games.find(({ gameId }) => gameId === this._selectedLibraryGameId);
+        if (game === undefined) {
+            const placeholder = this._document.createElement("div");
+            placeholder.className = "library-placeholder";
+            placeholder.textContent = "[ NO STORED GAMES ]";
+            detail.replaceChildren(placeholder);
+            return;
+        }
+        detail.replaceChildren(this._gameDetail(game));
+    }
+
+    // METHOD :: psxStoredGame -> HTMLElement
+    // Builds safe Library details and binds launch, rename, and removal actions.
+    private _gameDetail(game: PsxStoredGame): HTMLElement {
+        const wrapper = this._document.createElement("div");
+        wrapper.className = "game-detail";
+        const eyebrow = this._document.createElement("p");
+        eyebrow.className = "eyebrow";
+        eyebrow.textContent = "// STORED GAME";
+        const title = this._document.createElement("h3");
+        title.textContent = game.displayTitle;
+        const metrics = this._document.createElement("div");
+        metrics.className = "game-metrics";
+        metrics.append(
+            metric(this._document, String(game.discCount), "DISCS"),
+            metric(this._document, String(game.fileCount), "FILES"),
+            metric(this._document, formatBytes(game.totalBytes), "STORED"),
+        );
+        const discLabel = this._document.createElement("label");
+        discLabel.textContent = "Disc to start or insert";
+        const discSelect = this._document.createElement("select");
+        for (let index = 0; index < game.discCount; index++) {
+            discSelect.append(option(this._document, String(index), `Disc ${index + 1}`));
+        }
+        discSelect.value = String(Math.min(this._selectedLibraryDiscIndex, game.discCount - 1));
+        discSelect.addEventListener("change", () => {
+            this._selectedLibraryDiscIndex = Number(discSelect.value);
+            this._renderLibrary();
+        });
+        discLabel.append(discSelect);
+        const actions = this._document.createElement("div");
+        actions.className = "game-detail-actions";
+        const start = button(this._document, this._libraryStartLabel(game));
+        start.className = "primary-action";
+        start.addEventListener("click", () => { void this._launchLibrarySelection(game); });
+        const rename = button(this._document, "Rename");
+        rename.addEventListener("click", () => { void this._renameGame(game); });
+        const remove = button(this._document, "Remove");
+        remove.className = "danger-action";
+        remove.addEventListener("click", () => { void this._deleteGame(game); });
+        actions.append(start, rename, remove);
+        wrapper.append(eyebrow, title, metrics, discLabel, actions);
+        return wrapper;
+    }
+
+    // METHOD :: psxStoredGame -> STRING
+    // Describes whether Library will start, restart, or insert the selected disc.
+    private _libraryStartLabel(game: PsxStoredGame): string {
+        const session = this._player?.session;
+        if (session?.machine.gameId !== game.gameId) return session === null || session === undefined ? "Start" : "Switch Game";
+        return session.discIndex === this._selectedLibraryDiscIndex ? "Restart" : "Change Disc";
+    }
+
+    // METHOD :: psxStoredGame -> PROMISE(VOID)
+    // Starts a selected library game or performs an in-session disc insertion for the active game.
+    private async _launchLibrarySelection(game: PsxStoredGame): Promise<void> {
+        try {
+            const player = this._player;
+            const session = player?.session;
+            if (player !== null && player !== undefined && session?.machine.gameId === game.gameId
+                && session.discIndex !== this._selectedLibraryDiscIndex) {
+                await player.setDisc(this._selectedLibraryDiscIndex);
+                this._setText("runtime-status", this._runtimeLabel(player.status));
+                if (this._resumeAfterDialog && player.status === "paused") {
+                    this._resumeAfterDialog = false;
+                    player.resume();
+                }
+                this._showNotice(`Disc ${this._selectedLibraryDiscIndex + 1} inserted.`);
+            } else {
+                await this._startStoredGame(game.gameId, this._selectedLibraryDiscIndex);
+            }
+            element<HTMLDialogElement>(this._document, "library-dialog").close();
+        } catch (error) {
+            this._showNotice(`Start failed: ${errorMessage(error)}`);
+        }
+    }
+
+    // METHOD :: STRING, NUMBER -> PROMISE(VOID)
+    // Starts one stored game with the selected stored firmware and supported controller defaults.
+    private async _startStoredGame(gameId: string, discIndex: number): Promise<void> {
+        const runtime = this._runtime;
+        const bios = this._selectedFirmware();
+        if (runtime === null) throw new Error("The PlayStation runtime is unavailable.");
+        if (bios === null) throw new Error("Check and store firmware before starting a game.");
+        await runtime.startStored(gameId, {
+            bios,
+            initialDiscIndex: discIndex,
+            controllers: { 1: "dualshock", 2: "dualshock" },
+        });
+        this._muted = false;
+        const audio = this._sessionAudio();
+        if (audio !== null) {
+            audio.volume = 0.15;
+            await audio.unlock().catch(() => undefined);
+        }
+        this._showNotice(`Session started on disc ${discIndex + 1}.`);
+    }
+
+    // METHOD :: psxStoredGame -> PROMISE(VOID)
+    // Renames one stored game using explicit user input without changing its content identity.
+    private async _renameGame(game: PsxStoredGame): Promise<void> {
+        const title = globalThis.prompt("Game title", game.displayTitle)?.trim();
+        if (title === undefined || title.length === 0 || title === game.displayTitle) return;
+        try {
+            await this._gameStore.renameDisplayTitle(game.gameId, title);
+            await this._refreshLibrary();
+            this._showNotice(`Renamed game to “${title}”.`);
+        } catch (error) {
+            this._showNotice(`Rename failed: ${errorMessage(error)}`);
+        }
+    }
+
+    // METHOD :: psxStoredGame -> PROMISE(VOID)
+    // Removes one stored game only after an explicit destructive-action confirmation.
+    private async _deleteGame(game: PsxStoredGame): Promise<void> {
+        if (!globalThis.confirm(`Remove “${game.displayTitle}” from this browser?`)) return;
+        try {
+            if (this._player?.session?.machine.gameId === game.gameId) await this._runtime?.stop();
+            await this._gameStore.delete(game.gameId);
+            await this._refreshLibrary();
+            this._showNotice(`Removed “${game.displayTitle}”.`);
+        } catch (error) {
+            this._showNotice(`Removal failed: ${errorMessage(error)}`);
+        }
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Pauses or resumes the active session from the top command bar.
+    private async _togglePause(): Promise<void> {
+        try {
+            if (this._player?.status === "paused") this._player.resume();
+            else if (this._player?.status === "running") await this._player.pause();
+        } catch (error) {
+            this._showNotice(errorMessage(error));
+        }
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Performs one supported soft reset on the active session.
+    private async _resetSession(): Promise<void> {
+        try {
+            await this._player?.reset("soft");
+            this._showNotice("Session reset.");
+        } catch (error) {
+            this._showNotice(`Reset failed: ${errorMessage(error)}`);
+        }
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Toggles active-session audio without changing its configured volume.
+    private async _toggleMute(): Promise<void> {
+        const audio = this._sessionAudio();
+        if (audio === null) return;
+        try {
+            this._muted = !this._muted;
+            if (this._muted) audio.mute();
+            else {
+                audio.unmute();
+                await audio.unlock();
+            }
+            element<HTMLButtonElement>(this._document, "mute-session").textContent = this._muted ? "Unmute" : "Mute";
+            this._showNotice(this._muted ? "Audio muted." : "Audio unmuted.");
+        } catch (error) {
+            this._showNotice(`Audio change failed: ${errorMessage(error)}`);
+        }
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Stops the active session while preserving stored firmware, games, and cards.
+    private async _stopSession(): Promise<void> {
+        try {
+            await this._runtime?.stop();
+            this._resumeAfterDialog = false;
+            this._showNotice("Session stopped.");
+        } catch (error) {
+            this._showNotice(`Stop failed: ${errorMessage(error)}`);
+        }
+    }
+
+    // METHOD :: psxScalingMode -> PROMISE(VOID)
+    // Applies one supported scaling mode and requests fullscreen presentation.
+    private async _enterFullscreen(scaling: PsxScalingMode): Promise<void> {
+        const display = this._player?.display;
+        if (display?.fullscreen === undefined) return;
+        try {
+            display.scaling = scaling;
+            element<HTMLSelectElement>(this._document, "scaling-mode").value = scaling;
+            await display.fullscreen();
+            element<HTMLDialogElement>(this._document, "view-dialog").close();
+        } catch (error) {
+            this._setText("view-feedback", `Fullscreen failed: ${errorMessage(error)}`);
+        }
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Refreshes the two persistent card summaries and download availability.
+    private async _refreshMemoryCards(): Promise<void> {
+        for (const port of [1, 2] as const) {
+            try {
+                const record = await this._storage.loadMemoryCard(PROFILE_ID, CARD_IDS[port]);
+                const active = this._player?.session !== null && this._player?.session !== undefined;
+                this._setText(`card-status-${port}`, record === null
+                    ? (active ? "Available from the active session." : "No stored card yet; one is created when a game starts.")
+                    : `${formatBytes(record.bytes.byteLength)} · revision ${record.revision}`);
+                element<HTMLButtonElement>(this._document, `download-card-${port}`).disabled = record === null && !active;
+            } catch (error) {
+                this._setText(`card-status-${port}`, `Storage error: ${errorMessage(error)}`);
+                element<HTMLButtonElement>(this._document, `download-card-${port}`).disabled = true;
+            }
+        }
+    }
+
+    // METHOD :: controllerPort -> PROMISE(VOID)
+    // Downloads a defensive copy of one active or persisted memory card.
+    private async _downloadMemoryCard(port: ControllerPort): Promise<void> {
+        if (this._player === null) return;
+        this._feedback("memory", `Preparing card ${port}…`, "working");
+        try {
+            const bytes = await this._player.downloadMemoryCard(port);
+            const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+            download(this._document, new Blob([copy]), `card-${port}.mcd`);
+            this._feedback("memory", `Downloaded card ${port} (${formatBytes(bytes.byteLength)}).`, "success");
+        } catch (error) {
+            this._feedback("memory", `Card download failed: ${errorMessage(error)}`, "error");
+        }
+    }
+
+    // METHOD :: VOID -> VOID
+    // Assigns the first two connected standard browser gamepads to physical ports one and two.
+    private _syncGamepads(): void {
+        const runtime = this._runtime;
+        if (runtime === null) return;
+        for (const index of this._boundGamepads) runtime.bindGamepad(index, null);
+        this._boundGamepads.clear();
+        const pads = [...navigator.getGamepads()].filter((pad): pad is Gamepad => pad !== null && pad.mapping === "standard");
+        pads.slice(0, 2).forEach((pad, index) => {
+            runtime.bindGamepad(pad.index, (index + 1) as ControllerPort);
+            this._boundGamepads.add(pad.index);
+        });
+    }
+
+    // METHOD :: uiDialogId, (VOID -> PROMISE(VOID)) -> PROMISE(VOID)
+    // Prevents one dialog from being dismissed until its mutation has settled.
+    private async _withBusyDialog(dialogId: UiDialogId, operation: () => Promise<void>): Promise<void> {
+        this._busyDialog = dialogId;
+        const dialog = element<HTMLDialogElement>(this._document, `${dialogId}-dialog`);
+        const close = dialog.querySelector<HTMLButtonElement>("button[value='cancel']");
+        if (close !== null) close.disabled = true;
+        try {
+            await operation();
+        } finally {
+            this._busyDialog = null;
+            if (close !== null) close.disabled = false;
+        }
+    }
+
+    // METHOD :: VOID -> psxRegion
+    // Returns the System region selection, whose options are closed by the document contract.
+    private _selectedRegion(): PsxRegion {
+        return element<HTMLSelectElement>(this._document, "firmware-region").value as PsxRegion;
+    }
+
+    // METHOD :: VOID -> BOOLEAN
+    // True while the empty-system stage can accept one user-supplied firmware drop.
+    private _acceptsFirmwareDrop(): boolean {
+        return !this._firmwareBusy
+            && element<HTMLElement>(this._document, "ui-app").dataset.stage === "firmware-required";
+    }
+
+    // METHOD :: VOID -> BOOLEAN
+    // True while the central stage can accept firmware or game content for its current state.
+    private _acceptsStageDrop(): boolean {
+        const state = element<HTMLElement>(this._document, "ui-app").dataset.stage;
+        return this._acceptsFirmwareDrop() || state === "ready";
+    }
+
+    // METHOD :: VOID -> biosImage?
+    // Returns selected-region firmware or the first available regional record.
+    private _selectedFirmware(): BiosImage | null {
+        return this._firmware.get(this._selectedRegion()) ?? this._firmware.values().next().value ?? null;
+    }
+
+    // METHOD :: VOID -> psxAudio?
+    // Narrows the concrete audio object created by the default runtime composition.
+    private _sessionAudio(): PsxAudio | null {
+        return this._player?.audio instanceof PsxAudio ? this._player.audio : null;
+    }
+
+    // METHOD :: uiStageState -> STRING
+    // Produces a lifecycle label that identifies the active stored game and mounted disc.
+    private _runtimeLabel(state: UiStageState): string {
+        if (state === "running" || state === "paused" || state === "failed") {
+            const session = this._player?.session;
+            if (session !== null && session !== undefined) {
+                const title = this._games.find(({ gameId }) => gameId === session.machine.gameId)?.displayTitle
+                    ?? "Stored game";
+                const lifecycle = state === "running" ? "Playing" : state === "paused" ? "Paused" : "Failed";
+                return `${lifecycle} · ${title} · Disc ${session.discIndex + 1}/${session.machine.discCount}`;
+            }
+        }
+        return runtimeLabel(state);
+    }
+
+    // METHOD :: STRING, STRING, uiFeedbackState -> VOID
+    // Updates one operation-feedback region and its visual severity.
+    private _feedback(name: "firmware" | "game" | "memory", message: string, state: UiFeedbackState): void {
+        const feedback = element<HTMLElement>(this._document, `${name}-feedback`);
+        feedback.textContent = message;
+        feedback.dataset.state = state;
+    }
+
+    // METHOD :: VOID -> VOID
+    // Updates compact firmware and game-library telemetry.
+    private _renderTelemetry(): void {
+        this._setText("firmware-telemetry", `FIRMWARE // ${this._firmware.size === 0 ? "REQUIRED" : `${this._firmware.size} STORED`}`);
+        this._setText("library-telemetry", `LIBRARY // ${this._games.length} TITLE${this._games.length === 1 ? "" : "S"} · ${formatBytes(this._games.reduce((total, game) => total + game.totalBytes, 0))}`);
+    }
+
+    // METHOD :: STRING -> VOID
+    // Displays a short non-modal status notification over the stage.
+    private _showNotice(message: string): void {
+        const notice = element<HTMLElement>(this._document, "screen-notice");
+        notice.textContent = message;
+        notice.hidden = false;
+        if (this._noticeTimer !== null) globalThis.clearTimeout(this._noticeTimer);
+        this._noticeTimer = globalThis.setTimeout(() => {
+            notice.hidden = true;
+            this._noticeTimer = null;
+        }, 3200);
+    }
+
+    // METHOD :: STRING, STRING -> VOID
+    // Writes text to one required production element.
+    private _setText(id: string, value: string): void {
+        element<HTMLElement>(this._document, id).textContent = value;
+    }
+}
+
+/**
+ *
+ *  Helper Functions
+ *
+ */
+
+// HELPER :: DOCUMENT, STRING -> T
+// Returns one required production element or fails fast when the document contract is incomplete.
+const element = <T extends HTMLElement>(document: Document, id: string): T => {
+    const value = document.getElementById(id);
+    if (value === null) throw new Error(`Missing production UI element: ${id}`);
+    return value as T;
+};
+
+// HELPER :: FILE, psxRegion, [NUMBER] -> PROMISE(biosImage)
+// Extracts a ZIP or validates one raw firmware image against core build metadata.
+const firmwareImage = async (
+    file: File,
+    region: PsxRegion,
+    supportedByteLengths: ReadonlyArray<number>,
+): Promise<BiosImage> => {
+    if (ZipFirmwareSource.isArchive(file)) {
+        const extracted = await ZipFirmwareSource.extract(file, supportedByteLengths, region);
+        return Object.freeze({ ...extracted, region });
+    }
+    if (!supportedByteLengths.includes(file.size)) {
+        throw new Error("The firmware image has an unsupported byte length.");
+    }
+    return Object.freeze({ name: file.name, region, blob: file });
+};
+
+// HELPER :: uiStageState, STRING, NUMBER -> stagePresentation
+// Maps one application state to the central stage's actionable copy.
+const stagePresentation = (
+    state: UiStageState,
+    detail: string,
+    gameCount: number,
+): {
+    readonly code: string;
+    readonly title: string;
+    readonly description: string;
+    readonly primary: { readonly label: string; readonly dialog: UiDialogId } | null;
+    readonly secondary: { readonly label: string; readonly dialog: UiDialogId } | null;
+} => {
+    if (state === "loading") return {
+        code: "// BOOT", title: "[ INITIALIZING ]", description: "LOADING CORE METADATA AND BROWSER STORAGE",
+        primary: null, secondary: null,
+    };
+    if (state === "firmware-required") return {
+        code: "// SYSTEM REQUIRED", title: "[ FIRMWARE REQUIRED ]",
+        description: "DROP USER-SUPPLIED PLAYSTATION FIRMWARE HERE OR OPEN SYSTEM",
+        primary: { label: "Configure System", dialog: "system" }, secondary: null,
+    };
+    if (state === "ready" || state === "idle") return {
+        code: "// READY", title: gameCount === 0 ? "[ IMPORT A GAME ]" : "[ SELECT A GAME ]",
+        description: gameCount === 0 ? "ADD ONE OR MORE GAME ZIPS TO THE LOCAL LIBRARY" : "START A STORED TITLE OR IMPORT ANOTHER GAME",
+        primary: { label: gameCount === 0 ? "Import Game" : "Browse Library", dialog: gameCount === 0 ? "game" : "library" },
+        secondary: gameCount === 0 ? null : { label: "Import Game", dialog: "game" },
+    };
+    if (state === "starting") return {
+        code: "// SESSION", title: "[ STARTING ]", description: "MOUNTING GAME CONTENT AND WAITING FOR THE FIRST FRAME",
+        primary: null, secondary: null,
+    };
+    if (state === "stopping") return {
+        code: "// SESSION", title: "[ STOPPING ]", description: "FLUSHING MEMORY CARDS AND RELEASING THE CORE",
+        primary: null, secondary: null,
+    };
+    if (state === "failed") return {
+        code: "// ERROR", title: "[ SESSION FAILED ]", description: detail.length === 0 ? "THE PLAYSTATION SESSION COULD NOT CONTINUE" : detail.toUpperCase(),
+        primary: { label: "Browse Library", dialog: "library" }, secondary: { label: "System", dialog: "system" },
+    };
+    return { code: "// SESSION", title: "[ ACTIVE ]", description: "PLAYSTATION SESSION ACTIVE", primary: null, secondary: null };
+};
+
+// HELPER :: uiStageState -> STRING
+// Produces the compact top-bar lifecycle label.
+const runtimeLabel = (state: UiStageState): string => state === "firmware-required"
+    ? "System required"
+    : state === "ready" || state === "idle"
+        ? "Ready"
+        : state.charAt(0).toUpperCase() + state.slice(1);
+
+// HELPER :: psxRegion -> STRING
+// Formats one closed firmware region for user-facing status.
+const regionLabel = (region: PsxRegion): string => ({
+    "ntsc-u": "NTSC-U · United States",
+    "ntsc-j": "NTSC-J · Japan",
+    pal: "PAL · Europe",
+})[region];
+
+// HELPER :: NUMBER -> STRING
+// Formats byte totals using a compact binary unit.
+const formatBytes = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ["KiB", "MiB", "GiB"];
+    let value = bytes / 1024;
+    let unit = units[0]!;
+    for (let index = 1; index < units.length && value >= 1024; index++) {
+        value /= 1024;
+        unit = units[index]!;
+    }
+    return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${unit}`;
+};
+
+// HELPER :: UNKNOWN -> STRING
+// Normalizes caught failures into actionable UI copy.
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+// HELPER :: STRING -> STRING
+// Derives an initial game title from one archive basename.
+const titleFromArchive = (name: string): string => name
+    .replace(/\.zip$/iu, "")
+    .replace(/[\s._-]*(?:disc|disk|cd)[\s._-]*0?1$/iu, "")
+    .trim() || "Imported Game";
+
+// HELPER :: DOCUMENT, STRING, STRING -> htmlOptionElement
+// Creates one safe select option without HTML string interpolation.
+const option = (document: Document, value: string, label: string): HTMLOptionElement => {
+    const item = document.createElement("option");
+    item.value = value;
+    item.textContent = label;
+    return item;
+};
+
+// HELPER :: DOCUMENT, STRING, STRING -> htmlElement
+// Creates one compact Library metric.
+const metric = (document: Document, value: string, label: string): HTMLElement => {
+    const item = document.createElement("div");
+    const strong = document.createElement("strong");
+    strong.textContent = value;
+    const span = document.createElement("span");
+    span.textContent = label;
+    item.append(strong, span);
+    return item;
+};
+
+// HELPER :: DOCUMENT, STRING -> htmlButtonElement
+// Creates one non-submitting dialog action.
+const button = (document: Document, label: string): HTMLButtonElement => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.textContent = label;
+    return item;
+};
+
+// HELPER :: DOCUMENT, BLOB, STRING -> VOID
+// Starts one local Blob download and revokes its temporary URL.
+const download = (document: Document, blob: Blob, name: string): void => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    globalThis.setTimeout(() => URL.revokeObjectURL(url), 0);
+};
+
+// HELPER :: psxScalingMode -> STRING
+// Formats a supported scaling mode for View feedback.
+const displayScaling = (scaling: PsxScalingMode): string => scaling.charAt(0).toUpperCase() + scaling.slice(1);

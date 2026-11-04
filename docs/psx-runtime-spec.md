@@ -1099,7 +1099,8 @@ without cross-origin-isolation headers.
 | M8 | player, console, harness and preload | local files and stored games run through the same public composition path |
 | M9 | `PsxGameStore`, packaging, licenses and release gates | large Blob import/dedup/quota behavior passes; package contains no game, BIOS or core cache |
 | M10 | v1 release | ZIP/M3U diagnostics and every gate in section 13 pass from a clean checkout |
-| M11+ | optional CHD, additional controllers, touch UI, alternate core, enhanced graphics | each is independently probed and does not widen the v1 contracts accidentally |
+| M11 | mobile and touch controls | plain TypeScript/HTML touch controller passes multi-touch, cancellation, orientation and source-isolation probes; a physical phone sustains play for 60 seconds |
+| M12+ | optional CHD, additional controllers, alternate core, enhanced graphics | each is independently probed and does not widen the established contracts accidentally |
 
 M0 is a hard gate. M1 types may be drafted in parallel, but no production
 adapter or core-specific option table is finalized until M0 records the core's
@@ -1116,6 +1117,84 @@ Recommended implementation slices after M0:
 7. cards/states/storage;
 8. player/console/harness;
 9. game store, packaging and release evidence.
+
+### 11.1 M11 mobile and touch acceptance
+
+M11 extends the developer harness without introducing a UI framework. Semantic
+HTML and responsive CSS provide the visible controller; one plain TypeScript
+`TouchController` owns an isolated `PsxInput` channel for the active session.
+Keyboard and gamepad sources remain attached concurrently, and releasing touch
+input cannot release a control still held by another source.
+
+The touch surface provides D-pad directions, Triangle, Circle, Cross, Square,
+L1, L2, R1, R2, Start, Select, explicit L3 and R3 buttons, and two analog
+sticks when the selected port emulates a DualShock. One active-port selector
+routes the complete surface to port 1 or port 2. Changing ports, pausing,
+opening a modal, hiding the controller, losing focus, changing sessions or
+destroying the surface releases every touch-owned button and centers both
+sticks.
+
+The interaction requirements are:
+
+1. simultaneous pointers can hold a direction and two buttons independently;
+2. one captured D-pad pointer may roll through cardinal and diagonal regions
+   without lifting, and leaving its bounds releases all directions;
+3. each analog stick clamps displacement to the unit circle, reports both axes
+   continuously and returns both axes to zero on release;
+4. pointer up, pointer cancel, lost capture and page visibility loss cannot
+   leave a button or axis active;
+5. `auto`, `show` and `hide` visibility plus active port and swapped-side
+   preferences persist locally; `auto` shows on a touch-capable device without
+   a connected standard gamepad;
+6. portrait places controls below the unobscured canvas and resizes the display
+   so both remain inside the viewport without document scrolling; compact
+   landscape splits translucent controls across its sides, honors safe-area
+   insets and supports swapping sides;
+7. fullscreen contains both the canvas and enabled touch controls while the
+   display continues measuring only its screen container; and
+8. every target is at least 44 CSS pixels, suppresses browser panning, zooming,
+   selection and callouts, and has an accessible name.
+
+The automated M11 probe uses Chromium mobile/touch emulation and raw concurrent
+pointer sequences to prove rolling diagonals, button concurrency, analog
+clamping, port switching, cancellation, preference restoration and responsive
+layout selection. Final acceptance additionally requires 60 seconds of audible,
+responsive play on a physical phone in portrait and landscape with no stuck
+input after rotation, modal use or backgrounding.
+
+### 11.2 M12 production web interface
+
+M12 adds a framework-free production interface under `ui/`; the developer
+harness remains a separate diagnostic surface. The interface consumes only
+public runtime and storage operations already proven by earlier milestones.
+Design-only controls without a matching capability are omitted rather than
+simulated.
+
+The first production slice must:
+
+1. derive firmware-required, ready, starting, running, paused, stopping and
+   failed presentation from browser storage and `PsxPlayer` status;
+2. gate Game and Library until at least one valid regional firmware record is
+   stored, with NTSC-U selected by default;
+3. append dropped or selected ZIPs in disc order, identify generated M3U
+   behavior for multi-ZIP input, and use `PsxConsole.importFiles()` for the
+   actual check/store path;
+4. list content-addressed games with title, disc count, file count and stored
+   bytes, and support start, active-game disc insertion, restart, rename and
+   confirmed removal;
+5. expose supported pause/resume, reset, mute, stop, scaling, fullscreen and
+   memory-card download operations;
+6. pause a running session while a modal is open and prevent dismissal of a
+   dialog while its storage mutation is active; and
+7. fit the central stage inside desktop and mobile viewports without document
+   scrolling or copying private design assets into tracked source.
+
+`probe:ui` builds the production interface and selected core metadata, then
+checks the empty-storage firmware gate, System modal, default region,
+unsupported-setting absence, responsive viewport fit and command target sizes.
+Later M12 slices migrate the already-supported controller mapping, named-state
+management and touch surface from the harness before physical-device and
+real-session visual acceptance closes the milestone.
 
 ## 12. M0 probe plan
 
@@ -1210,7 +1289,7 @@ The following are intentionally outside v1:
 - shipping, finding, downloading or decrypting games or firmware;
 - a hosted game deployment format, manifest-driven shell or public ROM CDN;
 - RetroArch UI/config/database behavior;
-- mobile/touch acceptance, installable PWA or service-worker caching;
+- installable PWA or service-worker caching;
 - non-ZIP archive extraction and patch formats;
 - CHD/PBP and non-CUE descriptor families;
 - multitap (players 3–8), light gun, mouse, NegCon and specialty controllers;

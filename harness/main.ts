@@ -12,6 +12,7 @@ import {
     isGamepadButtonMaps,
     isKeyboardMap,
 } from "../src/index.js";
+import TouchController from "./TouchController.js";
 
 import type {
     BiosImage,
@@ -43,6 +44,7 @@ interface PreloadManifest {
 const DEFAULT_FIRMWARE_REGION: PsxRegion = "ntsc-u";
 const CONTROL_PROFILE_STORAGE_KEY = "psx-runtime:ui:controls";
 const QUICK_STATE_STORAGE_KEY = "psx-runtime:ui:quick-states";
+const TOUCH_CONTROLLER_STORAGE_KEY = "psx-runtime:ui:touch-controller";
 const HARNESS_PROFILE_ID = "harness";
 const FAST_FORWARD_RATES = [2, 5, 7] as const;
 const QUICK_STATE_NAMES = ["Quick State 1", "Quick State 2"] as const;
@@ -75,6 +77,14 @@ const statesDialog = element<HTMLDialogElement>("states-dialog");
 const stateConfirmDialog = element<HTMLDialogElement>("state-confirm-dialog");
 const canvas = element<HTMLCanvasElement>("screen");
 const container = element<HTMLDivElement>("screen-stage");
+const playStage = element<HTMLDivElement>("play-stage");
+const touchControllerElement = element<HTMLElement>("touch-controller");
+const touchControllerViewInput = element<HTMLSelectElement>("touch-controller-view");
+const touchControllerPortInput = element<HTMLSelectElement>("touch-controller-port");
+const touchControllerSwapInput = element<HTMLInputElement>("touch-controller-swap");
+const touchControllerStatus = element<HTMLElement>("touch-controller-status");
+const touchPortLabel = element<HTMLElement>("touch-port-label");
+const touchControllerToggle = element<HTMLButtonElement>("touch-controller-toggle");
 const buildUrlInput = element<HTMLInputElement>("build-url");
 const biosInput = element<HTMLInputElement>("bios");
 const biosRegionInput = element<HTMLSelectElement>("bios-region");
@@ -206,6 +216,23 @@ let modalPauseTask: Promise<void> | null = null;
 let noticeRevision = 0;
 const storedGameTitles = new Map<string, string>();
 const storedGames = new Map<string, PsxStoredGame>();
+
+type TouchControllerView = "auto" | "show" | "hide";
+
+interface TouchControllerPreferences {
+    readonly version: 1;
+    readonly view: TouchControllerView;
+    readonly port: ControllerPort;
+    readonly swap: boolean;
+}
+
+let touchControllerPreferences: TouchControllerPreferences = {
+    version: 1,
+    view: "auto",
+    port: 1,
+    swap: false,
+};
+const touchController = new TouchController({ root: touchControllerElement });
 
 interface GamepadAssignment {
     readonly index: number;
@@ -443,6 +470,75 @@ const removeStoredControlProfile = (): boolean => {
 const connectedStandardGamepads = (): ReadonlyArray<Gamepad> =>
     [...navigator.getGamepads()].filter((pad): pad is Gamepad =>
         pad !== null && pad.connected && pad.mapping === "standard");
+
+const loadTouchControllerPreferences = (): void => {
+    try {
+        const source = localStorage.getItem(TOUCH_CONTROLLER_STORAGE_KEY);
+        if (source !== null) {
+            const stored = record(JSON.parse(source));
+            if (stored?.version === 1
+                && (stored.view === "auto" || stored.view === "show" || stored.view === "hide")
+                && (stored.port === 1 || stored.port === 2) && typeof stored.swap === "boolean") {
+                touchControllerPreferences = {
+                    version: 1,
+                    view: stored.view,
+                    port: stored.port,
+                    swap: stored.swap,
+                };
+            }
+        }
+    } catch { /* unavailable or invalid preferences use defaults */ }
+    touchControllerViewInput.value = touchControllerPreferences.view;
+    touchControllerPortInput.value = String(touchControllerPreferences.port);
+    touchControllerSwapInput.checked = touchControllerPreferences.swap;
+};
+
+const persistTouchControllerPreferences = (): void => {
+    try {
+        localStorage.setItem(TOUCH_CONTROLLER_STORAGE_KEY, JSON.stringify(touchControllerPreferences));
+    } catch { /* preferences remain active for the page */ }
+};
+
+const updateTouchControllerPreferences = (): void => {
+    touchControllerPreferences = {
+        version: 1,
+        view: touchControllerViewInput.value as TouchControllerView,
+        port: Number(touchControllerPortInput.value) as ControllerPort,
+        swap: touchControllerSwapInput.checked,
+    };
+    persistTouchControllerPreferences();
+    syncTouchController();
+};
+
+const syncTouchController = (): void => {
+    const input = player?.input ?? null;
+    touchController.attach(input);
+    if (touchController.port !== touchControllerPreferences.port) {
+        touchController.port = touchControllerPreferences.port;
+    }
+    const sessionType = player?.session?.machine.controllers[touchControllerPreferences.port];
+    const controllerType = sessionType
+        ?? (touchControllerPreferences.port === 1 ? controllerOneInput : controllerTwoInput).value as PsxControllerType;
+    if (touchController.controllerType !== controllerType) touchController.controllerType = controllerType;
+    const automatic = navigator.maxTouchPoints > 0 && connectedStandardGamepads().length === 0;
+    const visible = touchControllerPreferences.view === "show"
+        || (touchControllerPreferences.view === "auto" && automatic);
+    touchControllerElement.hidden = !visible;
+    touchControllerElement.dataset.swapped = String(touchControllerPreferences.swap);
+    playStage.dataset.touchVisible = String(visible);
+    touchControllerToggle.textContent = visible ? "Hide Controls" : "Show Controls";
+    touchControllerToggle.setAttribute("aria-pressed", String(visible));
+    const active = visible && player?.status === "running" && controllerType !== "none";
+    if (touchController.enabled !== active) touchController.enabled = active;
+    const viewLabel = touchControllerPreferences.view === "auto"
+        ? `automatic (${visible ? "shown" : "hidden"})`
+        : visible ? "shown" : "hidden";
+    const stateLabel = controllerType === "none"
+        ? "controller disabled for this player"
+        : player?.status === "running" ? controllerType : "waiting for a running game";
+    touchControllerStatus.textContent = `${viewLabel} · player ${touchControllerPreferences.port} · ${stateLabel}`;
+    touchPortLabel.textContent = `On-screen controller · player ${touchControllerPreferences.port}`;
+};
 
 const gamepadName = (pad: Gamepad): string => pad.id.trim() || "Connected gamepad";
 
@@ -1315,6 +1411,7 @@ const ensureRuntime = async (): Promise<PsxConsole> => {
     }
     if (runtime !== null) {
         stopWatchingForVisibleFrame();
+        touchController.detach();
         await runtime.destroy();
     }
     const adapter = await LibretroPsxAdapter.init({ buildUrl });
@@ -1325,6 +1422,7 @@ const ensureRuntime = async (): Promise<PsxConsole> => {
         adapter,
         canvas,
         container,
+        fullscreenTarget: playStage,
         gestureSource: document,
         storage,
         profileId: HARNESS_PROFILE_ID,
@@ -1352,6 +1450,7 @@ const ensureRuntime = async (): Promise<PsxConsole> => {
         statusElement.textContent = status;
         statusStrip.dataset.state = status;
         pauseOverlay.hidden = status !== "paused";
+        syncTouchController();
     });
     player.on("error", report);
     activeBuildUrl = buildUrl;
@@ -1665,6 +1764,7 @@ const updateRuntimeShortcuts = (snapshot: ReadonlyArray<HarnessInputControl>): v
 };
 
 const updateDiagnostics = (): void => {
+    syncTouchController();
     const input = player?.input as ({
         readonly snapshot?: ReadonlyArray<HarnessInputControl>;
         readonly axes?: ReadonlyArray<{
@@ -2110,6 +2210,14 @@ element("audio-volume").addEventListener("input", () => run(() => {
 }));
 fullscreenButtons.fit.addEventListener("click", () => run(() => enterFullscreen("fit")));
 fullscreenButtons.stretch.addEventListener("click", () => run(() => enterFullscreen("stretch")));
+touchControllerViewInput.addEventListener("change", updateTouchControllerPreferences);
+touchControllerPortInput.addEventListener("change", updateTouchControllerPreferences);
+touchControllerSwapInput.addEventListener("change", updateTouchControllerPreferences);
+touchControllerToggle.addEventListener("click", () => {
+    const visible = !touchControllerElement.hidden;
+    touchControllerViewInput.value = visible ? "hide" : "show";
+    updateTouchControllerPreferences();
+});
 
 saveNewStateButton.addEventListener("click", () => runStateAction(async () => {
     const name = newStateNameInput.value.trim().normalize("NFC");
@@ -2284,6 +2392,7 @@ const initialize = async (): Promise<void> => {
 };
 
 loadQuickStateAssignments();
+loadTouchControllerPreferences();
 const controlProfileLoadStatus = loadControlProfile();
 controlStorageStatus.textContent = controlProfileLoadStatus === "loaded"
     ? "Stored control bindings loaded from this browser."

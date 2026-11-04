@@ -5,8 +5,9 @@ the browser. It follows the lifecycle and package boundaries established by
 [`arcade-runtime-ts`](https://github.com/mastergray/arcade-runtime-ts), with a
 PlayStation-specific libretro bridge, Worker-hosted WebAssembly core, disc
 handling, controller ports, memory cards and save states.
-The developer harness also provides bounded best-effort fast-forward and two
-controller-accessible quick-state slots.
+The developer harness also provides bounded best-effort fast-forward, two
+controller-accessible quick-state slots and a framework-free on-screen
+controller for phones and tablets.
 
 M0 feasibility, the M1 public-contract foundation, the M2 bridge/Worker
 foundation, the M3 content pipeline and the M4 adapter/session are complete.
@@ -63,6 +64,15 @@ original track Blobs, incremental Worker hashing, filename-independent
 deduplication and quota-aware atomic imports. Its package gate allowlists the
 npm tarball and verifies the selected core/toolchain notices.
 
+M10 completes the automated release gate. M11 adds an isolated touch-input
+channel with a rolling multi-touch D-pad, face and shoulder buttons,
+Start/Select, DualShock sticks and explicit L3/R3 controls. Portrait keeps the
+controller below a display that resizes to keep both inside the viewport,
+compact landscape overlays translucent left and right control groups, and
+fullscreen contains both the display and controls. Start and Select remain
+centered in the compact main row between the D-pad, stick groups and face
+buttons.
+
 The browser-facing console accepts one user-supplied ZIP containing a single
 CUE/BIN disc or an M3U with all referenced discs. It also accepts two to eight
 ordered single-disc ZIPs, namespaces their content, and generates the M3U that
@@ -72,6 +82,13 @@ path as raw or directory selections. ZIP bytes and firmware are never uploaded
 by the runtime.
 Games and firmware are persisted only through explicit browser-local actions
 and can be removed independently.
+
+The framework-free production interface lives under `ui/`, separately from
+the diagnostic harness. Its first production slice implements the supported
+System, Game, Library, Memory Cards and View workflows against the real
+runtime and browser stores. The central stage reflects firmware-required,
+ready, starting, running, paused, stopping and failed states; no mock-only
+formats or settings are exposed.
 
 The harness exposes separate **Check And Store** actions for firmware and game
 content, so either can be validated or replaced without rewriting the other.
@@ -94,6 +111,14 @@ swaps the two assignments. Assignments are stored locally per game and survive
 page reloads. Accelerated execution skips audio and returns to normal speed
 when the hold chord is released.
 
+The **View** surface configures the on-screen controller. Automatic visibility
+shows it on touch-capable devices when no standard gamepad is connected; Show
+and Hide override detection. The selected player port and swapped left/right
+layout persist in browser storage. Touch, keyboard and gamepad input remain
+independent, so suspending or hiding the touch surface releases only the
+controls it owns. The top-level **Show Controls** or **Hide Controls** button
+applies and stores an explicit visibility override without opening View.
+
 Firmware may be supplied as a raw image or as a small ZIP. When a ZIP contains
 multiple supported images, the runtime requires exactly one filename that can
 be identified with the selected NTSC-U, NTSC-J or PAL region.
@@ -111,7 +136,24 @@ npm install
 npm run check
 npm test
 npm run build
+npm run build:web
+npm run probe:m11
 ```
+
+Run the production web emulator at `http://127.0.0.1:4175` with:
+
+```sh
+npm run serve:ui
+```
+
+To test that interface from another device on the same local network, use
+`PSX_UI_HOST=0.0.0.0 npm run serve:ui`. The production UI and harness servers
+both default to loopback-only binding.
+
+For physical-device harness testing on the same local network, explicitly bind
+the development server to the network interface with
+`PSX_HARNESS_HOST=0.0.0.0 npm run serve:harness`. The default remains
+loopback-only.
 
 The ordinary typecheck and spec suite require no game or firmware files. Real
 core browser tests will use a redistributable homebrew disc and a private,

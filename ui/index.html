@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#07111d">
+  <title>PlayStation Web Emulator</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2307111d'/%3E%3Cpath d='M8 22V9h8a6 6 0 0 1 0 12h-4v-4h4a2 2 0 0 0 0-4h-4v9z' fill='%2366c7ff'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,400;0,500;0,600;1,500&amp;family=Share+Tech+Mono&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/ui/styles.css">
+  <script type="importmap">{"imports":{"fflate":"/node_modules/fflate/esm/browser.js"}}</script>
+</head>
+<body>
+  <div id="ui-app" class="app-shell" data-stage="loading">
+    <div class="screen-effects" aria-hidden="true"></div>
+
+    <header class="command-bar">
+      <nav class="main-nav" aria-label="Main">
+        <button type="button" data-open-dialog="system" aria-controls="system-dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2.5"></circle><path d="M12 3a9 9 0 0 1 9 9"></path></svg>
+          <span>System</span>
+        </button>
+        <button id="game-nav" type="button" data-open-dialog="game" aria-controls="game-dialog" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+          <span>Game</span>
+        </button>
+        <button id="library-nav" type="button" data-open-dialog="library" aria-controls="library-dialog" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="4.5" height="16" rx="1"></rect><rect x="9.5" y="4" width="4.5" height="16" rx="1"></rect><path d="M15.6 5.6l3.9-1.1 3.9 14.4-3.9 1.1z"></path></svg>
+          <span>Library</span>
+        </button>
+        <button type="button" data-open-dialog="memory" aria-controls="memory-dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="2"></rect><path d="M9 7h6M9 17h6"></path></svg>
+          <span>Memory Cards</span>
+        </button>
+        <button type="button" data-open-dialog="view" aria-controls="view-dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>
+          <span>View</span>
+        </button>
+      </nav>
+
+      <div class="session-actions" aria-label="Session controls">
+        <button id="pause-session" type="button" disabled>Pause</button>
+        <button id="reset-session" type="button" disabled>Reset</button>
+        <button id="mute-session" type="button" disabled>Mute</button>
+        <button id="stop-session" type="button" disabled>Stop</button>
+      </div>
+
+      <div class="runtime-status" role="status" aria-live="polite">
+        <span class="status-light" aria-hidden="true"></span>
+        <span id="runtime-status">Initializing</span>
+      </div>
+    </header>
+
+    <main id="play-stage" class="play-stage" aria-label="PlayStation emulator">
+      <div id="screen-stage" class="screen-stage">
+        <canvas id="screen" aria-label="PlayStation video output"></canvas>
+
+        <section id="stage-message" class="stage-message" aria-live="polite">
+          <svg class="stage-icon" viewBox="0 0 30 22" aria-hidden="true"><path d="M1.5 1.5h9l2 2.6h15v16.4h-26z"></path><path d="M10.5 1.5v2.6h2"></path><path id="stage-icon-action" d="M15 16.5v-8M11.6 11.6 15 8.2l3.4 3.4"></path></svg>
+          <p id="stage-code" class="eyebrow">// BOOT</p>
+          <h1 id="stage-title">[ INITIALIZING ]</h1>
+          <p id="stage-description">LOADING CORE METADATA AND BROWSER STORAGE</p>
+          <span class="stage-rule" aria-hidden="true"></span>
+          <div class="stage-actions">
+            <button id="stage-primary" class="primary-action" type="button" hidden>Configure System</button>
+            <button id="stage-secondary" type="button" hidden>Browse Library</button>
+          </div>
+          <p id="stage-formats" class="format-line" hidden>ZIP · CUE/BIN · M3U</p>
+        </section>
+
+        <div id="pause-overlay" class="pause-overlay" hidden><span>// SESSION</span>[ PAUSED ]</div>
+        <div id="screen-notice" class="screen-notice" role="status" aria-live="polite" hidden></div>
+
+        <div class="stage-telemetry">
+          <span id="firmware-telemetry">FIRMWARE // CHECKING</span>
+          <span id="library-telemetry">LIBRARY // CHECKING</span>
+        </div>
+        <div class="signal-bars" aria-hidden="true"></div>
+      </div>
+    </main>
+
+    <dialog id="system-dialog" class="terminal-dialog" aria-labelledby="system-title">
+      <form method="dialog" class="dialog-frame">
+        <header class="dialog-header">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2.5"></circle></svg>
+          <div><span>// SYS</span><h2 id="system-title">[ SYSTEM ]</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close System">×</button>
+        </header>
+        <div class="dialog-content">
+          <section class="dialog-section">
+            <div class="section-heading"><div><span>// FIRMWARE</span><h3>PlayStation firmware</h3></div><p>Firmware remains in this browser and is stored by region.</p></div>
+            <div id="firmware-slots" class="firmware-slots" aria-live="polite"></div>
+            <label>Region
+              <select id="firmware-region"><option value="ntsc-u">NTSC-U · United States</option><option value="ntsc-j">NTSC-J · Japan</option><option value="pal">PAL · Europe</option></select>
+            </label>
+            <label>Firmware image or ZIP
+              <input id="firmware-file" type="file" accept=".bin,.rom,.zip,application/zip,application/octet-stream">
+            </label>
+            <div id="firmware-feedback" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Select a user-supplied firmware image for the chosen region.</div>
+            <div class="button-row">
+              <button id="store-firmware" class="primary-action" type="button">Check And Store</button>
+              <button id="forget-firmware" type="button" hidden>Forget Stored Firmware</button>
+            </div>
+          </section>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="game-dialog" class="terminal-dialog" aria-labelledby="game-title">
+      <form method="dialog" class="dialog-frame">
+        <header class="dialog-header">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+          <div><span>// GAME</span><h2 id="game-title">[ IMPORT GAME ]</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close Game">×</button>
+        </header>
+        <div class="dialog-content">
+          <section class="dialog-section">
+            <div id="game-drop-zone" class="drop-zone" data-dragging="false">
+              <strong>DROP ONE OR MORE GAME ZIPS</strong>
+              <span id="game-selection">No game ZIPs selected.</span>
+              <label class="file-button">Choose ZIPs<input id="game-files" type="file" accept=".zip,application/zip" multiple></label>
+            </div>
+            <ol id="game-archives" class="archive-list" hidden></ol>
+            <label id="entry-choice" hidden>Disc-set entry<select id="entry-select"></select></label>
+            <div id="game-feedback" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Choose game content to begin.</div>
+            <div class="button-row game-action-row">
+              <button id="store-game" class="primary-action" type="button" disabled>Check And Store</button>
+              <button id="start-imported-game" class="primary-action" type="button" hidden disabled>Start</button>
+              <button id="clear-game" type="button" hidden>Clear</button>
+            </div>
+          </section>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="library-dialog" class="terminal-dialog wide-dialog" aria-labelledby="library-title">
+      <form method="dialog" class="dialog-frame">
+        <header class="dialog-header">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="4.5" height="16" rx="1"></rect><rect x="9.5" y="4" width="4.5" height="16" rx="1"></rect><path d="M15.6 5.6l3.9-1.1 3.9 14.4-3.9 1.1z"></path></svg>
+          <div><span>// LIB</span><h2 id="library-title">[ GAME LIBRARY ]</h2></div>
+          <span id="library-count" class="dialog-counter">00 TITLES</span>
+          <button class="icon-button" value="cancel" aria-label="Close Library">×</button>
+        </header>
+        <div class="library-layout">
+          <div id="library-list" class="library-list" role="listbox" aria-label="Stored games"></div>
+          <section id="library-detail" class="library-detail">
+            <div class="library-placeholder">[ NO STORED GAMES ]</div>
+          </section>
+        </div>
+        <footer class="dialog-footer"><span>LOCAL BROWSER STORAGE</span><button type="button" data-open-dialog="game">+ Import Game</button></footer>
+      </form>
+    </dialog>
+
+    <dialog id="memory-dialog" class="terminal-dialog" aria-labelledby="memory-title">
+      <form method="dialog" class="dialog-frame">
+        <header class="dialog-header">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="2"></rect><path d="M9 7h6M9 17h6"></path></svg>
+          <div><span>// MEM</span><h2 id="memory-title">[ MEMORY CARDS ]</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close Memory Cards">×</button>
+        </header>
+        <div class="dialog-content">
+          <section class="dialog-section">
+            <p>Download either current card from the active session or browser storage.</p>
+            <div class="card-grid">
+              <div><h3>Card 1</h3><p id="card-status-1">Checking browser storage…</p><button id="download-card-1" type="button">Download Card 1</button></div>
+              <div><h3>Card 2</h3><p id="card-status-2">Checking browser storage…</p><button id="download-card-2" type="button">Download Card 2</button></div>
+            </div>
+            <div id="memory-feedback" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Memory cards are stored locally.</div>
+          </section>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="view-dialog" class="terminal-dialog" aria-labelledby="view-title">
+      <form method="dialog" class="dialog-frame">
+        <header class="dialog-header">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"></rect><path d="M8 20h8M12 16v4"></path></svg>
+          <div><span>// VIEW</span><h2 id="view-title">[ VIEW ]</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close View">×</button>
+        </header>
+        <div class="dialog-content">
+          <section class="dialog-section">
+            <label>Scaling
+              <select id="scaling-mode"><option value="fit">Fit</option><option value="integer">Integer</option><option value="fill">Fill</option><option value="stretch">Stretch</option></select>
+            </label>
+            <div class="button-row"><button id="fullscreen-fit" type="button" disabled>Fullscreen · Fit</button><button id="fullscreen-stretch" type="button" disabled>Fullscreen · Stretch</button></div>
+            <p id="view-feedback">Start a game to use fullscreen presentation.</p>
+          </section>
+        </div>
+      </form>
+    </dialog>
+  </div>
+
+  <script type="module" src="/ui-build/ui/main.js"></script>
+</body>
+</html>

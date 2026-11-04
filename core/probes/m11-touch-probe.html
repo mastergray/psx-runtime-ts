@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>M11 touch controller probe</title>
+</head>
+<body>
+  <iframe id="harness" title="Mobile harness layout" src="/harness/index.html" style="display:block;width:390px;height:844px;border:0"></iframe>
+  <section id="controller" data-active="false" data-controller-type="digital" data-port="1">
+    <div data-touch-dpad data-directions=""></div>
+    <div data-touch-stick="left"></div>
+    <div data-touch-stick="right"></div>
+    <button type="button" data-touch-button="cross">Cross</button>
+    <button type="button" data-touch-button="circle">Circle</button>
+    <button type="button" data-touch-button="l1">L1</button>
+  </section>
+  <script type="module">
+    import TouchController from "/harness-build/harness/TouchController.js";
+
+    const result = {
+      ok: false,
+      rollingDpad: false,
+      concurrentButtons: false,
+      analogClamp: false,
+      portRelease: false,
+      lifecycleRelease: false,
+      channelIsolation: false,
+      automaticVisibility: false,
+      portraitLayout: false,
+      landscapeLayout: false,
+      mobileTargets: false,
+      viewportFit: false,
+      centerControls: false,
+      singleControlRow: false,
+    };
+
+    const report = async () => {
+      await fetch("/result", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(result),
+      });
+    };
+
+    try {
+      const harnessFrame = document.querySelector("#harness");
+      if (!(harnessFrame instanceof HTMLIFrameElement)) throw new Error("Harness frame is missing.");
+      for (let attempt = 0; attempt < 240; attempt++) {
+        const framedController = harnessFrame.contentDocument?.querySelector("#touch-controller");
+        if (framedController?.nodeType === Node.ELEMENT_NODE && !framedController.hidden) break;
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+      const harnessDocument = harnessFrame.contentDocument;
+      const framedController = harnessDocument?.querySelector("#touch-controller");
+      const framedScreen = harnessDocument?.querySelector("#screen-stage");
+      if (framedController?.nodeType !== Node.ELEMENT_NODE || framedScreen?.nodeType !== Node.ELEMENT_NODE) {
+        throw new Error(`Harness touch layout did not initialize (${harnessDocument?.location.href ?? "no document"}; ${harnessDocument?.readyState ?? "no state"}; ${harnessDocument?.body?.textContent?.slice(0, 80) ?? "no body"}).`);
+      }
+      const portraitControllerRect = framedController.getBoundingClientRect();
+      const portraitScreenRect = framedScreen.getBoundingClientRect();
+      const centerControls = harnessDocument.querySelector(".touch-center-controls");
+      const centerRect = centerControls?.getBoundingClientRect();
+      result.automaticVisibility = !framedController.hidden
+        && harnessDocument.querySelector("#touch-controller-view")?.value === "auto";
+      result.portraitLayout = portraitControllerRect.top >= portraitScreenRect.bottom
+        && portraitControllerRect.width <= harnessFrame.clientWidth;
+      result.viewportFit = portraitScreenRect.height >= 120
+        && portraitControllerRect.bottom <= harnessDocument.documentElement.clientHeight + 1
+        && getComputedStyle(harnessDocument.body).overflow === "hidden";
+      result.centerControls = centerRect !== undefined
+        && Math.abs((centerRect.left + centerRect.width / 2)
+          - (portraitControllerRect.left + portraitControllerRect.width / 2)) <= 1
+        && [...centerControls.querySelectorAll("button")].map((button) => button.textContent).join(",")
+          === "Select,Start";
+      const controlRowItems = [".touch-dpad", ".touch-stick-group-left", ".touch-center-controls",
+        ".touch-stick-group-right", ".touch-face"].map((selector) =>
+          harnessDocument.querySelector(selector)?.getBoundingClientRect());
+      const rowCenters = controlRowItems.map((rect) => rect === undefined
+        ? Number.NaN
+        : rect.top + rect.height / 2);
+      result.singleControlRow = rowCenters.every(Number.isFinite)
+        && Math.max(...rowCenters) - Math.min(...rowCenters) <= 1;
+      result.mobileTargets = [...framedController.querySelectorAll("button")].every((button) => {
+        const rect = button.getBoundingClientRect();
+        return rect.width >= 44 && rect.height >= 44;
+      });
+      harnessFrame.style.width = "844px";
+      harnessFrame.style.height = "390px";
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const landscapeControllerRect = framedController.getBoundingClientRect();
+      const landscapeScreenRect = framedScreen.getBoundingClientRect();
+      result.landscapeLayout = landscapeControllerRect.top <= landscapeScreenRect.top + 1
+        && landscapeControllerRect.bottom >= landscapeScreenRect.bottom - 1;
+
+      const root = document.querySelector("#controller");
+      const dpad = document.querySelector("[data-touch-dpad]");
+      const leftStick = document.querySelector('[data-touch-stick="left"]');
+      if (!(root instanceof HTMLElement) || !(dpad instanceof HTMLElement)
+          || !(leftStick instanceof HTMLElement)) throw new Error("Probe DOM is incomplete.");
+      const rectangle = Object.freeze({
+        x: 0, y: 0, left: 0, top: 0, right: 100, bottom: 100,
+        width: 100, height: 100, toJSON: () => ({}),
+      });
+      dpad.getBoundingClientRect = () => rectangle;
+      leftStick.getBoundingClientRect = () => rectangle;
+
+      const events = [];
+      const held = new Set();
+      let channelCount = 0;
+      let releaseAllCount = 0;
+      let destroyedChannels = 0;
+      const makeInput = () => ({
+        createChannel() {
+          channelCount += 1;
+          return {
+            press(control) {
+              held.add(`${control.port}:${control.button}`);
+              events.push({ type: "press", ...control });
+            },
+            release(control) {
+              held.delete(`${control.port}:${control.button}`);
+              events.push({ type: "release", ...control });
+            },
+            setAxis(control, value) {
+              events.push({ type: "axis", ...control, value });
+            },
+            releaseAll() {
+              held.clear();
+              releaseAllCount += 1;
+              events.push({ type: "releaseAll" });
+            },
+            destroy() {
+              held.clear();
+              destroyedChannels += 1;
+              events.push({ type: "destroy" });
+            },
+          };
+        },
+      });
+      const pointer = (target, type, pointerId, clientX = 50, clientY = 50) => {
+        target.dispatchEvent(new PointerEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          pointerId,
+          pointerType: "touch",
+          clientX,
+          clientY,
+          isPrimary: pointerId === 1,
+        }));
+      };
+      const has = (type, port, button) => events.some((event) =>
+        event.type === type && event.port === port && event.button === button);
+
+      const controller = new TouchController({ root });
+      const firstInput = makeInput();
+      controller.attach(firstInput);
+      controller.controllerType = "dualshock";
+      controller.enabled = true;
+
+      pointer(dpad, "pointerdown", 1, 95, 50);
+      const rightInitially = held.has("1:right") && !held.has("1:up");
+      pointer(dpad, "pointermove", 1, 95, 5);
+      result.rollingDpad = rightInitially && held.has("1:right") && held.has("1:up")
+        && dpad.dataset.directions === "right up";
+
+      const cross = document.querySelector('[data-touch-button="cross"]');
+      const circle = document.querySelector('[data-touch-button="circle"]');
+      const l1 = document.querySelector('[data-touch-button="l1"]');
+      if (!(cross instanceof HTMLButtonElement) || !(circle instanceof HTMLButtonElement)
+          || !(l1 instanceof HTMLButtonElement)) throw new Error("Probe buttons are incomplete.");
+      pointer(cross, "pointerdown", 2);
+      pointer(circle, "pointerdown", 3);
+      const allConcurrent = ["1:right", "1:up", "1:cross", "1:circle"]
+        .every((control) => held.has(control));
+      pointer(cross, "pointerup", 2);
+      const independentRelease = !held.has("1:cross") && held.has("1:circle") && held.has("1:right");
+      result.concurrentButtons = allConcurrent && independentRelease;
+      pointer(circle, "pointercancel", 3);
+      pointer(dpad, "pointerup", 1, 95, 5);
+
+      const analogStart = events.length;
+      pointer(leftStick, "pointerdown", 4, 100, 100);
+      const analog = events.slice(analogStart).filter((event) => event.type === "axis");
+      const x = analog.find((event) => event.axis === "left-x")?.value;
+      const y = analog.find((event) => event.axis === "left-y")?.value;
+      pointer(leftStick, "pointerup", 4, 100, 100);
+      const centered = events.slice(analogStart).filter((event) => event.type === "axis" && event.value === 0);
+      result.analogClamp = typeof x === "number" && typeof y === "number"
+        && Math.hypot(x, y) <= 1.000001 && x > 0 && y > 0 && centered.length >= 2;
+
+      pointer(cross, "pointerdown", 5);
+      controller.port = 2;
+      const releasedOldPort = has("release", 1, "cross") && !held.has("1:cross");
+      pointer(cross, "pointerdown", 6);
+      result.portRelease = releasedOldPort && held.has("2:cross") && has("press", 2, "cross");
+      pointer(cross, "pointerup", 6);
+
+      pointer(l1, "pointerdown", 7);
+      window.dispatchEvent(new Event("blur"));
+      const blurReleased = !held.has("2:l1") && has("release", 2, "l1");
+      pointer(circle, "pointerdown", 8);
+      controller.enabled = false;
+      result.lifecycleRelease = blurReleased && !held.has("2:circle") && releaseAllCount > 0;
+
+      controller.enabled = true;
+      controller.attach(firstInput);
+      const sameInputReused = channelCount === 1;
+      controller.attach(makeInput());
+      result.channelIsolation = sameInputReused && channelCount === 2 && destroyedChannels === 1;
+      controller.destroy();
+      result.channelIsolation = result.channelIsolation && destroyedChannels === 2;
+      result.ok = Object.entries(result).filter(([name]) => name !== "ok")
+        .every(([, value]) => value === true);
+    } catch (error) {
+      result.error = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    }
+    await report();
+  </script>
+</body>
+</html>

@@ -26,15 +26,30 @@ are in [the implementation spec](psx-runtime-spec.md).
 - [x] M7: implement revisioned cards, compatible states and card auto-save.
 - [x] M8: compose the player, console and developer harness.
 - [x] M9: implement local game storage, packaging and distribution gates.
-- [ ] M10: pass all `v1.0.0` release gates.
+- [x] M10: pass all `v1.0.0` release gates.
+- [ ] M11: add plain TypeScript/HTML mobile layouts and touch controls.
+- [ ] M12: build the framework-free production web-emulator interface.
+  - [x] Separate production code under `ui/` from the diagnostic harness.
+  - [x] Implement real System, Game, Library, Memory Cards and View workflows.
+  - [x] Render firmware-required, ready and complete session lifecycle states.
+  - [x] Prove the empty-storage desktop/mobile shell with `probe:ui`.
+  - [ ] Migrate supported controller mapping, named states and touch controls.
+  - [ ] Complete physical-device and real-session visual acceptance.
 
-## Next work: M10
+## Next work: M11–M12
 
-M0–M9 are complete. `PsxGameStore` audits before import, derives a versioned
-content identity with incremental Worker hashing, retains track Blobs in
-IndexedDB and deduplicates renamed copies. Quota and cancellation failures
-leave no partial record. The package audit rejects private inputs, generated
-media, caches and core binaries while checking the selected core notices. M10
-also adds bounded local ZIP expansion plus a two-disc controller/audio
-diagnostic under `tests/fixtures`. It then runs and records every
-clean-checkout `v1.0.0` gate.
+M0–M10 are complete and the release gate passes from a clean checkout. M11 adds
+a framework-free on-screen PlayStation controller over the existing isolated
+input-channel model. It covers rolling multi-touch D-pad input, face and
+shoulder buttons, Start/Select, DualShock sticks, explicit L3/R3, active-port
+selection, persisted visibility/swap preferences, responsive phone layouts and
+a final physical-device acceptance run.
+
+M12 is the production interface built from the same plain TypeScript/HTML
+constraint. Its first slice is complete: browser-local firmware gates Game and
+Library, ZIP imports use the existing audit/store path, multiple ZIPs retain
+disc order and generate the stored M3U, Library starts or switches stored
+content, session controls operate the real player, and View uses the runtime's
+supported scaling/fullscreen modes. The diagnostic harness remains available
+for feature-level verification while controller, state and touch-management
+surfaces are migrated into the production design.

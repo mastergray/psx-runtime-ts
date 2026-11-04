@@ -353,7 +353,11 @@ export default class PsxConsole {
     // Creates the default display, player, audio, storage, and input composition.
     static init(config: PsxConsoleInitConfig): PsxConsole {
         if (!isPsxConsoleInitConfig(config)) throw invalid("PsxConsole init config is invalid.", config);
-        const display = PsxDisplay.init({ canvas: config.canvas, container: config.container });
+        const display = PsxDisplay.init({
+            canvas: config.canvas,
+            container: config.container,
+            ...(config.fullscreenTarget === undefined ? {} : { fullscreenTarget: config.fullscreenTarget }),
+        });
         const player = PsxPlayer.init({
             adapter: config.adapter,
             display,
