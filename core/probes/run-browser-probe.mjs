@@ -773,6 +773,101 @@ try {
                 hiddenAfterClear: store.hidden,
             };
         });
+        await page.click("#system-controls-tab");
+        const controlsInitial = await page.evaluate(() => ({
+            controlsSelected: document.querySelector("#system-controls-tab")?.getAttribute("aria-selected"),
+            firmwareHidden: document.querySelector("#system-firmware-panel")?.hasAttribute("hidden"),
+            controlsVisible: document.querySelector("#system-controls-panel")?.hasAttribute("hidden") === false,
+            playerOneRows: document.querySelectorAll("#control-bindings-1 tr").length,
+            playerTwoRows: document.querySelectorAll("#control-bindings-2 tr").length,
+            playerOneCrossKey: document.querySelector("#control-keyboard-1-cross")?.textContent,
+            playerTwoUpKey: document.querySelector("#control-keyboard-2-up")?.textContent,
+            playerOnePad: document.querySelector("#assigned-gamepad-1")?.textContent,
+            assignmentAction: document.querySelector("#assign-gamepad-1")?.textContent,
+            playerReset: document.querySelector("#reset-player-mapping-1")?.textContent,
+            allResetDestructive: document.querySelector("#reset-all-mappings")?.classList.contains("danger-action"),
+        }));
+        await page.click("#assign-gamepad-1");
+        await page.evaluate(async () => {
+            globalThis.__m12PadPressed = false;
+            const buttons = Array.from({ length: 16 }, (_, index) => ({
+                get pressed() { return index === 0 && globalThis.__m12PadPressed; },
+                get value() { return this.pressed ? 1 : 0; },
+            }));
+            Object.defineProperty(navigator, "getGamepads", {
+                configurable: true,
+                value: () => [{
+                    id: "M12 Production Pad",
+                    index: 0,
+                    connected: true,
+                    mapping: "standard",
+                    axes: [0, 0, 0, 0],
+                    buttons,
+                }],
+            });
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            globalThis.__m12PadPressed = true;
+        });
+        await page.waitForFunction(() => document.querySelector("#assigned-gamepad-1")?.textContent
+            === "M12 Production Pad");
+        const controlsAssigned = await page.evaluate(() => {
+            globalThis.__m12PadPressed = false;
+            const source = localStorage.getItem("psx-runtime:ui:controls");
+            const profile = source === null ? null : JSON.parse(source);
+            return {
+                label: document.querySelector("#assigned-gamepad-1")?.textContent,
+                status: document.querySelector("#control-binding-status-1")?.getAttribute("data-state"),
+                preferredPort: profile?.gamepadPorts?.["M12 Production Pad"],
+                crossButton: document.querySelector("#control-gamepad-1-cross")?.textContent,
+            };
+        });
+        await page.click("#change-control-1-cross");
+        const controlsCapturing = await page.evaluate(() => ({
+            state: document.querySelector("#control-binding-status-1")?.getAttribute("data-state"),
+            action: document.querySelector("#change-control-1-cross")?.textContent,
+            message: document.querySelector("#control-binding-status-1")?.textContent,
+        }));
+        await page.keyboard.press("c");
+        await page.waitForFunction(() => document.querySelector("#control-keyboard-1-cross")?.textContent === "C");
+        const controlsStored = await page.evaluate(() => {
+            const source = localStorage.getItem("psx-runtime:ui:controls");
+            const profile = source === null ? null : JSON.parse(source);
+            return {
+                key: document.querySelector("#control-keyboard-1-cross")?.textContent,
+                status: document.querySelector("#control-binding-status-1")?.getAttribute("data-state"),
+                version: profile?.version,
+                storedControl: profile?.keyboard?.KeyC,
+            };
+        });
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForFunction(() => document.querySelector("#ui-app")?.getAttribute("data-stage") !== "loading");
+        await page.click("[data-open-dialog='system']");
+        await page.click("#system-controls-tab");
+        const controlsReloaded = await page.evaluate(() => ({
+            key: document.querySelector("#control-keyboard-1-cross")?.textContent,
+            storageFeedback: document.querySelector("#control-storage-status")?.textContent,
+            storageState: document.querySelector("#control-storage-status")?.getAttribute("data-state"),
+        }));
+        await page.click("#reset-player-mapping-1");
+        const controlsPlayerReset = await page.evaluate(() => ({
+            key: document.querySelector("#control-keyboard-1-cross")?.textContent,
+            status: document.querySelector("#control-binding-status-1")?.textContent,
+            stored: localStorage.getItem("psx-runtime:ui:controls") !== null,
+        }));
+        await page.click("#controls-player-tab-2");
+        const controlsPlayerTwo = await page.evaluate(() => ({
+            selected: document.querySelector("#controls-player-tab-2")?.getAttribute("aria-selected"),
+            playerOneHidden: document.querySelector("#controls-player-panel-1")?.hasAttribute("hidden"),
+            playerTwoVisible: document.querySelector("#controls-player-panel-2")?.hasAttribute("hidden") === false,
+            upKey: document.querySelector("#control-keyboard-2-up")?.textContent,
+        }));
+        await page.click("#reset-all-mappings");
+        const controlsResetAll = await page.evaluate(() => ({
+            stored: localStorage.getItem("psx-runtime:ui:controls"),
+            feedback: document.querySelector("#control-storage-status")?.textContent,
+            state: document.querySelector("#control-storage-status")?.getAttribute("data-state"),
+        }));
+        await page.click("#system-firmware-tab");
         await page.click("#system-dialog button[value='cancel']");
         const firmwareDrop = await page.evaluate(() => {
             const stage = document.querySelector("#screen-stage");
@@ -898,6 +993,70 @@ try {
                 closed: !dialog.open,
             };
         });
+        await page.click("[data-open-dialog='view']");
+        await page.waitForFunction(() => document.querySelector("#view-dialog")?.hasAttribute("open"));
+        const touchViewInitial = await page.evaluate(() => {
+            const toggle = document.querySelector("#touch-controller-visible");
+            const apply = document.querySelector("#apply-view")?.getBoundingClientRect();
+            const cancel = document.querySelector("#cancel-view")?.getBoundingClientRect();
+            return {
+                checked: toggle instanceof HTMLInputElement ? toggle.checked : null,
+                hidden: document.querySelector("#touch-controller")?.hasAttribute("hidden"),
+                touchButtons: document.querySelectorAll("#touch-controller [data-touch-button]").length,
+                touchSticks: document.querySelectorAll("#touch-controller [data-touch-stick]").length,
+                dpad: document.querySelector("#touch-controller [data-touch-dpad]") !== null,
+                modes: [...document.querySelectorAll("#scaling-mode option")].map((option) => ({
+                    value: option.getAttribute("value"),
+                    label: option.textContent,
+                })),
+                applyLeftOfCancel: (apply?.left ?? Infinity) < (cancel?.left ?? -Infinity),
+                applyEnabled: document.querySelector("#apply-view")?.hasAttribute("disabled") === false,
+            };
+        });
+        await page.selectOption("#scaling-mode", "fullscreen-fit");
+        const fullscreenWhileIdle = await page.evaluate(() => ({
+            applyDisabled: document.querySelector("#apply-view")?.hasAttribute("disabled"),
+            feedback: document.querySelector("#view-feedback")?.textContent,
+        }));
+        await page.selectOption("#scaling-mode", "fit");
+        await page.check("#touch-controller-visible");
+        const touchViewPending = await page.evaluate(() => ({
+            hidden: document.querySelector("#touch-controller")?.hasAttribute("hidden"),
+            stored: localStorage.getItem("psx-runtime:ui:on-screen-controller"),
+        }));
+        await page.click("#cancel-view");
+        await page.waitForFunction(() => document.querySelector("#view-dialog")?.hasAttribute("open") === false);
+        const touchViewCanceled = await page.evaluate(() => ({
+            hidden: document.querySelector("#touch-controller")?.hasAttribute("hidden"),
+            stored: localStorage.getItem("psx-runtime:ui:on-screen-controller"),
+        }));
+        await page.click("[data-open-dialog='view']");
+        await page.waitForFunction(() => document.querySelector("#view-dialog")?.hasAttribute("open"));
+        await page.check("#touch-controller-visible");
+        await page.click("#apply-view");
+        await page.waitForFunction(() => document.querySelector("#view-dialog")?.hasAttribute("open") === false
+            && document.querySelector("#touch-controller")?.hasAttribute("hidden") === false
+            && document.querySelector("#play-stage")?.getAttribute("data-touch-visible") === "true");
+        const touchViewShown = await page.evaluate(() => ({
+            hidden: document.querySelector("#touch-controller")?.hasAttribute("hidden"),
+            stageVisible: document.querySelector("#play-stage")?.getAttribute("data-touch-visible"),
+            stored: localStorage.getItem("psx-runtime:ui:on-screen-controller"),
+            notice: document.querySelector("#screen-notice")?.textContent,
+            pageFits: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+        }));
+        await page.click("[data-open-dialog='view']");
+        await page.waitForFunction(() => document.querySelector("#view-dialog")?.hasAttribute("open"));
+        await page.uncheck("#touch-controller-visible");
+        await page.click("#apply-view");
+        await page.waitForFunction(() => document.querySelector("#view-dialog")?.hasAttribute("open") === false
+            && document.querySelector("#touch-controller")?.hasAttribute("hidden")
+            && document.querySelector("#play-stage")?.getAttribute("data-touch-visible") === "false");
+        const touchViewHidden = await page.evaluate(() => ({
+            hidden: document.querySelector("#touch-controller")?.hasAttribute("hidden"),
+            stageVisible: document.querySelector("#play-stage")?.getAttribute("data-touch-visible"),
+            stored: localStorage.getItem("psx-runtime:ui:on-screen-controller"),
+            notice: document.querySelector("#screen-notice")?.textContent,
+        }));
         await page.click("[data-open-dialog='memory']");
         await page.waitForFunction(() => document.querySelector("#memory-dialog")?.hasAttribute("open"));
         const memoryImportInitial = await page.evaluate(() => ({
@@ -1000,6 +1159,18 @@ try {
             selection: document.querySelector("#game-selection")?.textContent,
             archive: document.querySelector("#game-archives li span")?.textContent,
             dragging: document.querySelector("#screen-stage")?.getAttribute("data-dragging"),
+            tabsHiddenWithoutSession: document.querySelector("#game-tabs")?.hasAttribute("hidden"),
+            importVisibleWithoutSession: document.querySelector("#game-import-panel")?.hasAttribute("hidden") === false,
+            sessionHiddenWithoutSession: document.querySelector("#game-session-panel")?.hasAttribute("hidden"),
+            activeControls: document.querySelector("#active-game-disc") instanceof HTMLSelectElement
+                && document.querySelector("#change-active-disc") instanceof HTMLButtonElement
+                && document.querySelector("#restart-active-disc") instanceof HTMLButtonElement
+                && document.querySelector("#active-controller-type-1") instanceof HTMLSelectElement
+                && document.querySelector("#active-controller-type-2") instanceof HTMLSelectElement
+                && document.querySelector("#apply-controller-types") instanceof HTMLButtonElement
+                && document.querySelector("#new-state-name") instanceof HTMLInputElement
+                && document.querySelector("#save-new-state") instanceof HTMLButtonElement
+                && document.querySelector("#state-list") !== null,
         }));
         const modalGameDrop = await page.evaluate(async () => {
             const dialog = document.querySelector("#game-dialog");
@@ -1162,15 +1333,140 @@ try {
             return result;
         });
         await page.setViewportSize({ width: 390, height: 844 });
-        const mobile = await page.evaluate(() => ({
-            pageFits: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
-            stageWidth: document.querySelector("#screen-stage")?.getBoundingClientRect().width,
-            targetSizes: [...document.querySelectorAll(".main-nav button, .session-actions button")]
-                .map((button) => {
-                    const rect = button.getBoundingClientRect();
-                    return { width: rect.width, height: rect.height };
-                }),
-        }));
+        await page.click("[data-open-dialog='view']");
+        await page.waitForFunction(() => document.querySelector("#view-dialog")?.hasAttribute("open"));
+        await page.check("#touch-controller-visible");
+        await page.click("#apply-view");
+        await page.waitForFunction(() => document.querySelector("#view-dialog")?.hasAttribute("open") === false
+            && document.querySelector("#touch-controller")?.hasAttribute("hidden") === false);
+        const mobile = await page.evaluate(() => {
+            const targets = [
+                ...document.querySelectorAll("#touch-controller button"),
+                document.querySelector(".touch-dpad"),
+                ...document.querySelectorAll(".touch-stick"),
+            ].filter((node) => node instanceof HTMLElement);
+            const overlaps = targets.flatMap((node, index) => targets.slice(index + 1)
+                .filter((candidate) => {
+                    const first = node.getBoundingClientRect();
+                    const second = candidate.getBoundingClientRect();
+                    return first.left < second.right - 0.5 && first.right > second.left + 0.5
+                        && first.top < second.bottom - 0.5 && first.bottom > second.top + 0.5;
+                })
+                .map((candidate) => `${node.getAttribute("data-touch-button") ?? node.className}:${candidate.getAttribute("data-touch-button") ?? candidate.className}`));
+            return {
+                pageFits: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+                stageWidth: document.querySelector("#screen-stage")?.getBoundingClientRect().width,
+                stageHeight: document.querySelector("#screen-stage")?.getBoundingClientRect().height,
+                controllerWidth: document.querySelector("#touch-controller")?.getBoundingClientRect().width,
+                controllerBelowScreen: (document.querySelector("#screen-stage")?.getBoundingClientRect().bottom ?? Infinity)
+                    < (document.querySelector("#touch-controller")?.getBoundingClientRect().top ?? -Infinity),
+                controllerDisplay: getComputedStyle(document.querySelector("#touch-controller")).display,
+                touchTargetSizes: [...document.querySelectorAll("#touch-controller button")]
+                    .map((button) => {
+                        const rect = button.getBoundingClientRect();
+                        return { width: rect.width, height: rect.height };
+                    }),
+                overlaps,
+                targetSizes: [...document.querySelectorAll(".main-nav button, .session-actions button")]
+                    .map((button) => {
+                        const rect = button.getBoundingClientRect();
+                        return { width: rect.width, height: rect.height };
+                    }),
+            };
+        });
+        await page.setViewportSize({ width: 360, height: 800 });
+        const compactPortrait = await page.evaluate(() => {
+            const targets = [
+                ...document.querySelectorAll("#touch-controller button"),
+                document.querySelector(".touch-dpad"),
+                ...document.querySelectorAll(".touch-stick"),
+            ].filter((node) => node instanceof HTMLElement);
+            const overlaps = targets.flatMap((node, index) => targets.slice(index + 1)
+                .filter((candidate) => {
+                    const first = node.getBoundingClientRect();
+                    const second = candidate.getBoundingClientRect();
+                    return first.left < second.right - 0.5 && first.right > second.left + 0.5
+                        && first.top < second.bottom - 0.5 && first.bottom > second.top + 0.5;
+                })
+                .map((candidate) => `${node.getAttribute("data-touch-button") ?? node.className}:${candidate.getAttribute("data-touch-button") ?? candidate.className}`));
+            return {
+                pageFits: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+                controllerBelowScreen: (document.querySelector("#screen-stage")?.getBoundingClientRect().bottom ?? Infinity)
+                    < (document.querySelector("#touch-controller")?.getBoundingClientRect().top ?? -Infinity),
+                overlaps,
+            };
+        });
+        await page.setViewportSize({ width: 360, height: 700 });
+        await page.click("[data-open-dialog='memory']");
+        await page.waitForFunction(() => document.querySelector("#memory-dialog")?.hasAttribute("open"));
+        const portraitModal = await page.evaluate(() => {
+            const dialog = document.querySelector("#memory-dialog");
+            const content = dialog?.querySelector(".dialog-content");
+            if (!(dialog instanceof HTMLDialogElement) || !(content instanceof HTMLElement)) {
+                throw new Error("Missing portrait modal scroll surface");
+            }
+            const rect = dialog.getBoundingClientRect();
+            const scrollable = content.scrollHeight > content.clientHeight;
+            content.scrollTop = content.scrollHeight;
+            return {
+                fitsViewport: rect.top >= 0 && rect.bottom <= innerHeight,
+                scrollable,
+                scrolled: content.scrollTop > 0,
+            };
+        });
+        await page.click("#memory-dialog button[value='cancel']");
+        await page.setViewportSize({ width: 844, height: 390 });
+        const landscape = await page.evaluate(() => {
+            const stage = document.querySelector("#play-stage")?.getBoundingClientRect();
+            const screen = document.querySelector("#screen-stage")?.getBoundingClientRect();
+            const message = document.querySelector("#stage-message")?.getBoundingClientRect();
+            const targets = [
+                ...document.querySelectorAll("#touch-controller button"),
+                document.querySelector(".touch-dpad"),
+                ...document.querySelectorAll(".touch-stick"),
+            ].filter((node) => node instanceof HTMLElement);
+            const overlaps = targets.flatMap((node, index) => targets.slice(index + 1)
+                .filter((candidate) => {
+                    const first = node.getBoundingClientRect();
+                    const second = candidate.getBoundingClientRect();
+                    return first.left < second.right - 0.5 && first.right > second.left + 0.5
+                        && first.top < second.bottom - 0.5 && first.bottom > second.top + 0.5;
+                })
+                .map((candidate) => `${node.getAttribute("data-touch-button") ?? node.className}:${candidate.getAttribute("data-touch-button") ?? candidate.className}`));
+            const left = [
+                document.querySelector(".touch-shoulders-left"),
+                document.querySelector(".touch-stick-group-left"),
+                document.querySelector('[data-touch-button="select"]'),
+                document.querySelector(".touch-dpad"),
+            ].map((node) => node?.getBoundingClientRect());
+            const right = [
+                document.querySelector(".touch-shoulders-right"),
+                document.querySelector(".touch-stick-group-right"),
+                document.querySelector('[data-touch-button="start"]'),
+                document.querySelector(".touch-face"),
+            ].map((node) => node?.getBoundingClientRect());
+            return {
+                pageFits: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
+                screenCentered: stage !== undefined && screen !== undefined
+                    && Math.abs((stage.left + stage.width / 2) - (screen.left + screen.width / 2)) < 1,
+                messageFits: screen !== undefined && message !== undefined
+                    && message.top >= screen.top && message.bottom <= screen.bottom,
+                telemetryHidden: getComputedStyle(document.querySelector(".stage-telemetry")).display === "none",
+                splitSides: screen !== undefined
+                    && left.every((rect) => rect !== undefined && rect.right <= screen.left + 1)
+                    && right.every((rect) => rect !== undefined && rect.left >= screen.right - 1),
+                selectLeftOfScreen: screen !== undefined
+                    && (document.querySelector('[data-touch-button="select"]')?.getBoundingClientRect().right ?? Infinity) <= screen.left + 1,
+                startRightOfScreen: screen !== undefined
+                    && (document.querySelector('[data-touch-button="start"]')?.getBoundingClientRect().left ?? -Infinity) >= screen.right - 1,
+                overlaps,
+                touchTargetSizes: [...document.querySelectorAll("#touch-controller button")]
+                    .map((button) => {
+                        const rect = button.getBoundingClientRect();
+                        return { width: rect.width, height: rect.height };
+                    }),
+            };
+        });
         resolveResult({
             ok: desktop.stage === "firmware-required" && desktop.title === "[ FIRMWARE REQUIRED ]"
                 && desktop.canvas && desktop.wordmarkAbsent && desktop.gameDisabled && desktop.libraryDisabled && desktop.pageFits
@@ -1179,6 +1475,27 @@ try {
                 && system.systemStopHidden && system.storeHidden
                 && system.newFirmware.visible && system.newFirmware.label === "Check And Store"
                 && system.newFirmware.enabled && system.hiddenAfterClear
+                && controlsInitial.controlsSelected === "true" && controlsInitial.firmwareHidden
+                && controlsInitial.controlsVisible && controlsInitial.playerOneRows === 16
+                && controlsInitial.playerTwoRows === 16 && controlsInitial.playerOneCrossKey === "Z"
+                && controlsInitial.playerTwoUpKey === "I" && controlsInitial.playerOnePad === "No connected gamepad"
+                && controlsInitial.assignmentAction === "Change"
+                && controlsInitial.playerReset === "Reset Player 1 Mapping" && controlsInitial.allResetDestructive
+                && controlsAssigned.label === "M12 Production Pad" && controlsAssigned.status === "success"
+                && controlsAssigned.preferredPort === 1 && controlsAssigned.crossButton === "A"
+                && controlsCapturing.state === "working" && controlsCapturing.action === "Cancel"
+                && controlsCapturing.message?.includes("Press a keyboard key or gamepad button")
+                && controlsStored.key === "C" && controlsStored.status === "success"
+                && controlsStored.version === 1 && controlsStored.storedControl?.port === 1
+                && controlsStored.storedControl?.button === "cross"
+                && controlsReloaded.key === "C" && controlsReloaded.storageState === "success"
+                && controlsReloaded.storageFeedback?.includes("Stored control mappings loaded")
+                && controlsPlayerReset.key === "Z" && controlsPlayerReset.status?.includes("restored to defaults")
+                && controlsPlayerReset.stored && controlsPlayerTwo.selected === "true"
+                && controlsPlayerTwo.playerOneHidden && controlsPlayerTwo.playerTwoVisible
+                && controlsPlayerTwo.upKey === "I" && controlsResetAll.stored === null
+                && controlsResetAll.feedback?.includes("Default mappings restored")
+                && controlsResetAll.state === "success"
                 && firmwareDrop.accepted && firmwareDrop.highlighted === "true"
                 && firmwareStored.gameEnabled && firmwareStored.libraryEnabled
                 && firmwareStored.feedback === "success" && firmwareStored.dragging === "false"
@@ -1199,6 +1516,21 @@ try {
                 && volumeControl.open && volumeControl.closed && volumeControl.value === "42"
                 && volumeControl.output === "42%" && volumeControl.ranges === 1
                 && volumeControl.extraControls === 0
+                && touchViewInitial.checked === false && touchViewInitial.hidden
+                && touchViewInitial.touchButtons === 12 && touchViewInitial.touchSticks === 2
+                && touchViewInitial.dpad && touchViewInitial.applyLeftOfCancel && touchViewInitial.applyEnabled
+                && touchViewInitial.modes.some(({ value, label }) => value === "fullscreen-fit" && label === "Fullscreen · Fit")
+                && touchViewInitial.modes.some(({ value, label }) => value === "fullscreen-stretch" && label === "Fullscreen · Stretch")
+                && fullscreenWhileIdle.applyDisabled
+                && fullscreenWhileIdle.feedback === "Start a game before applying a fullscreen presentation."
+                && touchViewPending.hidden && touchViewPending.stored === null
+                && touchViewCanceled.hidden && touchViewCanceled.stored === null
+                && !touchViewShown.hidden
+                && touchViewShown.stageVisible === "true" && touchViewShown.stored === "true"
+                && touchViewShown.notice === "View applied: Fit." && touchViewShown.pageFits
+                && touchViewHidden.hidden
+                && touchViewHidden.stageVisible === "false" && touchViewHidden.stored === "false"
+                && touchViewHidden.notice === "View applied: Fit."
                 && memoryImportInitial.dialogOpen && memoryImportInitial.cardOneDisabled
                 && memoryImportInitial.cardTwoDisabled
                 && memoryImportReady.feedback?.includes("ready. Choose the card slot")
@@ -1218,6 +1550,8 @@ try {
                 && gameDrop.accepted && gameDrop.highlighted === "true" && gameSelected.dialogOpen
                 && gameSelected.selection === "1 ZIP selected in disc order."
                 && gameSelected.archive === "Dropped Game.zip" && gameSelected.dragging === "false"
+                && gameSelected.tabsHiddenWithoutSession && gameSelected.importVisibleWithoutSession
+                && gameSelected.sessionHiddenWithoutSession && gameSelected.activeControls
                 && modalGameDrop.accepted && modalGameDrop.highlighted === "true"
                 && reorderedArchives.archives.join(",") === "Second Disc.zip,Dropped Game.zip"
                 && reorderedArchives.controls === 6
@@ -1245,16 +1579,43 @@ try {
                 && centeredNotice.horizontalDelta < 1 && centeredNotice.verticalDelta < 1
                 && mobile.pageFits
                 && typeof mobile.stageWidth === "number" && mobile.stageWidth <= 390
+                && typeof mobile.stageHeight === "number" && mobile.stageHeight > 0
+                && typeof mobile.controllerWidth === "number" && mobile.controllerWidth <= 390
+                && mobile.controllerBelowScreen && mobile.controllerDisplay === "grid"
+                && mobile.touchTargetSizes.every(({ width, height }) => width >= 44 && height >= 44)
+                && mobile.overlaps.length === 0
                 && mobile.targetSizes.every(({ width, height }) => width >= 36 && height >= 40)
+                && compactPortrait.pageFits && compactPortrait.controllerBelowScreen
+                && compactPortrait.overlaps.length === 0
+                && portraitModal.fitsViewport && portraitModal.scrollable && portraitModal.scrolled
+                && landscape.pageFits && landscape.screenCentered && landscape.messageFits
+                && landscape.telemetryHidden && landscape.splitSides
+                && landscape.selectLeftOfScreen && landscape.startRightOfScreen
+                && landscape.overlaps.length === 0
+                && landscape.touchTargetSizes.every(({ width, height }) => width >= 44 && height >= 44)
                 && pageErrors.length === 0,
             desktop,
             system,
+            controlsInitial,
+            controlsAssigned,
+            controlsCapturing,
+            controlsStored,
+            controlsReloaded,
+            controlsPlayerReset,
+            controlsPlayerTwo,
+            controlsResetAll,
             firmwareDrop,
             firmwareStored,
             systemDelete,
             emptyRegionGate,
             storedRegionGate,
             volumeControl,
+            touchViewInitial,
+            fullscreenWhileIdle,
+            touchViewPending,
+            touchViewCanceled,
+            touchViewShown,
+            touchViewHidden,
             memoryImportInitial,
             memoryImportReady,
             memoryImported,
@@ -1271,6 +1632,9 @@ try {
             activeScreenChrome,
             centeredNotice,
             mobile,
+            compactPortrait,
+            portraitModal,
+            landscape,
             pageErrors,
         });
     }

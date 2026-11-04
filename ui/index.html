@@ -79,17 +79,36 @@
         </div>
         <div class="signal-bars" aria-hidden="true"></div>
       </div>
+
+      <section id="touch-controller" class="touch-controller" aria-label="On-screen PlayStation controller" aria-disabled="true" data-active="false" data-controller-type="dualshock" data-port="1" hidden>
+        <p class="touch-port-label">On-screen controller · player 1</p>
+        <div class="touch-shoulders touch-shoulders-left"><button class="touch-button" type="button" data-touch-button="l2">L2</button><button class="touch-button" type="button" data-touch-button="l1">L1</button></div>
+        <div class="touch-shoulders touch-shoulders-right"><button class="touch-button" type="button" data-touch-button="r1">R1</button><button class="touch-button" type="button" data-touch-button="r2">R2</button></div>
+        <div class="touch-control-row">
+          <div class="touch-dpad" data-touch-dpad role="group" aria-label="Directional pad" data-directions="">
+            <span class="touch-dpad-direction touch-dpad-up" aria-hidden="true">▲</span><span class="touch-dpad-direction touch-dpad-right" aria-hidden="true">▶</span><span class="touch-dpad-direction touch-dpad-down" aria-hidden="true">▼</span><span class="touch-dpad-direction touch-dpad-left" aria-hidden="true">◀</span><span class="touch-dpad-center" aria-hidden="true"></span>
+          </div>
+          <div class="touch-stick-group touch-stick-group-left"><div class="touch-stick" data-touch-stick="left" role="group" aria-label="Left analog stick"><span class="touch-stick-knob">LS</span></div><button class="touch-button" type="button" data-touch-button="l3">L3</button></div>
+          <div class="touch-center-controls"><button class="touch-button" type="button" data-touch-button="select">Select</button><button class="touch-button" type="button" data-touch-button="start">Start</button></div>
+          <div class="touch-stick-group touch-stick-group-right"><div class="touch-stick" data-touch-stick="right" role="group" aria-label="Right analog stick"><span class="touch-stick-knob">RS</span></div><button class="touch-button" type="button" data-touch-button="r3">R3</button></div>
+          <div class="touch-face" role="group" aria-label="Face buttons"><button class="touch-button touch-triangle" type="button" data-touch-button="triangle" aria-label="Triangle">△</button><button class="touch-button touch-circle" type="button" data-touch-button="circle" aria-label="Circle">○</button><button class="touch-button touch-cross" type="button" data-touch-button="cross" aria-label="Cross">×</button><button class="touch-button touch-square" type="button" data-touch-button="square" aria-label="Square">□</button></div>
+        </div>
+      </section>
     </main>
 
-    <dialog id="system-dialog" class="terminal-dialog" aria-labelledby="system-title">
+    <dialog id="system-dialog" class="terminal-dialog wide-dialog" aria-labelledby="system-title">
       <form method="dialog" class="dialog-frame">
         <header class="dialog-header">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="2.5"></circle></svg>
           <div><span>// SYS</span><h2 id="system-title">[ SYSTEM ]</h2></div>
           <button class="icon-button" value="cancel" aria-label="Close System">×</button>
         </header>
+        <div id="system-tabs" class="dialog-tabs" role="tablist" aria-label="System settings">
+          <button id="system-firmware-tab" type="button" role="tab" aria-controls="system-firmware-panel" aria-selected="true">Firmware</button>
+          <button id="system-controls-tab" type="button" role="tab" aria-controls="system-controls-panel" aria-selected="false">Controls</button>
+        </div>
         <div class="dialog-content">
-          <section class="dialog-section">
+          <section id="system-firmware-panel" class="dialog-section" role="tabpanel" aria-labelledby="system-firmware-tab">
             <div class="section-heading"><div><span>// FIRMWARE</span><h3>PlayStation firmware</h3></div><p>Firmware remains in this browser and is stored by region.</p></div>
             <div id="firmware-slots" class="firmware-slots" aria-live="polite"></div>
             <label>Region
@@ -105,6 +124,29 @@
               <button id="forget-firmware" class="danger-action" type="button" hidden>Delete Firmware</button>
             </div>
           </section>
+          <section id="system-controls-panel" class="dialog-section control-settings" role="tabpanel" aria-labelledby="system-controls-tab" hidden>
+            <div class="section-heading"><div><span>// INPUT</span><h3>Controller mappings</h3></div><p>Mappings are stored in this browser and apply across games.</p></div>
+            <div class="player-tabs" role="tablist" aria-label="Controller player">
+              <button id="controls-player-tab-1" type="button" role="tab" aria-controls="controls-player-panel-1" aria-selected="true">Player 1</button>
+              <button id="controls-player-tab-2" type="button" role="tab" aria-controls="controls-player-panel-2" aria-selected="false">Player 2</button>
+            </div>
+            <section id="controls-player-panel-1" class="control-player-panel" role="tabpanel" aria-labelledby="controls-player-tab-1">
+              <div class="control-device-row"><div><span>Assigned gamepad</span><strong id="assigned-gamepad-1">No connected gamepad</strong></div><button id="assign-gamepad-1" type="button">Change</button></div>
+              <label class="switch-option" for="left-stick-dpad-1"><span><strong>Left stick acts as D-pad</strong><small>Useful for games that only support a digital controller.</small></span><input id="left-stick-dpad-1" type="checkbox" role="switch"></label>
+              <div class="control-table-wrap"><table class="control-map"><thead><tr><th>Control</th><th>Keyboard</th><th>Gamepad</th><th>Change</th></tr></thead><tbody id="control-bindings-1"></tbody></table></div>
+              <div id="control-binding-status-1" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Choose Change beside a control, then press a key or gamepad button.</div>
+              <div class="button-row"><button id="reset-player-mapping-1" type="button">Reset Player 1 Mapping</button></div>
+            </section>
+            <section id="controls-player-panel-2" class="control-player-panel" role="tabpanel" aria-labelledby="controls-player-tab-2" hidden>
+              <div class="control-device-row"><div><span>Assigned gamepad</span><strong id="assigned-gamepad-2">No connected gamepad</strong></div><button id="assign-gamepad-2" type="button">Change</button></div>
+              <label class="switch-option" for="left-stick-dpad-2"><span><strong>Left stick acts as D-pad</strong><small>Useful for games that only support a digital controller.</small></span><input id="left-stick-dpad-2" type="checkbox" role="switch"></label>
+              <div class="control-table-wrap"><table class="control-map"><thead><tr><th>Control</th><th>Keyboard</th><th>Gamepad</th><th>Change</th></tr></thead><tbody id="control-bindings-2"></tbody></table></div>
+              <div id="control-binding-status-2" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Choose Change beside a control, then press a key or gamepad button.</div>
+              <div class="button-row"><button id="reset-player-mapping-2" type="button">Reset Player 2 Mapping</button></div>
+            </section>
+            <div class="control-profile-actions"><button id="reset-all-mappings" class="danger-action" type="button">Reset All Mappings</button></div>
+            <div id="control-storage-status" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Loading control mappings…</div>
+          </section>
         </div>
       </form>
     </dialog>
@@ -116,8 +158,36 @@
           <div><span>// GAME</span><h2 id="game-title">[ IMPORT GAME ]</h2></div>
           <button class="icon-button" value="cancel" aria-label="Close Game">×</button>
         </header>
+        <div id="game-tabs" class="dialog-tabs" role="tablist" aria-label="Game actions" hidden>
+          <button id="game-session-tab" type="button" role="tab" aria-controls="game-session-panel" aria-selected="true">Current Game</button>
+          <button id="game-import-tab" type="button" role="tab" aria-controls="game-import-panel" aria-selected="false">Import</button>
+        </div>
         <div class="dialog-content">
-          <section class="dialog-section">
+          <section id="game-session-panel" class="dialog-section" role="tabpanel" aria-labelledby="game-session-tab" hidden>
+            <div class="section-heading"><div><span>// ACTIVE SESSION</span><h3 id="active-game-title">Current game</h3></div><p id="active-game-disc-status">Disc status unavailable.</p></div>
+            <div class="controller-type-settings">
+              <label>Player 1 controller<select id="active-controller-type-1"><option value="dualshock">DualShock</option><option value="digital">Digital</option><option value="none">None</option></select></label>
+              <label>Player 2 controller<select id="active-controller-type-2"><option value="dualshock">DualShock</option><option value="digital">Digital</option><option value="none">None</option></select></label>
+              <button id="apply-controller-types" type="button" disabled>Restart To Apply</button>
+            </div>
+            <div id="controller-type-feedback" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Controller types apply when this game is restarted.</div>
+            <div class="active-disc-controls">
+              <label>Disc<select id="active-game-disc"></select></label>
+              <div class="active-disc-actions">
+                <button id="change-active-disc" class="primary-action" type="button">Change Disc</button>
+                <button id="restart-active-disc" type="button" hidden>Restart From Disc</button>
+              </div>
+            </div>
+            <div id="active-game-feedback" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Select another disc to insert it.</div>
+            <div class="section-heading state-heading"><div><span>// SAVE STATES</span><h3>State management</h3></div><p>States are stored locally for this game.</p></div>
+            <div class="state-create-row">
+              <label>New state name<input id="new-state-name" type="text" maxlength="80" placeholder="For example: Before final race"></label>
+              <button id="save-new-state" class="primary-action" type="button">Save State</button>
+            </div>
+            <div id="state-feedback" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Save, load, overwrite, or delete named states for the active game.</div>
+            <div id="state-list" class="state-list"><div class="state-empty">[ NO SAVED STATES ]</div></div>
+          </section>
+          <section id="game-import-panel" class="dialog-section" role="tabpanel" aria-labelledby="game-import-tab">
             <div id="game-drop-zone" class="drop-zone" data-dragging="false">
               <strong>DROP ONE OR MORE GAME ZIPS</strong>
               <span id="game-selection">No game ZIPs selected.</span>
@@ -150,6 +220,7 @@
             <div class="library-placeholder">[ NO STORED GAMES ]</div>
           </section>
         </div>
+        <div id="library-feedback" class="operation-feedback library-feedback" data-state="idle" role="status" aria-live="polite" hidden></div>
         <footer class="dialog-footer"><span>LOCAL BROWSER STORAGE</span><button type="button" data-open-dialog="game">+ Import Game</button></footer>
       </form>
     </dialog>
@@ -187,10 +258,14 @@
         <div class="dialog-content">
           <section class="dialog-section">
             <label>Scaling
-              <select id="scaling-mode"><option value="fit">Fit</option><option value="integer">Integer</option><option value="fill">Fill</option><option value="stretch">Stretch</option></select>
+              <select id="scaling-mode"><option value="fit">Fit</option><option value="integer">Integer</option><option value="fill">Fill</option><option value="stretch">Stretch</option><option value="fullscreen-fit">Fullscreen · Fit</option><option value="fullscreen-stretch">Fullscreen · Stretch</option></select>
             </label>
-            <div class="button-row"><button id="fullscreen-fit" type="button" disabled>Fullscreen · Fit</button><button id="fullscreen-stretch" type="button" disabled>Fullscreen · Stretch</button></div>
-            <p id="view-feedback">Start a game to use fullscreen presentation.</p>
+            <label class="switch-option" for="touch-controller-visible">
+              <span><strong>On-screen controller</strong><small>Show touch controls for player 1 beneath the game display.</small></span>
+              <input id="touch-controller-visible" type="checkbox" role="switch">
+            </label>
+            <div class="button-row view-action-row"><button id="apply-view" class="primary-action" type="button">Apply</button><button id="cancel-view" type="submit" value="cancel">Cancel</button></div>
+            <p id="view-feedback" role="status" aria-live="polite" hidden></p>
           </section>
         </div>
       </form>

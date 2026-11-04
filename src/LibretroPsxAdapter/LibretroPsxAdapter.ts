@@ -1,5 +1,6 @@
 // Dependencies:
 import DiscSetAudit from "../DiscSetAudit/DiscSetAudit.js";              // Validates content and supplies resolved disc metadata
+import Sha256 from "../PsxGameStore/Sha256.js";                         // Hashes firmware when Web Crypto is unavailable on an insecure local origin
 import PsxRuntimeError from "../PsxRuntimeError/PsxRuntimeError.js";    // Reports unsupported browser, content, firmware, and core failures
 import {
     isPsxBuildInfo,      // Validates fetched immutable core-build metadata
@@ -300,12 +301,8 @@ const browserFetch = (): typeof globalThis.fetch => {
 };
 
 // HELPER :: blob -> PROMISE(STRING)
-// Reads and hashes one firmware blob with browser Web Crypto.
+// Reads and hashes one firmware blob with Web Crypto or the portable package implementation.
 const sha256 = async (blob: Blob): Promise<string> => {
-    if (typeof globalThis.crypto?.subtle?.digest !== "function") throw new PsxRuntimeError({
-        code: PsxRuntimeError.CODE.UNSUPPORTED,
-        message: "BIOS validation requires Web Crypto SHA-256 support.",
-    });
     let source: ArrayBuffer;
     try {
         source = await blob.arrayBuffer();
@@ -316,8 +313,13 @@ const sha256 = async (blob: Blob): Promise<string> => {
             data: error instanceof Error ? error.message : null,
         });
     }
-    const digest = await globalThis.crypto.subtle.digest("SHA-256", source);
-    return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+    if (typeof globalThis.crypto?.subtle?.digest === "function") {
+        const digest = await globalThis.crypto.subtle.digest("SHA-256", source);
+        return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+    }
+    const digest = new Sha256();
+    digest.update(new Uint8Array(source));
+    return digest.digestHex();
 };
 
 // HELPER :: VOID -> uint8Array

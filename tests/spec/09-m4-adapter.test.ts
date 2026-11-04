@@ -454,6 +454,30 @@ const testFile: TestFile = {
                 .start(undefined),
         },
         {
+            label: "firmware validation falls back to portable SHA-256 without Web Crypto",
+            run: () => CTGTest.init("portable firmware hashing")
+                .stage("start without subtle crypto", async () => {
+                    LoopbackWorker.instances.length = 0;
+                    const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+                    Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+                    try {
+                        const scheduler = new ManualScheduler();
+                        const session = await drive(freshAdapter(scheduler).start({ game, bios }), scheduler);
+                        const result = { gameId: session.machine.gameId, workers: LoopbackWorker.instances.length };
+                        await session.exit();
+                        return result;
+                    } finally {
+                        if (cryptoDescriptor === undefined) delete (globalThis as { crypto?: Crypto }).crypto;
+                        else Object.defineProperty(globalThis, "crypto", cryptoDescriptor);
+                    }
+                })
+                .assert("portable hash permits startup", ({ subject }) => subject, P.equals<unknown>({
+                    gameId: "m4-fixture",
+                    workers: 1,
+                }))
+                .start(undefined),
+        },
+        {
             label: "disc, BIOS, and option failures occur before Worker creation with typed errors",
             run: () => CTGTest.init("startup rejection")
                 .stage("reject invalid inputs", async () => {

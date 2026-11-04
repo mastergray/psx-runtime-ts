@@ -52,7 +52,7 @@ interface StickState {
  *
  */
 
-// Routes a semantic multi-touch controller through one isolated PSX input channel.
+// Routes a semantic browser multi-touch controller through one isolated PSX input channel.
 export default class TouchController {
 
     /* Instance Fields */

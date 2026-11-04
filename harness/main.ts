@@ -12,7 +12,7 @@ import {
     isGamepadButtonMaps,
     isKeyboardMap,
 } from "../src/index.js";
-import TouchController from "./TouchController.js";
+import TouchController from "../ui/TouchController.js";
 
 import type {
     BiosImage,

@@ -1,6 +1,5 @@
 // Dependencies:
 import {
-    DEFAULT_KEYBOARD_MAP,
     LibretroPsxAdapter,
     PsxAudio,
     PsxConsole,
@@ -8,30 +7,46 @@ import {
     ZipDiscSource,
     ZipFirmwareSource,
 } from "../src/index.js";
+import ControlSettings from "./ControlSettings.js";              // Owns persistent keyboard and gamepad mappings
 import { summarizeMemoryCard } from "./MemoryCardDirectory.js"; // Interprets card directory entries for read-only display
-import { isUiDialogId } from "./types.js";    // Validates declarative dialog targets before opening them
+import TouchController from "./TouchController.js";            // Routes the production touch surface into session input
+import {
+    isUiControllerTypePreferences, // Validates per-game emulated controller preferences
+    isUiDialogId,                  // Validates declarative dialog targets
+    isUiViewMode,                  // Validates deferred View selections
+} from "./types.js";
 
 // Type dependencies:
 import type {
     BiosImage,          // Stored firmware supplied when a session starts
     ControllerPort,     // Physical port used by automatic browser-gamepad binding
     PsxFirmwareRecord,  // Stored firmware metadata rendered by System
+    PsxMachineInfo,     // Active core and content identity used for state compatibility
+    PsxControllerType,  // Per-game emulated controller device selected for one port
     PsxPlayerStatus,    // Lifecycle status rendered by the stage
     PsxRegion,          // Selected firmware region
     PsxScalingMode,     // Display layout selected in View
+    PsxStateRecord,     // Stored named state rendered by the active Game panel
     PsxStoredGame,      // Lightweight game metadata rendered by Library
 } from "../src/index.js";
 import type {
     PsxMemoryCardSummary,  // Read-only card-directory summary rendered in Memory Cards
     UiApplicationConfig,    // Browser and runtime dependencies supplied by main
+    UiControllerTypePreferences, // Persisted per-game emulated controller selections
     UiDialogId,             // Supported production dialog identifiers
     UiFeedbackState,        // Operation feedback severity
+    UiGamePanel,            // Active-session or import panel shown by Game
     UiStageState,           // Closed central-stage presentation state
+    UiSystemPanel,          // Firmware or Controls System tab
+    UiViewMode,             // Deferred windowed or fullscreen View selection
 } from "./types.js";
 
 const PROFILE_ID = "web-emulator";
 const CARD_IDS = Object.freeze({ 1: "card-1", 2: "card-2" });
 const REGIONS = Object.freeze(["ntsc-u", "ntsc-j", "pal"] as const);
+const DEFAULT_CONTROLLER_TYPES = Object.freeze({ 1: "dualshock", 2: "dualshock" } as const);
+const TOUCH_CONTROLLER_STORAGE_KEY = "psx-runtime:ui:on-screen-controller";
+const CONTROLLER_TYPE_STORAGE_KEY = "psx-runtime:ui:controller-types";
 
 /**
  *
@@ -47,6 +62,8 @@ export default class UiApplication {
     private readonly _storage: UiApplicationConfig["storage"];   // Firmware and memory-card persistence
     private readonly _gameStore: UiApplicationConfig["gameStore"]; // Audited game-library persistence
     private readonly _buildUrl: string;                           // PlayStation core build root
+    private readonly _controls: ControlSettings;                  // Persistent two-player physical input configuration
+    private readonly _touchController: TouchController;           // Player-one pointer controller rendered below or over the stage
     private readonly _firmware = new Map<PsxRegion, PsxFirmwareRecord>(); // Stored firmware records by region
     private _adapter: LibretroPsxAdapter | null = null;           // Loaded core metadata and worker factory
     private _runtime: PsxConsole | null = null;                   // Composed browser runtime
@@ -54,6 +71,10 @@ export default class UiApplication {
     private _games: ReadonlyArray<PsxStoredGame> = [];            // Current ordered browser library
     private _selectedArchives: File[] = [];                       // Ordered ZIP selection awaiting import
     private _importedGameId: string | null = null;                // Stored identity produced by the current selection
+    private _selectedGamePanel: UiGamePanel = "import";           // Current context-sensitive Game modal panel
+    private _selectedSystemPanel: UiSystemPanel = "firmware";     // Current System firmware or control-mapping panel
+    private _controllerTypePreferences: UiControllerTypePreferences; // Per-game emulated controller devices
+    private _stateRecords: ReadonlyArray<PsxStateRecord> = [];     // Named states loaded for the active game
     private _selectedLibraryGameId: string | null = null;         // Game currently displayed in Library details
     private _selectedLibraryDiscIndex = 0;                        // Initial or replacement disc selected in Library
     private _busyDialog: UiDialogId | null = null;                // Dialog protected from dismissal during a mutation
@@ -61,9 +82,9 @@ export default class UiApplication {
     private _switchingDialogs = false;                            // Prevents transient resume between modal surfaces
     private _noticeTimer: ReturnType<typeof globalThis.setTimeout> | null = null; // Pending notice dismissal timer
     private _muted = false;                                      // Requested audio mute state for the active session
-    private readonly _boundGamepads = new Set<number>();          // Browser gamepad indices currently assigned by this shell
     private _firmwareBusy = false;                               // Whether one firmware validation/storage operation is active
     private _memoryImportBusy = false;                            // Whether one card replacement is reading or persisting bytes
+    private _touchControllerVisible = false;                      // Persisted preference controlling touch-surface presentation
 
     // CONSTRUCTOR :: uiApplicationConfig -> uiApplication
     // Retains validated composition dependencies; initialize() binds the document and loads persistent state.
@@ -72,6 +93,17 @@ export default class UiApplication {
         this._storage = config.storage;
         this._gameStore = config.gameStore;
         this._buildUrl = config.buildUrl;
+        const localStorage = browserStorage(this._document);
+        this._controls = new ControlSettings({ document: this._document, storage: localStorage });
+        this._touchController = new TouchController({
+            root: element(this._document, "touch-controller"),
+            document: this._document,
+        });
+        this._touchControllerVisible = storedBoolean(
+            localStorage,
+            TOUCH_CONTROLLER_STORAGE_KEY,
+        );
+        this._controllerTypePreferences = loadControllerTypePreferences(localStorage);
     }
 
     /**
@@ -83,6 +115,7 @@ export default class UiApplication {
     // METHOD :: VOID -> PROMISE(VOID)
     // Binds the production document, loads the core and storage, and renders the first actionable state.
     async initialize(): Promise<void> {
+        this._controls.initialize();
         this._bindDocument();
         this._renderStage("loading");
         try {
@@ -99,6 +132,8 @@ export default class UiApplication {
     // METHOD :: VOID -> VOID
     // Binds declarative navigation and supported workflow controls exactly once.
     private _bindDocument(): void {
+        element<HTMLInputElement>(this._document, "touch-controller-visible").checked = this._touchControllerVisible;
+        this._syncTouchController();
         for (const trigger of this._document.querySelectorAll<HTMLElement>("[data-open-dialog]")) {
             trigger.addEventListener("click", () => {
                 const dialog = trigger.dataset.openDialog;
@@ -111,10 +146,18 @@ export default class UiApplication {
                 if (this._busyDialog === dialogId) event.preventDefault();
             });
             dialog.addEventListener("close", () => {
+                if (dialogId === "system") this._controls.cancelCapture();
                 if (dialogId === "memory") this._resetMemoryCardView();
                 void this._dialogClosed();
             });
         }
+
+        element<HTMLButtonElement>(this._document, "system-firmware-tab").addEventListener("click", () => {
+            this._selectSystemPanel("firmware");
+        });
+        element<HTMLButtonElement>(this._document, "system-controls-tab").addEventListener("click", () => {
+            this._selectSystemPanel("controls");
+        });
 
         element<HTMLSelectElement>(this._document, "firmware-region").addEventListener("change", () => {
             this._renderFirmware();
@@ -216,7 +259,8 @@ export default class UiApplication {
             event.preventDefault();
             dropZone.dataset.dragging = "false";
             gameDialog.dataset.dragging = "false";
-            void this._addArchives(event.dataTransfer === null ? [] : [...event.dataTransfer.files]);
+            void this._addArchives(event.dataTransfer === null ? [] : [...event.dataTransfer.files])
+                .then(() => this._selectGamePanel("import"));
         });
         element<HTMLButtonElement>(this._document, "clear-game").addEventListener("click", () => {
             this._selectedArchives = [];
@@ -228,6 +272,38 @@ export default class UiApplication {
         });
         element<HTMLButtonElement>(this._document, "start-imported-game").addEventListener("click", () => {
             void this._storeSelectedGame(true);
+        });
+        element<HTMLButtonElement>(this._document, "game-session-tab").addEventListener("click", () => {
+            void this._selectGamePanel("session");
+        });
+        element<HTMLButtonElement>(this._document, "game-import-tab").addEventListener("click", () => {
+            void this._selectGamePanel("import");
+        });
+        element<HTMLSelectElement>(this._document, "active-game-disc").addEventListener("change", () => {
+            this._renderActiveDiscActions();
+            this._describeActiveDiscSelection();
+        });
+        element<HTMLButtonElement>(this._document, "change-active-disc").addEventListener("click", () => {
+            void this._changeActiveDisc();
+        });
+        element<HTMLButtonElement>(this._document, "restart-active-disc").addEventListener("click", () => {
+            void this._restartFromActiveDisc();
+        });
+        for (const port of [1, 2] as const) {
+            element<HTMLSelectElement>(this._document, `active-controller-type-${port}`).addEventListener("change", () => {
+                this._controllerTypesChanged();
+            });
+        }
+        element<HTMLButtonElement>(this._document, "apply-controller-types").addEventListener("click", () => {
+            void this._restartWithControllerTypes();
+        });
+        element<HTMLButtonElement>(this._document, "save-new-state").addEventListener("click", () => {
+            void this._saveNewState();
+        });
+        element<HTMLInputElement>(this._document, "new-state-name").addEventListener("keydown", (event) => {
+            if (event.key !== "Enter") return;
+            event.preventDefault();
+            void this._saveNewState();
         });
         element<HTMLSelectElement>(this._document, "entry-select").addEventListener("change", () => {
             this._importedGameId = null;
@@ -251,16 +327,14 @@ export default class UiApplication {
             if (audio !== null) audio.volume = volume;
         });
 
-        element<HTMLSelectElement>(this._document, "scaling-mode").addEventListener("change", (event) => {
-            const value = (event.currentTarget as HTMLSelectElement).value as PsxScalingMode;
-            if (this._player !== null) this._player.display.scaling = value;
-            this._setText("view-feedback", `Scaling changed to ${displayScaling(value)}.`);
+        element<HTMLSelectElement>(this._document, "scaling-mode").addEventListener("change", () => {
+            this._syncViewActions();
         });
-        element<HTMLButtonElement>(this._document, "fullscreen-fit").addEventListener("click", () => {
-            void this._enterFullscreen("fit");
+        element<HTMLInputElement>(this._document, "touch-controller-visible").addEventListener("change", () => {
+            this._syncViewActions();
         });
-        element<HTMLButtonElement>(this._document, "fullscreen-stretch").addEventListener("click", () => {
-            void this._enterFullscreen("stretch");
+        element<HTMLButtonElement>(this._document, "apply-view").addEventListener("click", () => {
+            void this._applyView();
         });
         for (const port of [1, 2] as const) {
             element<HTMLButtonElement>(this._document, `download-card-${port}`).addEventListener("click", () => {
@@ -283,9 +357,6 @@ export default class UiApplication {
                 this._feedback("memory", `“${file.name}” is ready. Choose the card slot to replace.`, "idle");
             }
         });
-
-        globalThis.addEventListener("gamepadconnected", () => this._syncGamepads());
-        globalThis.addEventListener("gamepaddisconnected", () => this._syncGamepads());
     }
 
     // METHOD :: libretroPsxAdapter -> VOID
@@ -303,7 +374,7 @@ export default class UiApplication {
             storage: this._storage,
             profileId: PROFILE_ID,
             memoryCardIds: CARD_IDS,
-            keyboard: { target: globalThis, map: DEFAULT_KEYBOARD_MAP },
+            keyboard: { target: globalThis, map: this._controls.keyboardMap },
             gamepad: {
                 provider: { getGamepads: () => navigator.getGamepads() },
                 scheduler: {
@@ -311,16 +382,32 @@ export default class UiApplication {
                     cancel: cancelAnimationFrame.bind(globalThis),
                 },
                 target: this._document,
+                leftStickDpad: this._controls.leftStickDpad,
+                buttonMaps: this._controls.gamepadButtonMaps,
             },
             gameStore: this._gameStore,
         });
         this._player = this._runtime.player as PsxPlayer;
+        this._controls.attachRuntime(this._runtime);
         this._player.on("status", (status) => this._playerStatusChanged(status));
         this._player.on("error", (error) => {
-            this._showNotice(errorMessage(error));
-            this._renderStage("failed", errorMessage(error));
+            const message = errorMessage(error);
+            if (element<HTMLDialogElement>(this._document, "game-dialog").open) {
+                if (this._selectedGamePanel === "session") {
+                    this._panelFeedback("active-game-feedback", `Start failed: ${message}`, "error");
+                } else {
+                    this._feedback("game", `Start failed: ${message}`, "error");
+                }
+                return;
+            }
+            if (element<HTMLDialogElement>(this._document, "library-dialog").open) {
+                this._libraryFeedback(`Start failed: ${message}`, "error");
+                return;
+            }
+            this._showNotice(message);
+            this._renderStage("failed", message);
         });
-        this._syncGamepads();
+        this._syncTouchController();
     }
 
     // METHOD :: psxPlayerStatus -> VOID
@@ -336,6 +423,10 @@ export default class UiApplication {
                 if (this._muted) audio.mute();
                 void audio.unlock().catch(() => undefined);
             }
+        }
+        this._syncTouchController();
+        if (element<HTMLDialogElement>(this._document, "game-dialog").open) {
+            void this._refreshActiveGame();
         }
         void this._refreshMemoryCards();
     }
@@ -357,8 +448,7 @@ export default class UiApplication {
         const systemStop = element<HTMLButtonElement>(this._document, "system-stop-session");
         systemStop.hidden = !sessionActive;
         systemStop.disabled = !sessionActive;
-        element<HTMLButtonElement>(this._document, "fullscreen-fit").disabled = state !== "running" && state !== "paused";
-        element<HTMLButtonElement>(this._document, "fullscreen-stretch").disabled = state !== "running" && state !== "paused";
+        this._syncViewActions();
         element<HTMLElement>(this._document, "pause-overlay").hidden = state !== "paused";
         this._setText("runtime-status", this._runtimeLabel(state));
 
@@ -400,9 +490,38 @@ export default class UiApplication {
             await this._player.pause();
             this._resumeAfterDialog = true;
         }
-        if (dialogId === "library") this._renderLibrary();
+        if (dialogId === "system") {
+            this._selectSystemPanel(this._hasSelectedFirmware() ? this._selectedSystemPanel : "firmware");
+        }
+        if (dialogId === "library") {
+            this._libraryFeedback(null);
+            this._renderLibrary();
+        }
         if (dialogId === "memory") await this._refreshMemoryCards();
+        if (dialogId === "view") this._resetViewForm();
+        if (dialogId === "game") {
+            this._selectedGamePanel = this._player?.session === null || this._player?.session === undefined
+                ? "import"
+                : "session";
+            element<HTMLInputElement>(this._document, "new-state-name").value = "";
+            element<HTMLSelectElement>(this._document, "active-game-disc").replaceChildren();
+            await this._refreshActiveGame();
+        }
         element<HTMLDialogElement>(this._document, `${dialogId}-dialog`).showModal();
+    }
+
+    // METHOD :: uiSystemPanel -> VOID
+    // Selects the Firmware or Controls System workflow and updates tab semantics.
+    private _selectSystemPanel(panel: UiSystemPanel): void {
+        this._controls.cancelCapture();
+        this._selectedSystemPanel = panel;
+        for (const candidate of ["firmware", "controls"] as const) {
+            const selected = candidate === panel;
+            const tab = element<HTMLButtonElement>(this._document, `system-${candidate}-tab`);
+            tab.setAttribute("aria-selected", String(selected));
+            tab.tabIndex = selected ? 0 : -1;
+            element<HTMLElement>(this._document, `system-${candidate}-panel`).hidden = !selected;
+        }
     }
 
     // METHOD :: VOID -> PROMISE(VOID)
@@ -688,6 +807,8 @@ export default class UiApplication {
         start.disabled = !stored || busy;
         clear.hidden = !hasSelection;
         clear.disabled = busy;
+        element<HTMLButtonElement>(this._document, "game-session-tab").disabled = busy;
+        element<HTMLButtonElement>(this._document, "game-import-tab").disabled = busy;
         const rows = [...this._document.querySelectorAll<HTMLElement>("#game-archives li")];
         rows.forEach((row, index) => {
             for (const action of row.querySelectorAll<HTMLButtonElement>("[data-archive-action]")) {
@@ -719,6 +840,436 @@ export default class UiApplication {
         this._selectedArchives = this._selectedArchives.filter((_, archiveIndex) => archiveIndex !== index);
         this._importedGameId = null;
         void this._renderArchiveSelection();
+    }
+
+    // METHOD :: uiGamePanel -> PROMISE(VOID)
+    // Selects one Game workflow while preventing an unavailable active-session panel.
+    private async _selectGamePanel(panel: UiGamePanel): Promise<void> {
+        const session = this._player?.session;
+        this._selectedGamePanel = panel === "session" && (session === null || session === undefined)
+            ? "import"
+            : panel;
+        if (this._selectedGamePanel === "session") await this._refreshActiveGame();
+        else this._renderGamePanels();
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Loads state metadata for the active game and renders the context-sensitive Game modal.
+    private async _refreshActiveGame(): Promise<void> {
+        const session = this._player?.session;
+        if (session === null || session === undefined) {
+            this._stateRecords = [];
+            this._selectedGamePanel = "import";
+            this._renderGamePanels();
+            return;
+        }
+        try {
+            this._stateRecords = await this._storage.listStates(PROFILE_ID, session.machine.gameId);
+            this._renderGamePanels();
+            this._describeActiveDiscSelection();
+            this._describeControllerTypes(session);
+            this._panelFeedback(
+                "state-feedback",
+                "Save, load, overwrite, or delete named states for the active game.",
+                "idle",
+            );
+        } catch (error) {
+            this._stateRecords = [];
+            this._renderGamePanels();
+            this._panelFeedback("state-feedback", `State storage failed: ${errorMessage(error)}`, "error");
+        }
+    }
+
+    // METHOD :: VOID -> VOID
+    // Renders Game tabs and the selected active-session or import workflow.
+    private _renderGamePanels(): void {
+        const session = this._player?.session;
+        const active = session !== null && session !== undefined;
+        if (!active) this._selectedGamePanel = "import";
+        const tabs = element<HTMLElement>(this._document, "game-tabs");
+        const sessionTab = element<HTMLButtonElement>(this._document, "game-session-tab");
+        const importTab = element<HTMLButtonElement>(this._document, "game-import-tab");
+        const sessionSelected = active && this._selectedGamePanel === "session";
+        const busy = this._busyDialog === "game";
+        tabs.hidden = !active;
+        sessionTab.disabled = busy;
+        importTab.disabled = busy;
+        sessionTab.setAttribute("aria-selected", String(sessionSelected));
+        sessionTab.tabIndex = sessionSelected ? 0 : -1;
+        importTab.setAttribute("aria-selected", String(!sessionSelected));
+        importTab.tabIndex = sessionSelected ? -1 : 0;
+        element<HTMLElement>(this._document, "game-session-panel").hidden = !sessionSelected;
+        element<HTMLElement>(this._document, "game-import-panel").hidden = sessionSelected;
+        this._setText("game-title", sessionSelected ? "[ CURRENT GAME ]" : "[ IMPORT GAME ]");
+        if (active) this._renderActiveGame(session);
+    }
+
+    // METHOD :: psxSession -> VOID
+    // Renders active title, disc selection, and stored state records.
+    private _renderActiveGame(session: NonNullable<PsxPlayer["session"]>): void {
+        this._setText("active-game-title", this._activeGameTitle());
+        this._setText(
+            "active-game-disc-status",
+            `Disc ${session.discIndex + 1} of ${session.machine.discCount} active`,
+        );
+        this._renderControllerTypeActions(session);
+        const discSelect = element<HTMLSelectElement>(this._document, "active-game-disc");
+        const selectedDisc = discSelect.options.length === 0 ? session.discIndex : Number(discSelect.value);
+        discSelect.replaceChildren(...Array.from(
+            { length: session.machine.discCount },
+            (_, index) => option(this._document, String(index), `Disc ${index + 1}`),
+        ));
+        discSelect.value = String(Number.isInteger(selectedDisc)
+            && selectedDisc >= 0 && selectedDisc < session.machine.discCount
+            ? selectedDisc
+            : session.discIndex);
+        discSelect.disabled = this._busyDialog === "game";
+        element<HTMLInputElement>(this._document, "new-state-name").disabled = this._busyDialog === "game";
+        element<HTMLButtonElement>(this._document, "save-new-state").disabled = this._busyDialog === "game";
+        this._renderActiveDiscActions();
+        const stateList = element<HTMLElement>(this._document, "state-list");
+        if (this._stateRecords.length === 0) {
+            const empty = this._document.createElement("div");
+            empty.className = "state-empty";
+            empty.textContent = "[ NO SAVED STATES ]";
+            stateList.replaceChildren(empty);
+            return;
+        }
+        stateList.replaceChildren(...this._stateRecords.map((record) => this._stateItem(record, session.machine)));
+    }
+
+    // METHOD :: psxSession -> VOID
+    // Renders persisted per-game controller types and gates restart around realized session types.
+    private _renderControllerTypeActions(session: NonNullable<PsxPlayer["session"]>): void {
+        const selected = this._controllerTypesForGame(session.machine.gameId);
+        for (const port of [1, 2] as const) {
+            const input = element<HTMLSelectElement>(this._document, `active-controller-type-${port}`);
+            input.value = selected[port];
+            input.disabled = this._busyDialog === "game";
+        }
+        const changed = ([1, 2] as const).some((port) => selected[port] !== session.machine.controllers[port]);
+        const apply = element<HTMLButtonElement>(this._document, "apply-controller-types");
+        apply.disabled = !changed || this._busyDialog === "game";
+        apply.textContent = changed ? "Restart To Apply" : "Controllers Active";
+    }
+
+    // METHOD :: psxSession -> VOID
+    // Describes whether stored controller types match the active emulated devices.
+    private _describeControllerTypes(session: NonNullable<PsxPlayer["session"]>): void {
+        const selected = this._controllerTypesForGame(session.machine.gameId);
+        const changed = ([1, 2] as const).some((port) => selected[port] !== session.machine.controllers[port]);
+        this._panelFeedback(
+            "controller-type-feedback",
+            changed
+                ? "Stored controller types are waiting for a restart."
+                : "The selected controller types are active for this game.",
+            changed ? "working" : "success",
+        );
+    }
+
+    // METHOD :: VOID -> VOID
+    // Persists current Game controller selections and reports whether a restart is required.
+    private _controllerTypesChanged(): void {
+        const session = this._player?.session;
+        if (session === null || session === undefined) return;
+        const controllers: Readonly<Record<ControllerPort, PsxControllerType>> = {
+            1: element<HTMLSelectElement>(this._document, "active-controller-type-1").value as PsxControllerType,
+            2: element<HTMLSelectElement>(this._document, "active-controller-type-2").value as PsxControllerType,
+        };
+        this._controllerTypePreferences = {
+            version: 1,
+            games: { ...this._controllerTypePreferences.games, [session.machine.gameId]: controllers },
+        };
+        persistControllerTypePreferences(browserStorage(this._document), this._controllerTypePreferences);
+        this._renderControllerTypeActions(session);
+        const changed = ([1, 2] as const).some((port) => controllers[port] !== session.machine.controllers[port]);
+        this._panelFeedback(
+            "controller-type-feedback",
+            changed
+                ? "Controller types stored for this game. Restart to apply them."
+                : "The selected controller types are already active.",
+            changed ? "working" : "success",
+        );
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Restarts the active game and disc with its persisted emulated controller types.
+    private async _restartWithControllerTypes(): Promise<void> {
+        const session = this._player?.session;
+        if (session === null || session === undefined) return;
+        await this._withBusyDialog("game", async () => {
+            this._panelFeedback("controller-type-feedback", "Restarting with the selected controllers…", "working");
+            try {
+                await this._startStoredGame(session.machine.gameId, session.discIndex);
+                element<HTMLDialogElement>(this._document, "game-dialog").close();
+            } catch (error) {
+                this._panelFeedback(
+                    "controller-type-feedback",
+                    `Controller restart failed: ${errorMessage(error)}`,
+                    "error",
+                );
+            }
+        });
+        if (this._player?.session !== null && this._player?.session !== undefined) {
+            this._renderControllerTypeActions(this._player.session);
+        }
+    }
+
+    // METHOD :: STRING -> ARRAY<controllerPort, psxControllerType>
+    // Returns stored controller types for one game or the DualShock defaults.
+    private _controllerTypesForGame(gameId: string): Readonly<Record<ControllerPort, PsxControllerType>> {
+        return this._controllerTypePreferences.games[gameId] ?? DEFAULT_CONTROLLER_TYPES;
+    }
+
+    // METHOD :: VOID -> STRING
+    // Returns the active library title without exposing content identity in fallback copy.
+    private _activeGameTitle(): string {
+        const gameId = this._player?.session?.machine.gameId;
+        return this._games.find((game) => game.gameId === gameId)?.displayTitle ?? "Current game";
+    }
+
+    // METHOD :: VOID -> VOID
+    // Gates disc insertion around the active disc and Game mutation state.
+    private _renderActiveDiscActions(): void {
+        const session = this._player?.session;
+        const selected = Number(element<HTMLSelectElement>(this._document, "active-game-disc").value);
+        const change = element<HTMLButtonElement>(this._document, "change-active-disc");
+        const restart = element<HTMLButtonElement>(this._document, "restart-active-disc");
+        const selectedIsActive = session !== null && session !== undefined && selected === session.discIndex;
+        const unavailable = session === null || session === undefined || this._busyDialog === "game";
+        change.disabled = unavailable || selectedIsActive;
+        change.textContent = selectedIsActive ? "Current Disc" : "Change Disc";
+        restart.hidden = session === null || session === undefined || selectedIsActive;
+        restart.disabled = unavailable || selectedIsActive;
+    }
+
+    // METHOD :: VOID -> VOID
+    // Explains the behavioral difference between inserting and booting the selected disc.
+    private _describeActiveDiscSelection(): void {
+        const session = this._player?.session;
+        if (session === null || session === undefined || this._busyDialog === "game") return;
+        const selected = Number(element<HTMLSelectElement>(this._document, "active-game-disc").value);
+        const message = session.machine.discCount === 1
+            ? "This game has one disc."
+            : selected === session.discIndex
+                ? `Disc ${session.discIndex + 1} of ${session.machine.discCount} is active.`
+                : `Disc ${selected + 1} selected. Change Disc preserves the running game; Restart From Disc boots it directly.`;
+        this._panelFeedback("active-game-feedback", message, "idle");
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Inserts the selected disc, closes Game, and lets modal lifecycle resume the session.
+    private async _changeActiveDisc(): Promise<void> {
+        const player = this._player;
+        const session = player?.session;
+        if (player === null || session === null || session === undefined) return;
+        const discIndex = Number(element<HTMLSelectElement>(this._document, "active-game-disc").value);
+        if (!Number.isInteger(discIndex) || discIndex < 0 || discIndex >= session.machine.discCount
+            || discIndex === session.discIndex) return;
+        let changed = false;
+        await this._withBusyDialog("game", async () => {
+            this._renderActiveGame(session);
+            this._panelFeedback("active-game-feedback", `Changing to Disc ${discIndex + 1}…`, "working");
+            try {
+                await player.setDisc(discIndex);
+                this._selectedLibraryDiscIndex = discIndex;
+                this._setText("runtime-status", this._runtimeLabel(player.status));
+                changed = true;
+            } catch (error) {
+                this._panelFeedback("active-game-feedback", `Disc change failed: ${errorMessage(error)}`, "error");
+            }
+        });
+        this._renderActiveGame(session);
+        if (!changed) return;
+        element<HTMLDialogElement>(this._document, "game-dialog").close();
+        this._showNotice(`Disc ${discIndex + 1} inserted.`);
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Rebuilds the active game from the selected disc after warning about volatile progress loss.
+    private async _restartFromActiveDisc(): Promise<void> {
+        const session = this._player?.session;
+        if (session === null || session === undefined) return;
+        const discIndex = Number(element<HTMLSelectElement>(this._document, "active-game-disc").value);
+        if (!Number.isInteger(discIndex) || discIndex < 0 || discIndex >= session.machine.discCount
+            || discIndex === session.discIndex) return;
+        if (!globalThis.confirm(
+            `Restart “${this._activeGameTitle()}” from Disc ${discIndex + 1}? Unsaved progress since the last in-game save or save state will be lost.`,
+        )) return;
+        let restarted = false;
+        await this._withBusyDialog("game", async () => {
+            this._renderActiveGame(session);
+            this._panelFeedback(
+                "active-game-feedback",
+                `Restarting from Disc ${discIndex + 1}…`,
+                "working",
+            );
+            try {
+                await this._startStoredGame(session.machine.gameId, discIndex);
+                this._selectedLibraryDiscIndex = discIndex;
+                restarted = true;
+            } catch (error) {
+                this._panelFeedback(
+                    "active-game-feedback",
+                    `Restart from disc failed: ${errorMessage(error)}`,
+                    "error",
+                );
+            }
+        });
+        if (!restarted) {
+            const activeSession = this._player?.session;
+            if (activeSession !== null && activeSession !== undefined) this._renderActiveGame(activeSession);
+            return;
+        }
+        this._resumeAfterDialog = false;
+        element<HTMLDialogElement>(this._document, "game-dialog").close();
+        this._showNotice(`Restarted from Disc ${discIndex + 1}.`);
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Saves one new uniquely named state for the active game.
+    private async _saveNewState(): Promise<void> {
+        const player = this._player;
+        if (player?.session === null || player?.session === undefined) return;
+        const input = element<HTMLInputElement>(this._document, "new-state-name");
+        const name = input.value.trim().normalize("NFC");
+        if (name.length === 0) {
+            this._panelFeedback("state-feedback", "Enter a name for the new state.", "error");
+            input.focus();
+            return;
+        }
+        if (this._stateRecords.some((record) => record.name === name)) {
+            this._panelFeedback("state-feedback", `“${name}” already exists. Use Overwrite to replace it.`, "error");
+            return;
+        }
+        await this._runStateMutation(`Saving “${name}”…`, async () => {
+            await player.saveState(name);
+            input.value = "";
+        }, `Saved “${name}”.`);
+    }
+
+    // METHOD :: psxStateRecord -> PROMISE(VOID)
+    // Loads one compatible state and closes Game so normal modal resume behavior restores play.
+    private async _loadState(record: PsxStateRecord): Promise<void> {
+        const player = this._player;
+        const session = player?.session;
+        if (player === null || session === null || session === undefined
+            || !stateCompatible(record, session.machine)) return;
+        let loaded = false;
+        await this._withBusyDialog("game", async () => {
+            this._renderActiveGame(session);
+            this._panelFeedback("state-feedback", `Loading “${record.name}”…`, "working");
+            try {
+                await player.loadState(record.name);
+                this._selectedLibraryDiscIndex = record.metadata.discIndex;
+                this._setText("runtime-status", this._runtimeLabel(player.status));
+                loaded = true;
+            } catch (error) {
+                this._panelFeedback("state-feedback", `State load failed: ${errorMessage(error)}`, "error");
+            }
+        });
+        if (!loaded) {
+            this._renderActiveGame(session);
+            return;
+        }
+        element<HTMLDialogElement>(this._document, "game-dialog").close();
+        this._showNotice(`Loaded save state “${record.name}”.`);
+    }
+
+    // METHOD :: psxStateRecord -> PROMISE(VOID)
+    // Replaces one named state after explicit confirmation.
+    private async _overwriteState(record: PsxStateRecord): Promise<void> {
+        const player = this._player;
+        if (player?.session === null || player?.session === undefined) return;
+        if (!globalThis.confirm(`Overwrite save state “${record.name}”?`)) return;
+        await this._runStateMutation(
+            `Overwriting “${record.name}”…`,
+            async () => { await player.saveState(record.name); },
+            `Overwrote “${record.name}”.`,
+        );
+    }
+
+    // METHOD :: psxStateRecord -> PROMISE(VOID)
+    // Removes one named state after explicit confirmation.
+    private async _deleteState(record: PsxStateRecord): Promise<void> {
+        const player = this._player;
+        if (player?.session === null || player?.session === undefined) return;
+        if (!globalThis.confirm(`Delete save state “${record.name}”?`)) return;
+        await this._runStateMutation(
+            `Deleting “${record.name}”…`,
+            async () => { await player.deleteState(record.name); },
+            `Deleted “${record.name}”.`,
+        );
+    }
+
+    // METHOD :: STRING, (VOID -> PROMISE(VOID)), STRING -> PROMISE(VOID)
+    // Runs one protected state mutation, refreshes records, and reports its result in both UI surfaces.
+    private async _runStateMutation(
+        working: string,
+        mutation: () => Promise<void>,
+        success: string,
+    ): Promise<void> {
+        await this._withBusyDialog("game", async () => {
+            const activeSession = this._player?.session;
+            if (activeSession !== null && activeSession !== undefined) this._renderActiveGame(activeSession);
+            this._panelFeedback("state-feedback", working, "working");
+            try {
+                await mutation();
+                const session = this._player?.session;
+                this._stateRecords = session === null || session === undefined
+                    ? []
+                    : await this._storage.listStates(PROFILE_ID, session.machine.gameId);
+                if (session !== null && session !== undefined) this._renderActiveGame(session);
+                this._panelFeedback("state-feedback", success, "success");
+                this._showNotice(success);
+            } catch (error) {
+                this._panelFeedback("state-feedback", `State change failed: ${errorMessage(error)}`, "error");
+            }
+        });
+        const session = this._player?.session;
+        if (session !== null && session !== undefined) this._renderActiveGame(session);
+    }
+
+    // METHOD :: psxStateRecord, psxMachineInfo -> HTMLElement
+    // Builds one safe state summary with compatible load, overwrite, and destructive delete actions.
+    private _stateItem(record: PsxStateRecord, machine: PsxMachineInfo): HTMLElement {
+        const item = this._document.createElement("article");
+        item.className = "state-item";
+        const summary = this._document.createElement("div");
+        summary.className = "state-summary";
+        const name = this._document.createElement("strong");
+        name.textContent = record.name;
+        const metadata = this._document.createElement("span");
+        const compatible = stateCompatible(record, machine);
+        metadata.textContent = `${new Date(record.metadata.createdAt).toLocaleString()} · Disc ${record.metadata.discIndex + 1} · ${compatible ? "Ready" : "Different core build"}`;
+        summary.append(name, metadata);
+        const actions = this._document.createElement("div");
+        actions.className = "state-actions";
+        const load = button(this._document, "Load");
+        load.disabled = !compatible || this._busyDialog === "game";
+        load.addEventListener("click", () => { void this._loadState(record); });
+        const overwrite = button(this._document, "Overwrite");
+        overwrite.disabled = this._busyDialog === "game";
+        overwrite.addEventListener("click", () => { void this._overwriteState(record); });
+        const remove = button(this._document, "Delete");
+        remove.className = "danger-action";
+        remove.disabled = this._busyDialog === "game";
+        remove.addEventListener("click", () => { void this._deleteState(record); });
+        actions.append(load, overwrite, remove);
+        item.append(summary, actions);
+        return item;
+    }
+
+    // METHOD :: STRING, STRING, uiFeedbackState -> VOID
+    // Updates one Game session feedback surface and its visual severity.
+    private _panelFeedback(
+        id: "active-game-feedback" | "controller-type-feedback" | "state-feedback",
+        message: string,
+        state: UiFeedbackState,
+    ): void {
+        const feedback = element<HTMLElement>(this._document, id);
+        feedback.textContent = message;
+        feedback.dataset.state = state;
     }
 
     // METHOD :: VOID -> PROMISE(VOID)
@@ -829,6 +1380,7 @@ export default class UiApplication {
     // METHOD :: psxStoredGame -> PROMISE(VOID)
     // Starts a selected library game or performs an in-session disc insertion for the active game.
     private async _launchLibrarySelection(game: PsxStoredGame): Promise<void> {
+        this._libraryFeedback(`${this._libraryStartLabel(game)} “${game.displayTitle}”…`, "working");
         try {
             const player = this._player;
             const session = player?.session;
@@ -846,7 +1398,7 @@ export default class UiApplication {
             }
             element<HTMLDialogElement>(this._document, "library-dialog").close();
         } catch (error) {
-            this._showNotice(`Start failed: ${errorMessage(error)}`);
+            this._libraryFeedback(`Start failed: ${errorMessage(error)}`, "error");
         }
     }
 
@@ -860,7 +1412,7 @@ export default class UiApplication {
         await runtime.startStored(gameId, {
             bios,
             initialDiscIndex: discIndex,
-            controllers: { 1: "dualshock", 2: "dualshock" },
+            controllers: this._controllerTypesForGame(gameId),
         });
         this._muted = false;
         const audio = this._sessionAudio();
@@ -911,10 +1463,14 @@ export default class UiApplication {
     }
 
     // METHOD :: VOID -> PROMISE(VOID)
-    // Performs one supported soft reset on the active session.
+    // Performs one supported soft reset and resumes when reset was requested from pause.
     private async _resetSession(): Promise<void> {
+        const player = this._player;
+        if (player === null) return;
+        const resumeAfterReset = player.status === "paused";
         try {
-            await this._player?.reset("soft");
+            await player.reset("soft");
+            if (resumeAfterReset && player.status === "paused") player.resume();
             this._showNotice("Session reset.");
         } catch (error) {
             this._showNotice(`Reset failed: ${errorMessage(error)}`);
@@ -955,19 +1511,75 @@ export default class UiApplication {
         }
     }
 
-    // METHOD :: psxScalingMode -> PROMISE(VOID)
+    // METHOD :: VOID -> VOID
+    // Restores the View form from applied runtime and controller preferences before each opening.
+    private _resetViewForm(): void {
+        element<HTMLSelectElement>(this._document, "scaling-mode").value = this._player?.display.scaling ?? "fit";
+        element<HTMLInputElement>(this._document, "touch-controller-visible").checked = this._touchControllerVisible;
+        this._syncViewActions();
+    }
+
+    // METHOD :: VOID -> VOID
+    // Enables Apply only when the selected presentation can be entered in the current lifecycle state.
+    private _syncViewActions(): void {
+        const rawMode = element<HTMLSelectElement>(this._document, "scaling-mode").value;
+        const fullscreen = rawMode === "fullscreen-fit" || rawMode === "fullscreen-stretch";
+        const sessionActive = this._player?.status === "running" || this._player?.status === "paused";
+        element<HTMLButtonElement>(this._document, "apply-view").disabled = fullscreen && !sessionActive;
+        this._viewFeedback(fullscreen && !sessionActive
+            ? "Start a game before applying a fullscreen presentation."
+            : null);
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Applies the deferred scaling, fullscreen, and on-screen-controller selections as one View action.
+    private async _applyView(): Promise<void> {
+        const rawMode = element<HTMLSelectElement>(this._document, "scaling-mode").value;
+        if (!isUiViewMode(rawMode)) {
+            this._viewFeedback("The selected view mode is unsupported.");
+            return;
+        }
+        const fullscreenScaling = fullscreenScalingFor(rawMode);
+        const runtimeScaling = runtimeScalingFor(rawMode);
+        if (fullscreenScaling !== null && !await this._enterFullscreen(fullscreenScaling)) return;
+        if (fullscreenScaling === null && this._player !== null) this._player.display.scaling = runtimeScaling;
+        this._touchControllerVisible = element<HTMLInputElement>(
+            this._document,
+            "touch-controller-visible",
+        ).checked;
+        storeBoolean(
+            browserStorage(this._document),
+            TOUCH_CONTROLLER_STORAGE_KEY,
+            this._touchControllerVisible,
+        );
+        this._syncTouchController();
+        element<HTMLDialogElement>(this._document, "view-dialog").close();
+        this._showNotice(
+            `View applied: ${fullscreenScaling === null ? "" : "Fullscreen · "}${displayScaling(runtimeScaling)}.`,
+        );
+    }
+
+    // METHOD :: psxScalingMode -> PROMISE(BOOLEAN)
     // Applies one supported scaling mode and requests fullscreen presentation.
-    private async _enterFullscreen(scaling: PsxScalingMode): Promise<void> {
+    private async _enterFullscreen(scaling: PsxScalingMode): Promise<boolean> {
         const display = this._player?.display;
-        if (display?.fullscreen === undefined) return;
+        if (display?.fullscreen === undefined) return false;
         try {
             display.scaling = scaling;
-            element<HTMLSelectElement>(this._document, "scaling-mode").value = scaling;
             await display.fullscreen();
-            element<HTMLDialogElement>(this._document, "view-dialog").close();
+            return true;
         } catch (error) {
-            this._setText("view-feedback", `Fullscreen failed: ${errorMessage(error)}`);
+            this._viewFeedback(`Fullscreen failed: ${errorMessage(error)}`);
+            return false;
         }
+    }
+
+    // METHOD :: STRING? -> VOID
+    // Shows View feedback only when an actionable issue needs to remain in the modal.
+    private _viewFeedback(message: string | null): void {
+        const feedback = element<HTMLElement>(this._document, "view-feedback");
+        feedback.textContent = message ?? "";
+        feedback.hidden = message === null;
     }
 
     // METHOD :: VOID -> PROMISE(VOID)
@@ -1104,17 +1716,20 @@ export default class UiApplication {
     }
 
     // METHOD :: VOID -> VOID
-    // Assigns the first two connected standard browser gamepads to physical ports one and two.
-    private _syncGamepads(): void {
-        const runtime = this._runtime;
-        if (runtime === null) return;
-        for (const index of this._boundGamepads) runtime.bindGamepad(index, null);
-        this._boundGamepads.clear();
-        const pads = [...navigator.getGamepads()].filter((pad): pad is Gamepad => pad !== null && pad.mapping === "standard");
-        pads.slice(0, 2).forEach((pad, index) => {
-            runtime.bindGamepad(pad.index, (index + 1) as ControllerPort);
-            this._boundGamepads.add(pad.index);
-        });
+    // Reflects the persisted View preference and current player input on the player-one touch surface.
+    private _syncTouchController(): void {
+        const root = element<HTMLElement>(this._document, "touch-controller");
+        const playStage = element<HTMLElement>(this._document, "play-stage");
+        const controllerType = this._player?.session?.machine.controllers[1] ?? "dualshock";
+        this._touchController.attach(this._player?.input ?? null);
+        if (this._touchController.controllerType !== controllerType) {
+            this._touchController.controllerType = controllerType;
+        }
+        root.hidden = !this._touchControllerVisible;
+        playStage.dataset.touchVisible = String(this._touchControllerVisible);
+        this._touchController.enabled = this._touchControllerVisible
+            && this._player?.status === "running"
+            && controllerType !== "none";
     }
 
     // METHOD :: uiDialogId, (VOID -> PROMISE(VOID)) -> PROMISE(VOID)
@@ -1199,6 +1814,15 @@ export default class UiApplication {
         feedback.dataset.state = state;
     }
 
+    // METHOD :: STRING?, uiFeedbackState? -> VOID
+    // Updates or clears the Library operation-feedback region.
+    private _libraryFeedback(message: string | null, state: UiFeedbackState = "idle"): void {
+        const feedback = element<HTMLElement>(this._document, "library-feedback");
+        feedback.textContent = message ?? "";
+        feedback.dataset.state = state;
+        feedback.hidden = message === null;
+    }
+
     // METHOD :: VOID -> VOID
     // Updates compact firmware and game-library telemetry.
     private _renderTelemetry(): void {
@@ -1238,6 +1862,46 @@ const element = <T extends HTMLElement>(document: Document, id: string): T => {
     const value = document.getElementById(id);
     if (value === null) throw new Error(`Missing production UI element: ${id}`);
     return value as T;
+};
+
+// HELPER :: storage?, STRING -> BOOLEAN
+// Reads one opt-in browser preference and defaults safely when storage is unavailable.
+const storedBoolean = (storage: Storage | null, key: string): boolean => {
+    try { return storage?.getItem(key) === "true"; } catch { return false; }
+};
+
+// HELPER :: storage?, STRING, BOOLEAN -> VOID
+// Persists one browser preference without making unavailable storage fatal to the UI.
+const storeBoolean = (storage: Storage | null, key: string, value: boolean): void => {
+    try { storage?.setItem(key, String(value)); } catch { /* Preferences are best effort. */ }
+};
+
+// HELPER :: DOCUMENT -> STORAGE?
+// Returns browser-local storage without allowing privacy or origin restrictions to block startup.
+const browserStorage = (document: Document): Storage | null => {
+    try { return document.defaultView?.localStorage ?? null; } catch { return null; }
+};
+
+// HELPER :: STORAGE? -> uiControllerTypePreferences
+// Loads validated per-game controller types or returns an empty versioned preference set.
+const loadControllerTypePreferences = (storage: Storage | null): UiControllerTypePreferences => {
+    try {
+        const source = storage?.getItem(CONTROLLER_TYPE_STORAGE_KEY);
+        if (source === null || source === undefined) return { version: 1, games: {} };
+        const value: unknown = JSON.parse(source);
+        return isUiControllerTypePreferences(value) ? value : { version: 1, games: {} };
+    } catch {
+        return { version: 1, games: {} };
+    }
+};
+
+// HELPER :: STORAGE?, uiControllerTypePreferences -> VOID
+// Persists per-game emulated controller types without making storage availability fatal.
+const persistControllerTypePreferences = (
+    storage: Storage | null,
+    preferences: UiControllerTypePreferences,
+): void => {
+    try { storage?.setItem(CONTROLLER_TYPE_STORAGE_KEY, JSON.stringify(preferences)); } catch { /* Best effort. */ }
 };
 
 // HELPER :: FILE, psxRegion, [NUMBER] -> PROMISE(biosImage)
@@ -1383,6 +2047,26 @@ const download = (document: Document, blob: Blob, name: string): void => {
     link.remove();
     globalThis.setTimeout(() => URL.revokeObjectURL(url), 0);
 };
+
+// HELPER :: uiViewMode -> psxScalingMode?
+// Returns the runtime scaling requested by a fullscreen View option, or null for a windowed option.
+const fullscreenScalingFor = (mode: UiViewMode): PsxScalingMode | null => mode === "fullscreen-fit"
+    ? "fit"
+    : mode === "fullscreen-stretch" ? "stretch" : null;
+
+// HELPER :: uiViewMode -> psxScalingMode
+// Returns the runtime scaling carried by any windowed or fullscreen View option.
+const runtimeScalingFor = (mode: UiViewMode): PsxScalingMode => mode === "fullscreen-fit"
+    ? "fit"
+    : mode === "fullscreen-stretch" ? "stretch" : mode;
+
+// HELPER :: psxStateRecord, psxMachineInfo -> BOOLEAN
+// True when one stored state matches the exact active content and deterministic core build.
+const stateCompatible = (record: PsxStateRecord, machine: PsxMachineInfo): boolean =>
+    record.metadata.gameId === machine.gameId
+    && record.metadata.buildId === machine.buildId
+    && record.metadata.core === machine.core
+    && record.metadata.coreVersion === machine.coreVersion;
 
 // HELPER :: psxScalingMode -> STRING
 // Formats a supported scaling mode for View feedback.
