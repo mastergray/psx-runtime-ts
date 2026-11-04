@@ -742,12 +742,37 @@ try {
                 .every((id) => document.querySelector(`#${id}`) === null),
         }));
         await page.click("[data-open-dialog='system']");
-        const system = await page.evaluate(() => ({
-            open: document.querySelector("#system-dialog")?.hasAttribute("open"),
-            slots: document.querySelectorAll(".firmware-slot").length,
-            defaultRegion: document.querySelector("#firmware-region")?.value,
-            forgetHidden: document.querySelector("#forget-firmware")?.hasAttribute("hidden"),
-        }));
+        const system = await page.evaluate(() => {
+            const input = document.querySelector("#firmware-file");
+            const store = document.querySelector("#store-firmware");
+            if (!(input instanceof HTMLInputElement) || !(store instanceof HTMLButtonElement)) {
+                throw new Error("Missing firmware selection actions");
+            }
+            const storeHidden = store.hidden;
+            const transfer = new DataTransfer();
+            transfer.items.add(new File([new Uint8Array(512 * 1024)], "new-firmware.bin", {
+                type: "application/octet-stream",
+            }));
+            input.files = transfer.files;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+            const newFirmware = {
+                visible: !store.hidden,
+                label: store.textContent,
+                enabled: !store.disabled,
+            };
+            input.files = new DataTransfer().files;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+            return {
+                open: document.querySelector("#system-dialog")?.hasAttribute("open"),
+                slots: document.querySelectorAll(".firmware-slot").length,
+                defaultRegion: document.querySelector("#firmware-region")?.value,
+                forgetHidden: document.querySelector("#forget-firmware")?.hasAttribute("hidden"),
+                systemStopHidden: document.querySelector("#system-stop-session")?.hasAttribute("hidden"),
+                storeHidden,
+                newFirmware,
+                hiddenAfterClear: store.hidden,
+            };
+        });
         await page.click("#system-dialog button[value='cancel']");
         const firmwareDrop = await page.evaluate(() => {
             const stage = document.querySelector("#screen-stage");
@@ -777,6 +802,174 @@ try {
             feedback: document.querySelector("#firmware-feedback")?.getAttribute("data-state"),
             dragging: document.querySelector("#screen-stage")?.getAttribute("data-dragging"),
         }));
+        await page.click("[data-open-dialog='system']");
+        const systemDelete = await page.evaluate(() => {
+            const messages = [];
+            globalThis.confirm = (message) => {
+                messages.push(String(message));
+                return false;
+            };
+            const remove = document.querySelector("#forget-firmware");
+            const input = document.querySelector("#firmware-file");
+            const store = document.querySelector("#store-firmware");
+            const systemStop = document.querySelector("#system-stop-session");
+            if (!(remove instanceof HTMLButtonElement) || !(input instanceof HTMLInputElement)
+                || !(store instanceof HTMLButtonElement) || !(systemStop instanceof HTMLButtonElement)) {
+                throw new Error("Missing System actions");
+            }
+            remove.click();
+            const initialStoreHidden = store.hidden;
+            const transfer = new DataTransfer();
+            transfer.items.add(new File([new Uint8Array(512 * 1024)], "replacement.bin", {
+                type: "application/octet-stream",
+            }));
+            input.files = transfer.files;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+            const replacement = {
+                visible: !store.hidden,
+                label: store.textContent,
+                enabled: !store.disabled,
+            };
+            input.files = new DataTransfer().files;
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+            systemStop.hidden = false;
+            systemStop.disabled = false;
+            systemStop.click();
+            const systemStopResult = {
+                label: systemStop.textContent,
+                destructive: systemStop.classList.contains("danger-action"),
+                confirmation: messages[1],
+                leftOfDelete: systemStop.getBoundingClientRect().left < remove.getBoundingClientRect().left,
+            };
+            systemStop.hidden = true;
+            systemStop.disabled = true;
+            return {
+                label: remove.textContent,
+                visible: !remove.hidden,
+                destructive: remove.classList.contains("danger-action"),
+                color: getComputedStyle(remove).color,
+                confirmation: messages[0],
+                initialStoreHidden,
+                replacement,
+                hiddenAfterClear: store.hidden,
+                systemStop: systemStopResult,
+            };
+        });
+        await page.selectOption("#firmware-region", "pal");
+        const emptyRegionGate = await page.evaluate(() => ({
+            stage: document.querySelector("#ui-app")?.getAttribute("data-stage"),
+            gameDisabled: document.querySelector("#game-nav")?.hasAttribute("disabled"),
+            libraryDisabled: document.querySelector("#library-nav")?.hasAttribute("disabled"),
+            deleteHidden: document.querySelector("#forget-firmware")?.hasAttribute("hidden"),
+            storeHidden: document.querySelector("#store-firmware")?.hasAttribute("hidden"),
+        }));
+        await page.selectOption("#firmware-region", "ntsc-u");
+        const storedRegionGate = await page.evaluate(() => ({
+            stage: document.querySelector("#ui-app")?.getAttribute("data-stage"),
+            gameEnabled: document.querySelector("#game-nav")?.hasAttribute("disabled") === false,
+            libraryEnabled: document.querySelector("#library-nav")?.hasAttribute("disabled") === false,
+            deleteVisible: document.querySelector("#forget-firmware")?.hasAttribute("hidden") === false,
+            storeHidden: document.querySelector("#store-firmware")?.hasAttribute("hidden"),
+        }));
+        await page.click("#system-dialog button[value='cancel']");
+        const volumeControl = await page.evaluate(() => {
+            const trigger = document.querySelector("#volume-session");
+            const dialog = document.querySelector("#volume-dialog");
+            const range = document.querySelector("#volume-level");
+            if (!(trigger instanceof HTMLButtonElement) || !(dialog instanceof HTMLDialogElement)
+                || !(range instanceof HTMLInputElement)) throw new Error("Missing Volume controls");
+            trigger.disabled = false;
+            trigger.click();
+            range.value = "42";
+            range.dispatchEvent(new Event("input", { bubbles: true }));
+            const result = {
+                label: trigger.textContent,
+                controls: trigger.getAttribute("aria-controls"),
+                open: dialog.open,
+                value: range.value,
+                output: document.querySelector("#volume-value")?.textContent,
+                ranges: dialog.querySelectorAll("input[type='range']").length,
+                extraControls: dialog.querySelectorAll(".dialog-content button, .dialog-content select, .dialog-content input:not([type='range'])").length,
+            };
+            dialog.close();
+            trigger.disabled = true;
+            return {
+                ...result,
+                closed: !dialog.open,
+            };
+        });
+        await page.click("[data-open-dialog='memory']");
+        await page.waitForFunction(() => document.querySelector("#memory-dialog")?.hasAttribute("open"));
+        const memoryImportInitial = await page.evaluate(() => ({
+            dialogOpen: document.querySelector("#memory-dialog")?.hasAttribute("open"),
+            cardOneDisabled: document.querySelector("#import-card-1")?.hasAttribute("disabled"),
+            cardTwoDisabled: document.querySelector("#import-card-2")?.hasAttribute("disabled"),
+        }));
+        const memoryCard = Buffer.alloc(128 * 1024);
+        memoryCard[0] = 0x4d;
+        memoryCard[1] = 0x43;
+        for (let frame = 1; frame <= 15; frame++) {
+            const directoryOffset = frame * 128;
+            memoryCard[directoryOffset] = 0xa0;
+            memoryCard[directoryOffset + 8] = 0xff;
+            memoryCard[directoryOffset + 9] = 0xff;
+        }
+        const directoryOffset = 128;
+        memoryCard[directoryOffset] = 0x51;
+        memoryCard.writeUInt32LE(8 * 1024, directoryOffset + 4);
+        Buffer.from("BASLUS-00000TEST").copy(memoryCard, directoryOffset + 0x0a);
+        const dataOffset = 8 * 1024;
+        memoryCard[dataOffset] = 0x53;
+        memoryCard[dataOffset + 1] = 0x43;
+        Buffer.from("Test Save").copy(memoryCard, dataOffset + 4);
+        await page.setInputFiles("#memory-card-file", {
+            name: "imported-card.mcd",
+            mimeType: "application/octet-stream",
+            buffer: memoryCard,
+        });
+        const memoryImportReady = await page.evaluate(() => {
+            globalThis.__m12MemoryConfirmations = [];
+            globalThis.confirm = (message) => {
+                globalThis.__m12MemoryConfirmations.push(String(message));
+                return true;
+            };
+            return {
+                feedback: document.querySelector("#memory-feedback")?.textContent,
+                cardOneEnabled: document.querySelector("#import-card-1")?.hasAttribute("disabled") === false,
+                cardTwoEnabled: document.querySelector("#import-card-2")?.hasAttribute("disabled") === false,
+            };
+        });
+        await page.click("#import-card-1");
+        await page.waitForFunction(() => document.querySelector("#memory-feedback")?.getAttribute("data-state")
+            === "success");
+        const memoryImported = await page.evaluate(() => ({
+            feedback: document.querySelector("#memory-feedback")?.textContent,
+            cardStatus: document.querySelector("#card-status-1")?.textContent,
+            downloadEnabled: document.querySelector("#download-card-1")?.hasAttribute("disabled") === false,
+            cardOneEnabled: document.querySelector("#import-card-1")?.hasAttribute("disabled") === false,
+            cardTwoEnabled: document.querySelector("#import-card-2")?.hasAttribute("disabled") === false,
+            confirmation: globalThis.__m12MemoryConfirmations[0],
+            savesVisible: document.querySelector("#card-saves-1")?.hasAttribute("hidden") === false,
+            saveTitle: document.querySelector("#card-saves-1 strong")?.textContent,
+            saveDetail: document.querySelector("#card-saves-1 span")?.textContent,
+        }));
+        await page.click("#memory-dialog button[value='cancel']");
+        await page.waitForFunction(() => document.querySelector("#memory-dialog")?.hasAttribute("open") === false);
+        await page.click("[data-open-dialog='memory']");
+        await page.waitForFunction(() => document.querySelector("#memory-dialog")?.hasAttribute("open"));
+        const memoryReset = await page.evaluate(() => {
+            const input = document.querySelector("#memory-card-file");
+            return {
+                selectedFiles: input instanceof HTMLInputElement ? input.files?.length : null,
+                feedback: document.querySelector("#memory-feedback")?.textContent,
+                feedbackState: document.querySelector("#memory-feedback")?.getAttribute("data-state"),
+                cardOneDisabled: document.querySelector("#import-card-1")?.hasAttribute("disabled"),
+                cardTwoDisabled: document.querySelector("#import-card-2")?.hasAttribute("disabled"),
+                summaryVisible: document.querySelector("#card-saves-1")?.hasAttribute("hidden") === false,
+                saveTitle: document.querySelector("#card-saves-1 strong")?.textContent,
+            };
+        });
+        await page.click("#memory-dialog button[value='cancel']");
         const gameDrop = await page.evaluate(async () => {
             const stage = document.querySelector("#screen-stage");
             if (!(stage instanceof HTMLElement)) throw new Error("Missing production stage");
@@ -983,9 +1176,45 @@ try {
                 && desktop.canvas && desktop.wordmarkAbsent && desktop.gameDisabled && desktop.libraryDisabled && desktop.pageFits
                 && desktop.unsupportedSettingsAbsent && system.open && system.slots === 3
                 && system.defaultRegion === "ntsc-u" && system.forgetHidden
+                && system.systemStopHidden && system.storeHidden
+                && system.newFirmware.visible && system.newFirmware.label === "Check And Store"
+                && system.newFirmware.enabled && system.hiddenAfterClear
                 && firmwareDrop.accepted && firmwareDrop.highlighted === "true"
                 && firmwareStored.gameEnabled && firmwareStored.libraryEnabled
                 && firmwareStored.feedback === "success" && firmwareStored.dragging === "false"
+                && systemDelete.label === "Delete Firmware" && systemDelete.visible
+                && systemDelete.destructive && systemDelete.color === "rgb(255, 155, 174)"
+                && systemDelete.confirmation?.startsWith("Delete the stored NTSC-U")
+                && systemDelete.initialStoreHidden && systemDelete.replacement.visible
+                && systemDelete.replacement.label === "Check And Replace"
+                && systemDelete.replacement.enabled && systemDelete.hiddenAfterClear
+                && systemDelete.systemStop.label === "Stop Session"
+                && systemDelete.systemStop.destructive && systemDelete.systemStop.leftOfDelete
+                && systemDelete.systemStop.confirmation?.startsWith("Stop the current session?")
+                && emptyRegionGate.stage === "firmware-required" && emptyRegionGate.gameDisabled
+                && emptyRegionGate.libraryDisabled && emptyRegionGate.deleteHidden && emptyRegionGate.storeHidden
+                && storedRegionGate.stage === "ready" && storedRegionGate.gameEnabled
+                && storedRegionGate.libraryEnabled && storedRegionGate.deleteVisible && storedRegionGate.storeHidden
+                && volumeControl.label === "Volume" && volumeControl.controls === "volume-dialog"
+                && volumeControl.open && volumeControl.closed && volumeControl.value === "42"
+                && volumeControl.output === "42%" && volumeControl.ranges === 1
+                && volumeControl.extraControls === 0
+                && memoryImportInitial.dialogOpen && memoryImportInitial.cardOneDisabled
+                && memoryImportInitial.cardTwoDisabled
+                && memoryImportReady.feedback?.includes("ready. Choose the card slot")
+                && memoryImportReady.cardOneEnabled && memoryImportReady.cardTwoEnabled
+                && memoryImported.feedback?.includes("Imported “imported-card.mcd” to Card 1")
+                && memoryImported.cardStatus?.includes("1 save · 1/15 blocks used")
+                && memoryImported.cardStatus?.includes("revision 1") && memoryImported.downloadEnabled
+                && memoryImported.cardOneEnabled && memoryImported.cardTwoEnabled
+                && memoryImported.confirmation === "Replace Card 1 with “imported-card.mcd”?"
+                && memoryImported.savesVisible && memoryImported.saveTitle === "Test Save"
+                && memoryImported.saveDetail === "BASLUS-00000TEST · 1 block"
+                && memoryReset.selectedFiles === 0
+                && memoryReset.feedback === "Select a 128 KiB card image to import, or download an existing card."
+                && memoryReset.feedbackState === "idle" && memoryReset.cardOneDisabled
+                && memoryReset.cardTwoDisabled && memoryReset.summaryVisible
+                && memoryReset.saveTitle === "Test Save"
                 && gameDrop.accepted && gameDrop.highlighted === "true" && gameSelected.dialogOpen
                 && gameSelected.selection === "1 ZIP selected in disc order."
                 && gameSelected.archive === "Dropped Game.zip" && gameSelected.dragging === "false"
@@ -1022,6 +1251,14 @@ try {
             system,
             firmwareDrop,
             firmwareStored,
+            systemDelete,
+            emptyRegionGate,
+            storedRegionGate,
+            volumeControl,
+            memoryImportInitial,
+            memoryImportReady,
+            memoryImported,
+            memoryReset,
             gameDrop,
             gameSelected,
             modalGameDrop,

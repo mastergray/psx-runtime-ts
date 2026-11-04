@@ -8,6 +8,7 @@ import {
     ZipDiscSource,
     ZipFirmwareSource,
 } from "../src/index.js";
+import { summarizeMemoryCard } from "./MemoryCardDirectory.js"; // Interprets card directory entries for read-only display
 import { isUiDialogId } from "./types.js";    // Validates declarative dialog targets before opening them
 
 // Type dependencies:
@@ -21,6 +22,7 @@ import type {
     PsxStoredGame,      // Lightweight game metadata rendered by Library
 } from "../src/index.js";
 import type {
+    PsxMemoryCardSummary,  // Read-only card-directory summary rendered in Memory Cards
     UiApplicationConfig,    // Browser and runtime dependencies supplied by main
     UiDialogId,             // Supported production dialog identifiers
     UiFeedbackState,        // Operation feedback severity
@@ -61,6 +63,7 @@ export default class UiApplication {
     private _muted = false;                                      // Requested audio mute state for the active session
     private readonly _boundGamepads = new Set<number>();          // Browser gamepad indices currently assigned by this shell
     private _firmwareBusy = false;                               // Whether one firmware validation/storage operation is active
+    private _memoryImportBusy = false;                            // Whether one card replacement is reading or persisting bytes
 
     // CONSTRUCTOR :: uiApplicationConfig -> uiApplication
     // Retains validated composition dependencies; initialize() binds the document and loads persistent state.
@@ -86,7 +89,7 @@ export default class UiApplication {
             this._adapter = await LibretroPsxAdapter.init({ buildUrl: this._buildUrl });
             this._createRuntime(this._adapter);
             await Promise.all([this._refreshFirmware(), this._refreshLibrary(), this._refreshMemoryCards()]);
-            this._renderStage(this._firmware.size === 0 ? "firmware-required" : "ready");
+            this._renderStage(this._hasSelectedFirmware() ? "ready" : "firmware-required");
         } catch (error) {
             this._renderStage("failed", errorMessage(error));
             throw error;
@@ -102,22 +105,46 @@ export default class UiApplication {
                 if (isUiDialogId(dialog)) void this._openDialog(dialog);
             });
         }
-        for (const dialogId of ["system", "game", "library", "memory", "view"] as const) {
+        for (const dialogId of ["system", "game", "library", "memory", "view", "volume"] as const) {
             const dialog = element<HTMLDialogElement>(this._document, `${dialogId}-dialog`);
             dialog.addEventListener("cancel", (event) => {
                 if (this._busyDialog === dialogId) event.preventDefault();
             });
-            dialog.addEventListener("close", () => { void this._dialogClosed(); });
+            dialog.addEventListener("close", () => {
+                if (dialogId === "memory") this._resetMemoryCardView();
+                void this._dialogClosed();
+            });
         }
 
         element<HTMLSelectElement>(this._document, "firmware-region").addEventListener("change", () => {
             this._renderFirmware();
+            if (this._player?.status === "idle") {
+                this._renderStage(this._hasSelectedFirmware() ? "ready" : "firmware-required");
+            }
+        });
+        element<HTMLInputElement>(this._document, "firmware-file").addEventListener("change", () => {
+            const file = element<HTMLInputElement>(this._document, "firmware-file").files?.[0];
+            this._renderFirmware();
+            if (file === undefined) {
+                this._feedback("firmware", "Select a user-supplied firmware image for the chosen region.", "idle");
+                return;
+            }
+            this._feedback(
+                "firmware",
+                this._hasSelectedFirmware()
+                    ? `Selected “${file.name}”. Check and replace the stored firmware after validation.`
+                    : `Selected “${file.name}”. Check and store it for ${regionLabel(this._selectedRegion())}.`,
+                "idle",
+            );
         });
         element<HTMLButtonElement>(this._document, "store-firmware").addEventListener("click", () => {
             void this._storeFirmware();
         });
         element<HTMLButtonElement>(this._document, "forget-firmware").addEventListener("click", () => {
             void this._forgetFirmware();
+        });
+        element<HTMLButtonElement>(this._document, "system-stop-session").addEventListener("click", () => {
+            void this._stopSession();
         });
 
         const screenStage = element<HTMLElement>(this._document, "screen-stage");
@@ -217,8 +244,11 @@ export default class UiApplication {
         element<HTMLButtonElement>(this._document, "mute-session").addEventListener("click", () => {
             void this._toggleMute();
         });
-        element<HTMLButtonElement>(this._document, "stop-session").addEventListener("click", () => {
-            void this._stopSession();
+        element<HTMLInputElement>(this._document, "volume-level").addEventListener("input", () => {
+            const volume = this._selectedVolume();
+            this._setText("volume-value", `${Math.round(volume * 100)}%`);
+            const audio = this._sessionAudio();
+            if (audio !== null) audio.volume = volume;
         });
 
         element<HTMLSelectElement>(this._document, "scaling-mode").addEventListener("change", (event) => {
@@ -236,7 +266,23 @@ export default class UiApplication {
             element<HTMLButtonElement>(this._document, `download-card-${port}`).addEventListener("click", () => {
                 void this._downloadMemoryCard(port);
             });
+            element<HTMLButtonElement>(this._document, `import-card-${port}`).addEventListener("click", () => {
+                void this._importMemoryCard(port);
+            });
         }
+        element<HTMLInputElement>(this._document, "memory-card-file").addEventListener("change", () => {
+            const file = element<HTMLInputElement>(this._document, "memory-card-file").files?.[0];
+            this._syncMemoryCardImportActions();
+            if (file === undefined) {
+                this._feedback("memory", "Select a 128 KiB card image to import, or download an existing card.", "idle");
+            } else if (file.size !== 128 * 1024) {
+                this._feedback("memory", `“${file.name}” is not a 128 KiB PlayStation memory card image.`, "error");
+            } else if (this._player?.status !== "idle") {
+                this._feedback("memory", `“${file.name}” is valid. Stop the current session before importing it.`, "idle");
+            } else {
+                this._feedback("memory", `“${file.name}” is ready. Choose the card slot to replace.`, "idle");
+            }
+        });
 
         globalThis.addEventListener("gamepadconnected", () => this._syncGamepads());
         globalThis.addEventListener("gamepaddisconnected", () => this._syncGamepads());
@@ -281,12 +327,12 @@ export default class UiApplication {
     // Synchronizes stage presentation and session controls with one lifecycle transition.
     private _playerStatusChanged(status: PsxPlayerStatus): void {
         this._renderStage(status === "idle"
-            ? (this._firmware.size === 0 ? "firmware-required" : "ready")
+            ? (this._hasSelectedFirmware() ? "ready" : "firmware-required")
             : status);
         if (status === "running") {
             const audio = this._sessionAudio();
             if (audio !== null) {
-                audio.volume = 0.15;
+                audio.volume = this._selectedVolume();
                 if (this._muted) audio.mute();
                 void audio.unlock().catch(() => undefined);
             }
@@ -299,7 +345,7 @@ export default class UiApplication {
     private _renderStage(state: UiStageState, detail = ""): void {
         const app = element<HTMLElement>(this._document, "ui-app");
         app.dataset.stage = state;
-        const hasFirmware = this._firmware.size > 0;
+        const hasFirmware = this._hasSelectedFirmware();
         element<HTMLButtonElement>(this._document, "game-nav").disabled = !hasFirmware;
         element<HTMLButtonElement>(this._document, "library-nav").disabled = !hasFirmware;
         const sessionActive = state === "running" || state === "paused" || state === "failed";
@@ -307,7 +353,10 @@ export default class UiApplication {
         element<HTMLButtonElement>(this._document, "pause-session").textContent = state === "paused" ? "Resume" : "Pause";
         element<HTMLButtonElement>(this._document, "reset-session").disabled = state !== "running" && state !== "paused";
         element<HTMLButtonElement>(this._document, "mute-session").disabled = state !== "running" && state !== "paused";
-        element<HTMLButtonElement>(this._document, "stop-session").disabled = !sessionActive;
+        element<HTMLButtonElement>(this._document, "volume-session").disabled = state !== "running" && state !== "paused";
+        const systemStop = element<HTMLButtonElement>(this._document, "system-stop-session");
+        systemStop.hidden = !sessionActive;
+        systemStop.disabled = !sessionActive;
         element<HTMLButtonElement>(this._document, "fullscreen-fit").disabled = state !== "running" && state !== "paused";
         element<HTMLButtonElement>(this._document, "fullscreen-stretch").disabled = state !== "running" && state !== "paused";
         element<HTMLElement>(this._document, "pause-overlay").hidden = state !== "paused";
@@ -336,7 +385,8 @@ export default class UiApplication {
     // METHOD :: uiDialogId -> PROMISE(VOID)
     // Pauses a running session and opens one supported modal surface.
     private async _openDialog(dialogId: UiDialogId): Promise<void> {
-        if (dialogId !== "system" && this._firmware.size === 0 && (dialogId === "game" || dialogId === "library")) {
+        if (dialogId !== "system" && !this._hasSelectedFirmware()
+            && (dialogId === "game" || dialogId === "library")) {
             await this._openDialog("system");
             return;
         }
@@ -372,9 +422,6 @@ export default class UiApplication {
     private async _refreshFirmware(): Promise<void> {
         this._firmware.clear();
         for (const record of await this._storage.listFirmware()) this._firmware.set(record.region, record);
-        if (!this._firmware.has(this._selectedRegion()) && this._firmware.size > 0) {
-            element<HTMLSelectElement>(this._document, "firmware-region").value = this._firmware.keys().next().value!;
-        }
         this._renderFirmware();
     }
 
@@ -395,9 +442,16 @@ export default class UiApplication {
             return slot;
         }));
         const record = this._firmware.get(this._selectedRegion());
+        const firmwareFile = element<HTMLInputElement>(this._document, "firmware-file").files?.[0];
+        const store = element<HTMLButtonElement>(this._document, "store-firmware");
+        store.textContent = record === undefined ? "Check And Store" : "Check And Replace";
+        store.hidden = firmwareFile === undefined;
+        store.disabled = firmwareFile === undefined || this._firmwareBusy;
         const forget = element<HTMLButtonElement>(this._document, "forget-firmware");
         forget.hidden = record === undefined;
         forget.disabled = record === undefined;
+        element<HTMLButtonElement>(this._document, "game-nav").disabled = record === undefined;
+        element<HTMLButtonElement>(this._document, "library-nav").disabled = record === undefined;
         this._renderTelemetry();
     }
 
@@ -410,24 +464,27 @@ export default class UiApplication {
             this._feedback("firmware", "Select a firmware image or ZIP first.", "error");
             return;
         }
-        await this._storeFirmwareFile(file, true);
-        input.value = "";
+        const stored = await this._storeFirmwareFile(file, true);
+        if (stored) input.value = "";
+        this._renderFirmware();
     }
 
-    // METHOD :: FILE, BOOLEAN -> PROMISE(VOID)
+    // METHOD :: FILE, BOOLEAN -> PROMISE(BOOLEAN)
     // Validates and stores firmware selected in System or dropped on the firmware-required stage.
-    private async _storeFirmwareFile(file: File, protectDialog: boolean): Promise<void> {
+    private async _storeFirmwareFile(file: File, protectDialog: boolean): Promise<boolean> {
         if (this._firmwareBusy) {
             this._showNotice("Firmware validation is already in progress.");
-            return;
+            return false;
         }
         const adapter = this._adapter;
         if (adapter === null) {
             this._feedback("firmware", "Core metadata is unavailable; reload the application and try again.", "error");
-            return;
+            return false;
         }
+        let stored = false;
         const operation = async (): Promise<void> => {
             this._firmwareBusy = true;
+            this._renderFirmware();
             this._feedback("firmware", `Checking “${file.name}”…`, "working");
             if (!protectDialog) this._showNotice(`Checking “${file.name}”…`);
             try {
@@ -437,6 +494,7 @@ export default class UiApplication {
                 await this._refreshFirmware();
                 const message = `Firmware passed validation and was stored for ${regionLabel(region)}.`;
                 this._feedback("firmware", message, "success");
+                stored = true;
                 if (!protectDialog) this._showNotice(message);
                 if (this._player?.status === "idle") this._renderStage("ready");
             } catch (error) {
@@ -448,10 +506,12 @@ export default class UiApplication {
                 }
             } finally {
                 this._firmwareBusy = false;
+                this._renderFirmware();
             }
         };
         if (protectDialog) await this._withBusyDialog("system", operation);
         else await operation();
+        return stored;
     }
 
     // METHOD :: VOID -> PROMISE(VOID)
@@ -459,12 +519,14 @@ export default class UiApplication {
     private async _forgetFirmware(): Promise<void> {
         const region = this._selectedRegion();
         if (!this._firmware.has(region)) return;
-        if (!globalThis.confirm(`Forget the stored ${regionLabel(region)} firmware?`)) return;
+        if (!globalThis.confirm(
+            `Delete the stored ${regionLabel(region)} firmware from this browser?`,
+        )) return;
         await this._storage.deleteFirmware(region);
         await this._refreshFirmware();
         this._feedback("firmware", `Stored ${regionLabel(region)} firmware was removed.`, "success");
         if (this._player?.status === "idle") {
-            this._renderStage(this._firmware.size === 0 ? "firmware-required" : "ready");
+            this._renderStage(this._hasSelectedFirmware() ? "ready" : "firmware-required");
         }
     }
 
@@ -803,7 +865,7 @@ export default class UiApplication {
         this._muted = false;
         const audio = this._sessionAudio();
         if (audio !== null) {
-            audio.volume = 0.15;
+            audio.volume = this._selectedVolume();
             await audio.unlock().catch(() => undefined);
         }
         this._showNotice(`Session started on disc ${discIndex + 1}.`);
@@ -881,6 +943,9 @@ export default class UiApplication {
     // METHOD :: VOID -> PROMISE(VOID)
     // Stops the active session while preserving stored firmware, games, and cards.
     private async _stopSession(): Promise<void> {
+        if (!globalThis.confirm(
+            "Stop the current session? Progress since the last in-game save or save state will be lost.",
+        )) return;
         try {
             await this._runtime?.stop();
             this._resumeAfterDialog = false;
@@ -906,21 +971,121 @@ export default class UiApplication {
     }
 
     // METHOD :: VOID -> PROMISE(VOID)
-    // Refreshes the two persistent card summaries and download availability.
+    // Refreshes the two current card summaries and download availability.
     private async _refreshMemoryCards(): Promise<void> {
         for (const port of [1, 2] as const) {
             try {
                 const record = await this._storage.loadMemoryCard(PROFILE_ID, CARD_IDS[port]);
                 const active = this._player?.session !== null && this._player?.session !== undefined;
-                this._setText(`card-status-${port}`, record === null
-                    ? (active ? "Available from the active session." : "No stored card yet; one is created when a game starts.")
-                    : `${formatBytes(record.bytes.byteLength)} · revision ${record.revision}`);
+                const bytes = active
+                    ? await this._player!.downloadMemoryCard(port).catch(() => record?.bytes ?? null)
+                    : record?.bytes ?? null;
+                if (bytes === null) {
+                    this._setText(`card-status-${port}`, "No stored card yet; one is created when a game starts.");
+                    this._renderMemoryCardSummary(port, null);
+                } else {
+                    const summary = summarizeMemoryCard(bytes);
+                    const revision = record === null ? "" : ` · revision ${record.revision}`;
+                    this._setText(`card-status-${port}`, summary.valid
+                        ? `${summary.saves.length} save${summary.saves.length === 1 ? "" : "s"} · ${summary.usedBlocks}/15 blocks used${revision}`
+                        : `Unrecognized card directory · ${formatBytes(bytes.byteLength)}${revision}`);
+                    this._renderMemoryCardSummary(port, summary);
+                }
                 element<HTMLButtonElement>(this._document, `download-card-${port}`).disabled = record === null && !active;
             } catch (error) {
                 this._setText(`card-status-${port}`, `Storage error: ${errorMessage(error)}`);
+                this._renderMemoryCardSummary(port, null);
                 element<HTMLButtonElement>(this._document, `download-card-${port}`).disabled = true;
             }
         }
+        this._syncMemoryCardImportActions();
+    }
+
+    // METHOD :: controllerPort, psxMemoryCardSummary? -> VOID
+    // Renders recognized saves, identifiers, and block counts without exposing or changing card bytes.
+    private _renderMemoryCardSummary(port: ControllerPort, summary: PsxMemoryCardSummary | null): void {
+        const list = element<HTMLUListElement>(this._document, `card-saves-${port}`);
+        list.replaceChildren();
+        if (summary === null) {
+            list.hidden = true;
+            return;
+        }
+        if (!summary.valid || summary.saves.length === 0) {
+            const item = this._document.createElement("li");
+            item.className = "card-empty";
+            item.textContent = summary.valid ? "[ EMPTY CARD ]" : "[ UNRECOGNIZED DIRECTORY ]";
+            list.append(item);
+            list.hidden = false;
+            return;
+        }
+        for (const save of summary.saves) {
+            const item = this._document.createElement("li");
+            const title = this._document.createElement("strong");
+            title.textContent = save.title;
+            const detail = this._document.createElement("span");
+            detail.textContent = `${save.filename || "No internal filename"} · ${save.blocks} block${save.blocks === 1 ? "" : "s"}`;
+            item.append(title, detail);
+            list.append(item);
+        }
+        list.hidden = false;
+    }
+
+    // METHOD :: VOID -> VOID
+    // Clears transient Memory Cards input and feedback while preserving current card summaries.
+    private _resetMemoryCardView(): void {
+        if (this._memoryImportBusy) return;
+        element<HTMLInputElement>(this._document, "memory-card-file").value = "";
+        this._syncMemoryCardImportActions();
+        this._feedback(
+            "memory",
+            "Select a 128 KiB card image to import, or download an existing card.",
+            "idle",
+        );
+    }
+
+    // METHOD :: VOID -> VOID
+    // Enables card import targets only for one valid image while the player is idle.
+    private _syncMemoryCardImportActions(): void {
+        const file = element<HTMLInputElement>(this._document, "memory-card-file").files?.[0];
+        const enabled = file !== undefined && file.size === 128 * 1024
+            && this._player?.status === "idle" && !this._memoryImportBusy;
+        for (const port of [1, 2] as const) {
+            element<HTMLButtonElement>(this._document, `import-card-${port}`).disabled = !enabled;
+        }
+    }
+
+    // METHOD :: controllerPort -> PROMISE(VOID)
+    // Confirms and imports one exact PlayStation card image into browser storage.
+    private async _importMemoryCard(port: ControllerPort): Promise<void> {
+        const player = this._player;
+        const file = element<HTMLInputElement>(this._document, "memory-card-file").files?.[0];
+        if (player === null || file === undefined) return;
+        if (file.size !== 128 * 1024) {
+            this._feedback("memory", "Memory card images must contain exactly 128 KiB.", "error");
+            return;
+        }
+        if (player.status !== "idle") {
+            this._feedback("memory", "Stop the current session before importing a memory card.", "error");
+            return;
+        }
+        if (!globalThis.confirm(`Replace Card ${port} with “${file.name}”?`)) return;
+        await this._withBusyDialog("memory", async () => {
+            this._memoryImportBusy = true;
+            this._syncMemoryCardImportActions();
+            this._feedback("memory", `Importing “${file.name}” to Card ${port}…`, "working");
+            try {
+                await player.replaceMemoryCard(port, new Uint8Array(await file.arrayBuffer()));
+                await this._refreshMemoryCards();
+                const message = `Imported “${file.name}” to Card ${port} and stored it in this browser.`;
+                this._feedback("memory", message, "success");
+                this._showNotice(message);
+            } catch (error) {
+                this._feedback("memory", `Card import failed: ${errorMessage(error)}`, "error");
+            } finally {
+                this._memoryImportBusy = false;
+                this._syncMemoryCardImportActions();
+            }
+        });
     }
 
     // METHOD :: controllerPort -> PROMISE(VOID)
@@ -990,13 +1155,25 @@ export default class UiApplication {
     // METHOD :: VOID -> biosImage?
     // Returns selected-region firmware or the first available regional record.
     private _selectedFirmware(): BiosImage | null {
-        return this._firmware.get(this._selectedRegion()) ?? this._firmware.values().next().value ?? null;
+        return this._firmware.get(this._selectedRegion()) ?? null;
+    }
+
+    // METHOD :: VOID -> BOOLEAN
+    // True when the currently selected region has a validated stored firmware record.
+    private _hasSelectedFirmware(): boolean {
+        return this._firmware.has(this._selectedRegion());
     }
 
     // METHOD :: VOID -> psxAudio?
     // Narrows the concrete audio object created by the default runtime composition.
     private _sessionAudio(): PsxAudio | null {
         return this._player?.audio instanceof PsxAudio ? this._player.audio : null;
+    }
+
+    // METHOD :: VOID -> NUMBER
+    // Returns the production Volume slider as a normalized Web Audio gain.
+    private _selectedVolume(): number {
+        return Number(element<HTMLInputElement>(this._document, "volume-level").value) / 100;
     }
 
     // METHOD :: uiStageState -> STRING

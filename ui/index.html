@@ -44,7 +44,7 @@
         <button id="pause-session" type="button" disabled>Pause</button>
         <button id="reset-session" type="button" disabled>Reset</button>
         <button id="mute-session" type="button" disabled>Mute</button>
-        <button id="stop-session" type="button" disabled>Stop</button>
+        <button id="volume-session" type="button" data-open-dialog="volume" aria-controls="volume-dialog" disabled>Volume</button>
       </div>
 
       <div class="runtime-status" role="status" aria-live="polite">
@@ -99,9 +99,10 @@
               <input id="firmware-file" type="file" accept=".bin,.rom,.zip,application/zip,application/octet-stream">
             </label>
             <div id="firmware-feedback" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Select a user-supplied firmware image for the chosen region.</div>
-            <div class="button-row">
-              <button id="store-firmware" class="primary-action" type="button">Check And Store</button>
-              <button id="forget-firmware" type="button" hidden>Forget Stored Firmware</button>
+            <div class="button-row system-action-row">
+              <button id="system-stop-session" class="danger-action" type="button" hidden disabled>Stop Session</button>
+              <button id="store-firmware" class="primary-action" type="button" hidden disabled>Check And Store</button>
+              <button id="forget-firmware" class="danger-action" type="button" hidden>Delete Firmware</button>
             </div>
           </section>
         </div>
@@ -162,12 +163,15 @@
         </header>
         <div class="dialog-content">
           <section class="dialog-section">
-            <p>Download either current card from the active session or browser storage.</p>
+            <p>Download either current card from the active session or browser storage. Importing replaces one stored card and is available only while no session is active.</p>
+            <label>Memory card image
+              <input id="memory-card-file" type="file" accept=".mcd,.mcr,.mc,.bin,application/octet-stream">
+            </label>
             <div class="card-grid">
-              <div><h3>Card 1</h3><p id="card-status-1">Checking browser storage…</p><button id="download-card-1" type="button">Download Card 1</button></div>
-              <div><h3>Card 2</h3><p id="card-status-2">Checking browser storage…</p><button id="download-card-2" type="button">Download Card 2</button></div>
+              <div><h3>Card 1</h3><p id="card-status-1">Checking browser storage…</p><ul id="card-saves-1" class="card-save-list" hidden></ul><div class="card-actions"><button id="download-card-1" type="button">Download Card 1</button><button id="import-card-1" class="danger-action" type="button" disabled>Import To Card 1</button></div></div>
+              <div><h3>Card 2</h3><p id="card-status-2">Checking browser storage…</p><ul id="card-saves-2" class="card-save-list" hidden></ul><div class="card-actions"><button id="download-card-2" type="button">Download Card 2</button><button id="import-card-2" class="danger-action" type="button" disabled>Import To Card 2</button></div></div>
             </div>
-            <div id="memory-feedback" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Memory cards are stored locally.</div>
+            <div id="memory-feedback" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Select a 128 KiB card image to import, or download an existing card.</div>
           </section>
         </div>
       </form>
@@ -187,6 +191,23 @@
             </label>
             <div class="button-row"><button id="fullscreen-fit" type="button" disabled>Fullscreen · Fit</button><button id="fullscreen-stretch" type="button" disabled>Fullscreen · Stretch</button></div>
             <p id="view-feedback">Start a game to use fullscreen presentation.</p>
+          </section>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="volume-dialog" class="terminal-dialog" aria-labelledby="volume-title">
+      <form method="dialog" class="dialog-frame">
+        <header class="dialog-header">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10z"></path><path d="M17 9a4 4 0 0 1 0 6M19.5 6.5a8 8 0 0 1 0 11"></path></svg>
+          <div><span>// AUDIO</span><h2 id="volume-title">[ VOLUME ]</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close Volume">×</button>
+        </header>
+        <div class="dialog-content">
+          <section class="dialog-section volume-control">
+            <label for="volume-level">Volume</label>
+            <input id="volume-level" type="range" min="0" max="100" step="1" value="15">
+            <output id="volume-value" for="volume-level">15%</output>
           </section>
         </div>
       </form>

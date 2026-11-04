@@ -367,6 +367,7 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
 .operation-feedback[data-state="error"] { border-color: var(--red); color: var(--red); }
 .button-row { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 9px; }
 .button-row button { padding-inline: 16px; }
+.system-action-row #system-stop-session { margin-right: auto; }
 .game-action-row { justify-content: flex-start; }
 .game-action-row #clear-game { margin-left: auto; }
 
@@ -403,15 +404,63 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
 .game-metrics span { color: var(--muted); font: 0.72rem "Share Tech Mono", monospace; }
 .game-detail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .game-detail-actions button { padding-inline: 16px; }
-.danger-action { border-color: #74394a; color: #ff9bae; }
+.danger-action {
+    border-color: #8c3d53;
+    background: linear-gradient(180deg, #351722, #1e0d14);
+    color: #ff9bae;
+    box-shadow: inset 0 0 18px rgba(255, 84, 119, 0.06);
+}
+.danger-action:hover:not(:disabled) {
+    border-color: var(--red);
+    background: linear-gradient(180deg, #4a1c2a, #2a1019);
+    color: #ffd7df;
+}
 .dialog-footer { min-height: 56px; padding: 8px 14px; display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--line); color: var(--muted); font: 0.76rem "Share Tech Mono", monospace; }
 .dialog-footer button { padding-inline: 16px; }
 
 .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.card-grid > div { padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: rgba(3, 10, 18, 0.55); }
+.card-grid > div { padding: 18px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; background: rgba(3, 10, 18, 0.55); }
 .card-grid h3 { margin: 0; color: var(--text-bright); }
-.card-grid p { min-height: 42px; color: var(--muted); }
+.card-grid p { min-height: 42px; color: var(--muted); font-size: 0.78rem; }
 .card-grid button { width: 100%; }
+.card-actions { margin-top: auto; display: grid; gap: 8px; }
+.card-save-list {
+    max-height: 132px;
+    margin: 0 0 12px;
+    padding: 4px;
+    display: grid;
+    align-content: start;
+    gap: 4px;
+    overflow-y: auto;
+    border: 1px solid var(--line-soft);
+    border-radius: 6px;
+    background: rgba(1, 6, 11, 0.72);
+    list-style: none;
+    scrollbar-color: var(--line-bright) transparent;
+    scrollbar-width: thin;
+}
+.card-save-list[hidden] { display: none; }
+.card-save-list li { padding: 6px 7px; display: grid; gap: 1px; border: 1px solid var(--line); border-radius: 4px; background: #050d16; }
+.card-save-list strong { overflow: hidden; color: var(--text-bright); font-size: 0.75rem; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.card-save-list span { color: var(--muted); font: 0.62rem/1.25 "Share Tech Mono", monospace; overflow-wrap: anywhere; }
+.card-save-list .card-empty { color: var(--muted); font: 0.67rem "Share Tech Mono", monospace; text-align: center; }
+
+.volume-control { grid-template-columns: 1fr auto; align-items: center; }
+.volume-control label { grid-column: 1; }
+.volume-control input[type="range"] {
+    grid-column: 1;
+    width: 100%;
+    accent-color: var(--cyan);
+    cursor: pointer;
+}
+.volume-control output {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    min-width: 4.5rem;
+    color: var(--text-bright);
+    font: 1.1rem "Share Tech Mono", monospace;
+    text-align: right;
+}
 
 @media (max-width: 1180px) {
     .command-bar { align-items: stretch; overflow-x: auto; }
@@ -430,7 +479,7 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
     #pause-session::after { content: "Ⅱ"; font-size: 0.9rem; }
     #reset-session::after { content: "↻"; font-size: 1.15rem; }
     #mute-session::after { content: "♪"; font-size: 1rem; }
-    #stop-session::after { content: "■"; font-size: 0.8rem; }
+    #volume-session::after { content: "VOL"; font-size: 0.58rem; }
     .runtime-status { display: none; }
     .play-stage { height: calc(100dvh - 75px); min-height: 360px; }
     .screen-stage { border-radius: 11px; }
