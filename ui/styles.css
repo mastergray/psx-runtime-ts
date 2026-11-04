@@ -374,6 +374,247 @@ button[hidden], [hidden] { display: none !important; }
 .touch-center-controls .touch-button { min-width: 62px; border-radius: 7px; font-size: 0.63rem; text-transform: uppercase; }
 .touch-controller:not([data-controller-type="dualshock"]) .touch-stick { visibility: hidden; }
 
+.presentation-entry {
+    padding: 14px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(3, 10, 18, 0.55);
+}
+.presentation-entry > div { display: grid; gap: 3px; }
+.presentation-entry strong { color: var(--text-bright); font-weight: 500; }
+.presentation-entry small { color: var(--muted); font: 0.72rem/1.35 "Share Tech Mono", monospace; }
+.presentation-entry button { padding-inline: 16px; }
+
+.app-shell[data-mode="presentation"] {
+    min-height: 100dvh;
+    padding: 0;
+    background: #000;
+}
+.app-shell[data-mode="presentation"] > .command-bar,
+.app-shell[data-mode="presentation"] > .screen-effects { display: none; }
+.app-shell[data-mode="presentation"] .play-stage {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    min-height: 0;
+    margin: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    place-items: stretch;
+    gap: 0;
+}
+.app-shell[data-mode="presentation"] .screen-stage {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    background: #000;
+    box-shadow: none;
+}
+.app-shell[data-mode="presentation"] .screen-stage::before,
+.app-shell[data-mode="presentation"] .screen-stage::after,
+.app-shell[data-mode="presentation"] .touch-controller,
+.app-shell[data-mode="presentation"] .stage-telemetry,
+.app-shell[data-mode="presentation"] .signal-bars,
+.app-shell[data-mode="presentation"] .screen-notice { display: none; }
+
+.presentation-hint {
+    position: absolute;
+    z-index: 18;
+    left: 50%;
+    bottom: max(22px, env(safe-area-inset-bottom));
+    max-width: calc(100% - 40px);
+    padding: 10px 18px;
+    transform: translateX(-50%);
+    border: 1px solid rgba(102, 199, 255, 0.45);
+    border-radius: 999px;
+    background: rgba(2, 8, 14, 0.86);
+    color: var(--text-bright);
+    font: clamp(0.72rem, 1.5vw, 1rem) "Share Tech Mono", monospace;
+    text-align: center;
+    white-space: nowrap;
+    animation: presentation-hint 3s forwards;
+    pointer-events: none;
+}
+@keyframes presentation-hint { 0%, 78% { opacity: 1; } 100% { opacity: 0; } }
+
+.presentation-menu {
+    position: absolute;
+    z-index: 24;
+    inset: 0;
+    padding: clamp(10px, 2vw, 28px);
+    overflow: hidden;
+    background: rgba(1, 6, 12, 0.94);
+    backdrop-filter: blur(9px);
+}
+.presentation-window {
+    position: relative;
+    width: min(1500px, 100%);
+    height: 100%;
+    margin: 0 auto;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    overflow: hidden;
+    border: 1px solid var(--line-bright);
+    border-radius: 15px;
+    background: #07111c;
+    box-shadow: 0 30px 100px rgba(0, 0, 0, 0.74), 0 0 54px rgba(102, 199, 255, 0.08);
+}
+.presentation-header {
+    min-height: clamp(72px, 10vh, 104px);
+    padding: 14px clamp(18px, 3vw, 34px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #102237, #091521);
+}
+.presentation-header p { margin: 0; color: var(--muted); font: clamp(0.76rem, 1.35vw, 1.05rem) "Share Tech Mono", monospace; text-align: right; }
+.presentation-header .presentation-header-label { color: var(--cyan); text-align: left; }
+.presentation-columns {
+    min-height: 0;
+    padding: clamp(12px, 2vw, 28px);
+    display: grid;
+    grid-template-columns: minmax(290px, 0.72fr) minmax(0, 1.55fr);
+    gap: clamp(12px, 2vw, 26px);
+}
+.presentation-actions {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(5px, 0.8vh, 10px);
+    overflow: auto;
+    scrollbar-color: var(--line-bright) transparent;
+    scrollbar-width: thin;
+}
+.presentation-actions button {
+    width: 100%;
+    min-height: clamp(48px, 6.7vh, 70px);
+    padding: 8px clamp(12px, 2vw, 22px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    text-align: left;
+}
+.presentation-actions button strong { color: inherit; font-size: clamp(0.94rem, 1.7vw, 1.35rem); font-weight: 500; }
+.presentation-actions button small { max-width: 15rem; color: var(--muted); font: clamp(0.67rem, 1.1vw, 0.9rem) "Share Tech Mono", monospace; text-align: right; }
+.presentation-actions .presentation-play-mode { margin-top: auto; }
+.presentation-content {
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
+    overflow: hidden;
+}
+.presentation-view { min-height: 0; overflow: auto; scrollbar-color: var(--line-bright) transparent; scrollbar-width: thin; }
+.presentation-content > .operation-feedback { margin-top: 12px; }
+.presentation-library-heading { margin-bottom: clamp(18px, 2.6vh, 32px); }
+.presentation-view .presentation-library-heading h3 { color: var(--cyan); font-family: "Share Tech Mono", monospace; font-weight: 400; letter-spacing: 0.08em; }
+.presentation-library-heading p { font-family: "Share Tech Mono", monospace; }
+.presentation-game-list { max-height: min(48vh, 480px); overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.presentation-game-row {
+    border-bottom: 1px solid var(--line);
+}
+.presentation-game-row:last-child { border-bottom: 0; }
+.presentation-game-list button {
+    width: 100%;
+    min-height: 62px;
+    padding: 10px 14px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: center;
+    border: 0;
+    border-radius: 0;
+    text-align: left;
+}
+.presentation-game-list strong { overflow: hidden; color: var(--text-bright); text-overflow: ellipsis; white-space: nowrap; }
+.presentation-game-list span { color: var(--muted); font: 0.78rem "Share Tech Mono", monospace; }
+.presentation-game-play[aria-current="true"] {
+    background: linear-gradient(90deg, rgba(55, 146, 198, 0.25), rgba(7, 17, 29, 0.55));
+    box-shadow: inset 4px 0 var(--cyan);
+}
+.presentation-game-play[aria-current="true"] strong { color: var(--cyan); }
+.presentation-disc-picker {
+    position: absolute;
+    z-index: 2;
+    inset: 50% auto auto 50%;
+    width: min(520px, calc(100% - 32px));
+    max-height: calc(100% - 32px);
+    padding: clamp(18px, 3vw, 32px);
+    display: grid;
+    gap: 16px;
+    overflow: auto;
+    border: 1px solid var(--line-bright);
+    border-radius: 12px;
+    background: #0a1827;
+    box-shadow: 0 24px 90px rgba(0, 0, 0, 0.82), 0 0 0 100vmax rgba(1, 6, 12, 0.76);
+    transform: translate(-50%, -50%);
+}
+.presentation-disc-picker h3 { margin: 0; color: var(--text-bright); font-size: clamp(1.1rem, 2.2vw, 1.7rem); font-weight: 500; }
+.presentation-disc-options { display: grid; gap: 8px; }
+.presentation-disc-options button,
+.presentation-disc-picker > button { min-height: 52px; }
+.presentation-loading {
+    position: absolute;
+    z-index: 3;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 12px;
+    padding: 24px;
+    text-align: center;
+    background: rgba(1, 6, 12, 0.94);
+    backdrop-filter: blur(8px);
+}
+.presentation-loading p { margin: 0; color: var(--cyan); font: clamp(0.76rem, 1.4vw, 1rem) "Share Tech Mono", monospace; letter-spacing: 0.2em; }
+.presentation-loading h3 { max-width: 720px; margin: 0; color: var(--text-bright); font-size: clamp(1.2rem, 3vw, 2.1rem); font-weight: 500; }
+.presentation-loading-pulse {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--cyan);
+    border-radius: 50%;
+    box-shadow: 0 0 18px rgba(102, 199, 255, 0.7);
+    animation: presentation-loading-pulse 1s ease-in-out infinite;
+}
+@keyframes presentation-loading-pulse { 50% { opacity: 0.24; transform: scale(0.72); } }
+[data-presentation-focus]:focus-visible,
+[data-presentation-focus][data-pad-focus="true"] {
+    outline: 3px solid var(--text-bright);
+    outline-offset: -6px;
+    border-color: var(--cyan);
+    background: linear-gradient(180deg, #14537a, #0d3854);
+    color: #fff;
+}
+
+@media (max-width: 760px) {
+    .presentation-entry { grid-template-columns: 1fr; }
+    .presentation-entry button { width: 100%; }
+    .presentation-menu { padding: 4px; }
+    .presentation-window { border-radius: 8px; }
+    .presentation-header { min-height: 54px; padding: 7px 12px; }
+    .presentation-header p { font-size: 0.68rem; }
+    .presentation-columns { padding: 6px; grid-template-columns: minmax(190px, 0.78fr) minmax(0, 1.22fr); gap: 7px; }
+    .presentation-actions { gap: 3px; }
+    .presentation-actions button { min-height: 40px; padding: 4px 8px; }
+    .presentation-actions button strong { font-size: 0.78rem; }
+    .presentation-actions button small { max-width: 8rem; font-size: 0.58rem; }
+    .presentation-content > .operation-feedback { margin-top: 5px; padding: 6px 8px; font-size: 0.62rem; }
+    .presentation-library-heading { margin-bottom: 10px; }
+    .presentation-game-list button { min-height: 44px; padding: 5px 7px; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+    .presentation-disc-picker { gap: 7px; padding: 12px; }
+    .presentation-disc-options { gap: 4px; }
+    .presentation-disc-options button,
+    .presentation-disc-picker > button { min-height: 40px; }
+}
+
 .terminal-dialog {
     width: min(720px, calc(100% - 24px));
     max-height: min(820px, calc(100dvh - 30px));
@@ -502,6 +743,9 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
 .state-summary { min-width: 0; display: grid; gap: 3px; }
 .state-summary strong { overflow: hidden; color: var(--text-bright); font-size: 0.86rem; text-overflow: ellipsis; white-space: nowrap; }
 .state-summary span { color: var(--muted); font: 0.66rem/1.35 "Share Tech Mono", monospace; }
+.state-quick-slots { display: flex; gap: 5px; }
+.state-quick-slots button { min-width: 38px; min-height: 30px; padding: 3px 7px; font: 0.66rem "Share Tech Mono", monospace; }
+.state-quick-slots button[aria-pressed="true"] { border-color: var(--cyan); background: var(--cyan-soft); color: var(--text-bright); }
 .state-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
 .state-actions button { min-height: 36px; padding: 5px 9px; font-size: 0.7rem; }
 .state-empty { min-height: 80px; display: grid; place-items: center; border: 1px dashed var(--line); border-radius: 7px; color: var(--muted); font: 0.72rem "Share Tech Mono", monospace; }
@@ -622,6 +866,8 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
     .firmware-slots { grid-template-columns: 1fr; }
     .section-heading { align-items: start; flex-direction: column; }
     .section-heading p { text-align: left; }
+    .presentation-library-heading { align-items: end; flex-direction: row; }
+    .presentation-library-heading p { text-align: right; }
     .library-layout { min-height: 0; grid-template-columns: 1fr; }
     .library-list { max-height: 210px; border-right: 0; border-bottom: 1px solid var(--line); }
     .library-detail { max-height: 52dvh; }

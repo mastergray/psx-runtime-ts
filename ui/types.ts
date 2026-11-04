@@ -50,6 +50,10 @@ export type UiViewMode = PsxScalingMode | "fullscreen-fit" | "fullscreen-stretch
 // Result of loading the browser-local control profile.
 export type UiControlProfileLoadStatus = "defaults" | "loaded" | "invalid" | "unavailable";
 
+// TYPE :: 1|2
+// Controller-addressable save-state slot retained by the production interface.
+export type UiQuickStateSlot = 1 | 2;
+
 // INTERFACE :: {document:DOCUMENT, storage:STORAGE?}
 // Browser dependencies used by the production control-mapping surface.
 export interface UiControlSettingsConfig {
@@ -108,6 +112,13 @@ export interface UiStoredControlProfile {
 export interface UiControllerTypePreferences {
     readonly version: 1;   // Storage schema version
     readonly games: Readonly<Record<string, Readonly<Record<ControllerPort, PsxControllerType>>>>; // Types by game and port
+}
+
+// INTERFACE :: {version:1, games:ARRAY<STRING, ARRAY<uiQuickStateSlot, STRING>>}
+// Per-game assignments from controller quick slots to compatible named states.
+export interface UiQuickStatePreferences {
+    readonly version: 1;  // Storage schema version shared with the diagnostic harness
+    readonly games: Readonly<Record<string, Partial<Record<UiQuickStateSlot, string>>>>; // Assigned state names by game and slot
 }
 
 // INTERFACE :: {document:DOCUMENT, storage:psxStorage, gameStore:psxGameStore, buildUrl:STRING}
@@ -195,6 +206,23 @@ export function isUiControllerTypePreferences(value: unknown): value is UiContro
     });
 }
 
+// PREDICATE :: UNKNOWN -> BOOLEAN
+// True when value contains unique, normalized state names for only Quick State 1 and 2.
+export function isUiQuickStatePreferences(value: unknown): value is UiQuickStatePreferences {
+    const preferences = objectRecord(value);
+    const games = objectRecord(preferences?.games);
+    return preferences?.version === 1 && games !== null && Object.entries(games).every(([gameId, value]) => {
+        const slots = objectRecord(value);
+        if (gameId.trim().length === 0 || slots === null
+            || Object.keys(slots).some((slot) => slot !== "1" && slot !== "2")) return false;
+        const one = slots[1];
+        const two = slots[2];
+        return (one === undefined || validStateName(one))
+            && (two === undefined || validStateName(two))
+            && !(typeof one === "string" && one === two);
+    });
+}
+
 /**
  *
  *  Helper Functions
@@ -223,3 +251,8 @@ const isStoredLeftStickDpad = (value: unknown): value is Readonly<Record<Control
     return ports !== null && Object.keys(ports).every((port) => port === "1" || port === "2")
         && typeof ports[1] === "boolean" && typeof ports[2] === "boolean";
 };
+
+// HELPER :: UNKNOWN -> BOOLEAN
+// True when value is one non-empty normalized state name within the public length limit.
+const validStateName = (value: unknown): value is string => typeof value === "string"
+    && value.length > 0 && value.length <= 80 && value === value.normalize("NFC");

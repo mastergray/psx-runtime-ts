@@ -90,6 +90,17 @@ runtime and browser stores. The central stage reflects firmware-required,
 ready, starting, running, paused, stopping and failed states; no mock-only
 formats or settings are exposed.
 
+Presentation Mode provides a controller-first, television-scale view of the
+same running session. The D-pad or left stick moves focus, Cross activates,
+Circle goes back, and L3+R3 opens or closes the presentation menu. That menu
+keeps the stored Library visible, highlights the active title, reports its
+aggregate browser storage and launches single-disc games directly. Multi-disc
+titles open a controller-focused disc picker, and startup remains covered by a
+status overlay until it completes. Reset, in-session disc switching and
+scaling remain available without duplicating the full Play Mode controls. The
+menu can also be opened with Escape or a two-finger tap, and returning to Play
+Mode keeps a menu-paused game paused.
+
 The harness exposes separate **Check And Store** actions for firmware and game
 content, so either can be validated or replaced without rewriting the other.
 Firmware setup lives under **System**. **Game** and **Library** remain disabled
@@ -138,6 +149,7 @@ npm test
 npm run build
 npm run build:web
 npm run probe:m11
+npm run probe:m13
 ```
 
 Run the production web emulator at `http://127.0.0.1:4175` with:

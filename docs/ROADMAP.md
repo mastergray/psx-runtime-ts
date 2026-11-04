@@ -33,10 +33,16 @@ are in [the implementation spec](psx-runtime-spec.md).
   - [x] Implement real System, Game, Library, Memory Cards and View workflows.
   - [x] Render firmware-required, ready and complete session lifecycle states.
   - [x] Prove the empty-storage desktop/mobile shell with `probe:ui`.
-  - [ ] Migrate supported controller mapping, named states and touch controls.
+  - [x] Migrate supported controller mapping, named states and touch controls.
   - [ ] Complete physical-device and real-session visual acceptance.
+- [ ] M13: add controller-first Presentation mode for mirrored televisions.
+  - [x] Share the existing page, runtime, browser stores and active session.
+  - [x] Add the TV skin, controller focus, menu gestures and pause ownership.
+  - [x] Support direct Library launch, per-game disc selection, reset and scaling.
+  - [x] Pass the M13 browser probe and existing production regression probe.
+  - [ ] Complete physical mirrored-display and real-session acceptance.
 
-## Next work: M11–M12
+## Next work: M11–M13
 
 M0–M10 are complete and the release gate passes from a clean checkout. M11 adds
 a framework-free on-screen PlayStation controller over the existing isolated
@@ -53,3 +59,9 @@ content, session controls operate the real player, and View uses the runtime's
 supported scaling/fullscreen modes. The diagnostic harness remains available
 for feature-level verification while controller, state and touch-management
 surfaces are migrated into the production design.
+
+M13 adds the Presentation skin specified in
+[presentation-mode-spec.md](presentation-mode-spec.md). It keeps one page and
+one active runtime, hides local chrome while playing, and opens a paused,
+controller-driven TV menu through L3 + R3, Escape or a two-finger tap. The
+automated gate is complete; mirrored-display acceptance remains open.

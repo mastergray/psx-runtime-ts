@@ -1100,7 +1100,9 @@ without cross-origin-isolation headers.
 | M9 | `PsxGameStore`, packaging, licenses and release gates | large Blob import/dedup/quota behavior passes; package contains no game, BIOS or core cache |
 | M10 | v1 release | ZIP/M3U diagnostics and every gate in section 13 pass from a clean checkout |
 | M11 | mobile and touch controls | plain TypeScript/HTML touch controller passes multi-touch, cancellation, orientation and source-isolation probes; a physical phone sustains play for 60 seconds |
-| M12+ | optional CHD, additional controllers, alternate core, enhanced graphics | each is independently probed and does not widen the established contracts accidentally |
+| M12 | production web interface | framework-free System, Game, Library, Memory Cards, View, controls, states and touch workflows pass the production browser probe |
+| M13 | Presentation mode | the same active runtime enters a controller-first TV skin; gesture, focus, pause ownership, direct library launch, disc selection and mode-restoration probes pass |
+| M14+ | optional CHD, additional controllers, alternate core, enhanced graphics | each is independently probed and does not widen the established contracts accidentally |
 
 M0 is a hard gate. M1 types may be drafted in parallel, but no production
 adapter or core-specific option table is finalized until M0 records the core's
@@ -1195,6 +1197,28 @@ unsupported-setting absence, responsive viewport fit and command target sizes.
 Later M12 slices migrate the already-supported controller mapping, named-state
 management and touch surface from the harness before physical-device and
 real-session visual acceptance closes the milestone.
+
+### 11.3 M13 Presentation mode
+
+M13 adds a controller-first television skin for mirrored or cabled displays.
+It is a mode of the existing production page, not a route, second window or
+receiver. The mode shares the current `PsxConsole`, `PsxPlayer`, library,
+firmware, memory cards, named states, controller preferences and audio output.
+Switching skins never restarts or re-imports the active game.
+
+The canvas fills the play stage while the menu is closed. L3 + R3, Escape or a
+two-finger tap opens a TV-density window over a paused game. D-pad or left
+stick navigation, Cross activation and Circle back own the controller until
+the window closes. A menu-owned pause resumes on close; a pre-existing user
+pause does not. Activation buttons must release before runtime input reattaches.
+
+The menu supports direct launch from the stored library, a controller-focused
+disc-selection modal for multi-disc games, in-session disc insertion, soft
+reset and scaling. Game startup uses a blocking status overlay. Firmware,
+import, deletion, renaming, named states, audio controls, controller
+configuration and memory-card administration remain in Play Mode.
+The complete behavior and physical acceptance procedure are specified in
+[presentation-mode-spec.md](presentation-mode-spec.md).
 
 ## 12. M0 probe plan
 

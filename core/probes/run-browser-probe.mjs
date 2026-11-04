@@ -29,10 +29,11 @@ const probes = {
     m10: "/core/probes/m10-release-probe.html",
     m11: "/core/probes/m11-touch-probe.html",
     m12: "/ui/index.html",
+    m13: "/ui/index.html",
 };
 
 if (probe === undefined || !(probe in probes)) {
-    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry|media|cards|stateDisc|memory|bios|m4|m6|m7|m8|m9|m10|m11|m12>");
+    console.error("Usage: node core/probes/run-browser-probe.mjs <workerfs|pcsx|beetle|endurance|geometry|media|cards|stateDisc|memory|bios|m4|m6|m7|m8|m9|m10|m11|m12|m13>");
     process.exit(2);
 }
 
@@ -724,6 +725,202 @@ try {
             playerTwoHidden: playerTwoHidden !== null,
             keyboardListening,
             gamepadListening,
+            pageErrors,
+        });
+    }
+    if (probe === "m13") {
+        await page.waitForFunction(() => document.querySelector("#ui-app")?.getAttribute("data-stage")
+            === "firmware-required");
+        await page.click("[data-open-dialog='view']");
+        const entry = await page.evaluate(() => ({
+            label: document.querySelector("#enter-presentation")?.textContent,
+            described: document.querySelector(".presentation-entry small")?.textContent,
+            menuInitiallyHidden: document.querySelector("#presentation-menu")?.hasAttribute("hidden"),
+        }));
+        await page.click("#enter-presentation");
+        await page.waitForFunction(() => document.querySelector("#ui-app")?.getAttribute("data-mode")
+            === "presentation" && document.querySelector("#presentation-menu")?.hasAttribute("hidden") === false);
+        const entered = await page.evaluate(() => {
+            const app = document.querySelector("#ui-app");
+            const menu = document.querySelector("#presentation-menu");
+            const command = document.querySelector(".command-bar");
+            const playStage = document.querySelector("#play-stage")?.getBoundingClientRect();
+            const actions = [...document.querySelectorAll(".presentation-actions [data-presentation-focus]")];
+            return {
+                mode: app?.getAttribute("data-mode"),
+                stored: localStorage.getItem("psx-runtime:ui:presentation-mode"),
+                menuVisible: menu?.hasAttribute("hidden") === false,
+                view: document.querySelector("#presentation-library-view")?.hasAttribute("hidden") === false,
+                chromeHidden: command !== null && getComputedStyle(command).display === "none",
+                fullViewport: playStage !== undefined && Math.abs(playStage.width - innerWidth) < 1
+                    && Math.abs(playStage.height - innerHeight) < 1,
+                columns: getComputedStyle(document.querySelector(".presentation-columns")).gridTemplateColumns,
+                actions: actions.map((action) => action.textContent?.replace(/\s+/gu, " ").trim()),
+                controllerFocus: document.activeElement?.id,
+                feedback: document.querySelector("#presentation-feedback")?.textContent,
+                feedbackHidden: document.querySelector("#presentation-feedback")?.hasAttribute("hidden"),
+                legacyActionsAbsent: ["Save State", "Load State", "Mute", "Volume", "Controllers"]
+                    .every((label) => !actions.some((action) => action.textContent?.includes(label))),
+                libraryActionAbsent: document.querySelector("#presentation-library") === null,
+                header: document.querySelector(".presentation-header-label")?.textContent,
+                headerStatus: document.querySelector("#presentation-header-status")?.textContent,
+                libraryHeading: document.querySelector("#presentation-library-view h3")?.textContent,
+                libraryCount: document.querySelector("#presentation-library-count")?.textContent,
+                storedGamesHeadingAbsent: ![...document.querySelectorAll("#presentation-library-view h3")]
+                    .some((heading) => heading.textContent?.includes("Stored games")),
+                resumeLabel: document.querySelector("#presentation-resume strong")?.textContent,
+                idleScalingEnabled: !document.querySelector("#presentation-scaling")?.hasAttribute("disabled"),
+                idleSwitchDiscDisabled: document.querySelector("#presentation-switch-disc")?.hasAttribute("disabled"),
+            };
+        });
+        await page.keyboard.press("ArrowRight");
+        const idleScaling = await page.evaluate(() => ({
+            label: document.querySelector("#presentation-scaling-value")?.textContent,
+            feedback: document.querySelector("#presentation-feedback")?.textContent,
+            feedbackHidden: document.querySelector("#presentation-feedback")?.hasAttribute("hidden"),
+        }));
+        await page.keyboard.press("ArrowDown");
+        const navigated = await page.evaluate(() => ({
+            focused: document.activeElement?.id,
+            padFocus: document.activeElement?.getAttribute("data-pad-focus"),
+        }));
+        await page.keyboard.press("Escape");
+        const idleEscape = await page.evaluate(() => ({
+            menuStillVisible: document.querySelector("#presentation-menu")?.hasAttribute("hidden") === false,
+            mode: document.querySelector("#ui-app")?.getAttribute("data-mode"),
+        }));
+        await page.click("#presentation-play-mode");
+        await page.waitForFunction(() => document.querySelector("#ui-app")?.getAttribute("data-mode") === "play");
+        const left = await page.evaluate(() => ({
+            mode: document.querySelector("#ui-app")?.getAttribute("data-mode"),
+            stored: localStorage.getItem("psx-runtime:ui:presentation-mode"),
+            menuHidden: document.querySelector("#presentation-menu")?.hasAttribute("hidden"),
+            chromeVisible: getComputedStyle(document.querySelector(".command-bar")).display !== "none",
+        }));
+        await page.click("[data-open-dialog='view']");
+        await page.click("#enter-presentation");
+        await page.waitForFunction(() => localStorage.getItem("psx-runtime:ui:presentation-mode") === "presentation");
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForFunction(() => document.querySelector("#ui-app")?.getAttribute("data-stage") !== "loading");
+        const restored = await page.evaluate(() => ({
+            mode: document.querySelector("#ui-app")?.getAttribute("data-mode"),
+            menuVisible: document.querySelector("#presentation-menu")?.hasAttribute("hidden") === false,
+            libraryVisible: document.querySelector("#presentation-library-view")?.hasAttribute("hidden") === false,
+            stored: localStorage.getItem("psx-runtime:ui:presentation-mode"),
+        }));
+        const libraryContract = await page.evaluate(async () => {
+            localStorage.setItem("psx-runtime:ui:presentation-mode", "play");
+            const { default: PresentationMode } = await import("/dist/ui-build/ui/PresentationMode/PresentationMode.js");
+            let started = null;
+            let session = null;
+            let finishStart;
+            const startGate = new Promise((resolve) => { finishStart = resolve; });
+            const games = [
+                { gameId: "single", title: "Single Disc", discCount: 1, totalBytes: 800_000_000 },
+                { gameId: "multi", title: "Multi Disc", discCount: 2, totalBytes: 700_000_000 },
+            ];
+            const mode = new PresentationMode({
+                document,
+                storage: localStorage,
+                getSnapshot: () => ({ firmwareReady: true, scaling: "fit", games, session }),
+                pauseForMenu: async () => false,
+                resumeFromMenu: () => undefined,
+                enterFullscreen: async () => undefined,
+                leaveFullscreen: async () => undefined,
+                startGame: async (gameId, discIndex) => {
+                    started = { gameId, discIndex };
+                    await startGate;
+                    session = {
+                        gameId,
+                        title: gameId === "multi" ? "Multi Disc" : "Single Disc",
+                        discIndex,
+                        discCount: gameId === "multi" ? 2 : 1,
+                    };
+                },
+                changeDisc: async () => undefined,
+                reset: async () => undefined,
+                setScaling: () => undefined,
+            });
+            mode.initialize();
+            await mode.enter();
+            await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+            const multi = document.querySelector('[data-game-id="multi"]');
+            const before = {
+                rows: document.querySelectorAll(".presentation-game-row").length,
+                dropdowns: document.querySelectorAll(".presentation-game-row select").length,
+                playButtons: document.querySelectorAll(".presentation-game-play").length,
+                pickerInitiallyHidden: document.querySelector("#presentation-disc-picker")?.hasAttribute("hidden"),
+            };
+            multi?.querySelector("button")?.click();
+            const pickerOptions = [...document.querySelectorAll("#presentation-disc-options button")]
+                .map((button) => button.textContent);
+            document.querySelectorAll("#presentation-disc-options button")[1]?.click();
+            while (started === null) await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+            const loading = {
+                visible: document.querySelector("#presentation-loading")?.hasAttribute("hidden") === false,
+                status: document.querySelector("#presentation-loading-status")?.textContent,
+            };
+            finishStart();
+            while (document.querySelector("#presentation-menu")?.hasAttribute("hidden") === false) {
+                await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+            }
+            const result = {
+                ...before,
+                pickerOptions,
+                started,
+                loading,
+                activeSelected: document.querySelector('.presentation-game-play[data-game-id="multi"]')
+                    ?.getAttribute("aria-current"),
+                headerStatus: document.querySelector("#presentation-header-status")?.textContent,
+                libraryCount: document.querySelector("#presentation-library-count")?.textContent,
+                switchDiscDisabled: document.querySelector("#presentation-switch-disc")?.hasAttribute("disabled"),
+                switchDiscValue: document.querySelector("#presentation-switch-disc-value")?.textContent,
+                menuClosed: document.querySelector("#presentation-menu")?.hasAttribute("hidden"),
+            };
+            mode.destroy();
+            return result;
+        });
+        resolveResult({
+            ok: entry.label === "Enter Presentation Mode"
+                && entry.described?.includes("mirrored television") && entry.menuInitiallyHidden
+                && entered.mode === "presentation" && entered.stored === "presentation"
+                && entered.menuVisible && entered.view && entered.chromeHidden && entered.fullViewport
+                && entered.columns !== "none" && entered.actions.some((label) => label?.startsWith("Play Mode"))
+                && entered.controllerFocus === "presentation-scaling"
+                && entered.feedback === "" && entered.feedbackHidden
+                && entered.legacyActionsAbsent && entered.libraryActionAbsent
+                && entered.header === "// Presentation Mode" && entered.headerStatus === "No game loaded"
+                && entered.libraryHeading === "// Library" && entered.libraryCount === "0 Titles (0 MB)"
+                && entered.storedGamesHeadingAbsent
+                && entered.resumeLabel === "Resume" && entered.idleScalingEnabled && entered.idleSwitchDiscDisabled
+                && entered.actions[1]?.startsWith("Reset")
+                && entered.actions[2]?.startsWith("Switch Disc")
+                && entered.actions[3]?.startsWith("Scaling")
+                && idleScaling.label === "Integer" && idleScaling.feedback === "" && idleScaling.feedbackHidden
+                && navigated.focused === "presentation-play-mode" && navigated.padFocus === "true"
+                && idleEscape.menuStillVisible && idleEscape.mode === "presentation"
+                && left.mode === "play" && left.stored === "play" && left.menuHidden && left.chromeVisible
+                && restored.mode === "presentation" && restored.menuVisible
+                && restored.libraryVisible && restored.stored === "presentation"
+                && libraryContract.rows === 2 && libraryContract.dropdowns === 0
+                && libraryContract.playButtons === 2 && libraryContract.pickerInitiallyHidden
+                && libraryContract.pickerOptions.join(",") === "Disc 1,Disc 2"
+                && libraryContract.started?.gameId === "multi" && libraryContract.started?.discIndex === 1
+                && libraryContract.loading.visible && libraryContract.loading.status === "Starting “Multi Disc”…"
+                && libraryContract.activeSelected === "true"
+                && libraryContract.headerStatus === "Multi Disc · Disc 2 of 2"
+                && libraryContract.libraryCount === "2 Titles (1.5 GB)"
+                && !libraryContract.switchDiscDisabled && libraryContract.switchDiscValue === "Disc 2 of 2"
+                && libraryContract.menuClosed
+                && pageErrors.length === 0,
+            entry,
+            entered,
+            idleScaling,
+            navigated,
+            idleEscape,
+            left,
+            restored,
+            libraryContract,
             pageErrors,
         });
     }

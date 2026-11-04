@@ -9,10 +9,12 @@ import {
 } from "../src/index.js";
 import ControlSettings from "./ControlSettings.js";              // Owns persistent keyboard and gamepad mappings
 import { summarizeMemoryCard } from "./MemoryCardDirectory.js"; // Interprets card directory entries for read-only display
+import PresentationMode from "./PresentationMode/PresentationMode.js"; // Owns the controller-first television skin
 import TouchController from "./TouchController.js";            // Routes the production touch surface into session input
 import {
     isUiControllerTypePreferences, // Validates per-game emulated controller preferences
     isUiDialogId,                  // Validates declarative dialog targets
+    isUiQuickStatePreferences,     // Validates quick-slot assignments shared with the harness
     isUiViewMode,                  // Validates deferred View selections
 } from "./types.js";
 
@@ -36,10 +38,13 @@ import type {
     UiDialogId,             // Supported production dialog identifiers
     UiFeedbackState,        // Operation feedback severity
     UiGamePanel,            // Active-session or import panel shown by Game
+    UiQuickStatePreferences, // Persisted per-game quick-slot assignments
+    UiQuickStateSlot,       // Quick State 1 or 2 selected from a controller
     UiStageState,           // Closed central-stage presentation state
     UiSystemPanel,          // Firmware or Controls System tab
     UiViewMode,             // Deferred windowed or fullscreen View selection
 } from "./types.js";
+import type { UiPresentationSnapshot } from "./PresentationMode/types.js"; // Runtime and library data shown in TV mode
 
 const PROFILE_ID = "web-emulator";
 const CARD_IDS = Object.freeze({ 1: "card-1", 2: "card-2" });
@@ -47,6 +52,8 @@ const REGIONS = Object.freeze(["ntsc-u", "ntsc-j", "pal"] as const);
 const DEFAULT_CONTROLLER_TYPES = Object.freeze({ 1: "dualshock", 2: "dualshock" } as const);
 const TOUCH_CONTROLLER_STORAGE_KEY = "psx-runtime:ui:on-screen-controller";
 const CONTROLLER_TYPE_STORAGE_KEY = "psx-runtime:ui:controller-types";
+const QUICK_STATE_STORAGE_KEY = "psx-runtime:ui:quick-states";
+const QUICK_STATE_NAMES = Object.freeze(["Quick State 1", "Quick State 2"] as const);
 
 /**
  *
@@ -63,6 +70,7 @@ export default class UiApplication {
     private readonly _gameStore: UiApplicationConfig["gameStore"]; // Audited game-library persistence
     private readonly _buildUrl: string;                           // PlayStation core build root
     private readonly _controls: ControlSettings;                  // Persistent two-player physical input configuration
+    private readonly _presentation: PresentationMode;             // Controller-first fullscreen television skin
     private readonly _touchController: TouchController;           // Player-one pointer controller rendered below or over the stage
     private readonly _firmware = new Map<PsxRegion, PsxFirmwareRecord>(); // Stored firmware records by region
     private _adapter: LibretroPsxAdapter | null = null;           // Loaded core metadata and worker factory
@@ -74,6 +82,7 @@ export default class UiApplication {
     private _selectedGamePanel: UiGamePanel = "import";           // Current context-sensitive Game modal panel
     private _selectedSystemPanel: UiSystemPanel = "firmware";     // Current System firmware or control-mapping panel
     private _controllerTypePreferences: UiControllerTypePreferences; // Per-game emulated controller devices
+    private _quickStatePreferences: UiQuickStatePreferences;       // Per-game Quick State 1/2 assignments
     private _stateRecords: ReadonlyArray<PsxStateRecord> = [];     // Named states loaded for the active game
     private _selectedLibraryGameId: string | null = null;         // Game currently displayed in Library details
     private _selectedLibraryDiscIndex = 0;                        // Initial or replacement disc selected in Library
@@ -82,6 +91,7 @@ export default class UiApplication {
     private _switchingDialogs = false;                            // Prevents transient resume between modal surfaces
     private _noticeTimer: ReturnType<typeof globalThis.setTimeout> | null = null; // Pending notice dismissal timer
     private _muted = false;                                      // Requested audio mute state for the active session
+    private _selectedScaling: PsxScalingMode = "fit";            // Active or pending display scaling shared by both modes
     private _firmwareBusy = false;                               // Whether one firmware validation/storage operation is active
     private _memoryImportBusy = false;                            // Whether one card replacement is reading or persisting bytes
     private _touchControllerVisible = false;                      // Persisted preference controlling touch-surface presentation
@@ -104,6 +114,20 @@ export default class UiApplication {
             TOUCH_CONTROLLER_STORAGE_KEY,
         );
         this._controllerTypePreferences = loadControllerTypePreferences(localStorage);
+        this._quickStatePreferences = loadQuickStatePreferences(localStorage);
+        this._presentation = new PresentationMode({
+            document: this._document,
+            storage: localStorage,
+            getSnapshot: () => this._presentationSnapshot(),
+            pauseForMenu: () => this._pauseForPresentation(),
+            resumeFromMenu: (ownedPause) => this._resumeFromPresentation(ownedPause),
+            enterFullscreen: () => this._enterPresentationFullscreen(),
+            leaveFullscreen: () => this._leavePresentationFullscreen(),
+            startGame: (gameId, discIndex) => this._startStoredGame(gameId, discIndex),
+            changeDisc: (discIndex) => this._changePresentationDisc(discIndex),
+            reset: () => this._resetSession(),
+            setScaling: (scaling) => this._setPresentationScaling(scaling),
+        });
     }
 
     /**
@@ -116,6 +140,7 @@ export default class UiApplication {
     // Binds the production document, loads the core and storage, and renders the first actionable state.
     async initialize(): Promise<void> {
         this._controls.initialize();
+        this._presentation.initialize();
         this._bindDocument();
         this._renderStage("loading");
         try {
@@ -325,6 +350,7 @@ export default class UiApplication {
             this._setText("volume-value", `${Math.round(volume * 100)}%`);
             const audio = this._sessionAudio();
             if (audio !== null) audio.volume = volume;
+            this._presentation.sync();
         });
 
         element<HTMLSelectElement>(this._document, "scaling-mode").addEventListener("change", () => {
@@ -335,6 +361,10 @@ export default class UiApplication {
         });
         element<HTMLButtonElement>(this._document, "apply-view").addEventListener("click", () => {
             void this._applyView();
+        });
+        element<HTMLButtonElement>(this._document, "enter-presentation").addEventListener("click", () => {
+            element<HTMLDialogElement>(this._document, "view-dialog").close();
+            void this._presentation.enter();
         });
         for (const port of [1, 2] as const) {
             element<HTMLButtonElement>(this._document, `download-card-${port}`).addEventListener("click", () => {
@@ -428,6 +458,7 @@ export default class UiApplication {
         if (element<HTMLDialogElement>(this._document, "game-dialog").open) {
             void this._refreshActiveGame();
         }
+        this._presentation.sync();
         void this._refreshMemoryCards();
     }
 
@@ -572,6 +603,7 @@ export default class UiApplication {
         element<HTMLButtonElement>(this._document, "game-nav").disabled = record === undefined;
         element<HTMLButtonElement>(this._document, "library-nav").disabled = record === undefined;
         this._renderTelemetry();
+        this._presentation.sync();
     }
 
     // METHOD :: VOID -> PROMISE(VOID)
@@ -861,6 +893,7 @@ export default class UiApplication {
             this._stateRecords = [];
             this._selectedGamePanel = "import";
             this._renderGamePanels();
+            this._presentation.sync();
             return;
         }
         try {
@@ -873,10 +906,12 @@ export default class UiApplication {
                 "Save, load, overwrite, or delete named states for the active game.",
                 "idle",
             );
+            this._presentation.sync();
         } catch (error) {
             this._stateRecords = [];
             this._renderGamePanels();
             this._panelFeedback("state-feedback", `State storage failed: ${errorMessage(error)}`, "error");
+            this._presentation.sync();
         }
     }
 
@@ -1019,6 +1054,53 @@ export default class UiApplication {
     // Returns stored controller types for one game or the DualShock defaults.
     private _controllerTypesForGame(gameId: string): Readonly<Record<ControllerPort, PsxControllerType>> {
         return this._controllerTypePreferences.games[gameId] ?? DEFAULT_CONTROLLER_TYPES;
+    }
+
+    // METHOD :: STRING, uiQuickStateSlot -> STRING?
+    // Resolves one explicit quick-slot assignment or its existing conventional state name.
+    private _quickStateNameFor(gameId: string, slot: UiQuickStateSlot): string | null {
+        const assigned = this._quickStatePreferences.games[gameId]?.[slot];
+        if (assigned !== undefined) return assigned;
+        const fallback = QUICK_STATE_NAMES[slot - 1]!;
+        return this._stateRecords.some((record) => record.metadata.gameId === gameId && record.name === fallback)
+            ? fallback
+            : null;
+    }
+
+    // METHOD :: STRING, uiQuickStateSlot, STRING -> VOID
+    // Assigns one named state, swapping slots when the target already belongs to the other slot.
+    private _assignQuickState(gameId: string, slot: UiQuickStateSlot, name: string): void {
+        const otherSlot: UiQuickStateSlot = slot === 1 ? 2 : 1;
+        const previousTarget = this._quickStateNameFor(gameId, slot);
+        const previousOther = this._quickStateNameFor(gameId, otherSlot);
+        const next: Partial<Record<UiQuickStateSlot, string>> = {
+            ...(this._quickStatePreferences.games[gameId] ?? {}),
+            [slot]: name,
+        };
+        if (previousOther === name) {
+            if (previousTarget === null || previousTarget === name) delete next[otherSlot];
+            else next[otherSlot] = previousTarget;
+        }
+        this._quickStatePreferences = {
+            version: 1,
+            games: { ...this._quickStatePreferences.games, [gameId]: next },
+        };
+        persistQuickStatePreferences(browserStorage(this._document), this._quickStatePreferences);
+    }
+
+    // METHOD :: STRING, STRING -> VOID
+    // Clears deleted state names from both quick slots and removes empty per-game records.
+    private _clearQuickStateName(gameId: string, name: string): void {
+        const current = this._quickStatePreferences.games[gameId];
+        if (current === undefined || (current[1] !== name && current[2] !== name)) return;
+        const next: Partial<Record<UiQuickStateSlot, string>> = { ...current };
+        if (next[1] === name) delete next[1];
+        if (next[2] === name) delete next[2];
+        const games = { ...this._quickStatePreferences.games };
+        if (Object.keys(next).length === 0) delete games[gameId];
+        else games[gameId] = next;
+        this._quickStatePreferences = { version: 1, games };
+        persistQuickStatePreferences(browserStorage(this._document), this._quickStatePreferences);
     }
 
     // METHOD :: VOID -> STRING
@@ -1197,7 +1279,10 @@ export default class UiApplication {
         if (!globalThis.confirm(`Delete save state “${record.name}”?`)) return;
         await this._runStateMutation(
             `Deleting “${record.name}”…`,
-            async () => { await player.deleteState(record.name); },
+            async () => {
+                await player.deleteState(record.name);
+                this._clearQuickStateName(player.session!.machine.gameId, record.name);
+            },
             `Deleted “${record.name}”.`,
         );
     }
@@ -1222,6 +1307,7 @@ export default class UiApplication {
                 if (session !== null && session !== undefined) this._renderActiveGame(session);
                 this._panelFeedback("state-feedback", success, "success");
                 this._showNotice(success);
+                this._presentation.sync();
             } catch (error) {
                 this._panelFeedback("state-feedback", `State change failed: ${errorMessage(error)}`, "error");
             }
@@ -1242,7 +1328,25 @@ export default class UiApplication {
         const metadata = this._document.createElement("span");
         const compatible = stateCompatible(record, machine);
         metadata.textContent = `${new Date(record.metadata.createdAt).toLocaleString()} · Disc ${record.metadata.discIndex + 1} · ${compatible ? "Ready" : "Different core build"}`;
-        summary.append(name, metadata);
+        const quick = this._document.createElement("div");
+        quick.className = "state-quick-slots";
+        for (const slot of [1, 2] as const) {
+            const assign = button(this._document, `Q${slot}`);
+            assign.setAttribute("aria-label", `Use “${record.name}” as Quick State ${slot}`);
+            assign.setAttribute("aria-pressed", String(this._quickStateNameFor(machine.gameId, slot) === record.name));
+            assign.disabled = !compatible || this._busyDialog === "game";
+            assign.addEventListener("click", () => {
+                this._assignQuickState(machine.gameId, slot, record.name);
+                const session = this._player?.session;
+                if (session !== null && session !== undefined) this._renderActiveGame(session);
+                const message = `“${record.name}” assigned to Quick State ${slot}.`;
+                this._panelFeedback("state-feedback", message, "success");
+                this._showNotice(message);
+                this._presentation.sync();
+            });
+            quick.append(assign);
+        }
+        summary.append(name, metadata, quick);
         const actions = this._document.createElement("div");
         actions.className = "state-actions";
         const load = button(this._document, "Load");
@@ -1283,6 +1387,7 @@ export default class UiApplication {
         }
         this._renderLibrary();
         this._renderTelemetry();
+        this._presentation.sync();
         if (this._player?.session !== null && this._player?.session !== undefined) {
             this._setText("runtime-status", this._runtimeLabel(this._player.status));
         }
@@ -1414,12 +1519,14 @@ export default class UiApplication {
             initialDiscIndex: discIndex,
             controllers: this._controllerTypesForGame(gameId),
         });
+        if (this._player !== null) this._player.display.scaling = this._selectedScaling;
         this._muted = false;
         const audio = this._sessionAudio();
         if (audio !== null) {
             audio.volume = this._selectedVolume();
             await audio.unlock().catch(() => undefined);
         }
+        this._presentation.sync();
         this._showNotice(`Session started on disc ${discIndex + 1}.`);
     }
 
@@ -1491,9 +1598,93 @@ export default class UiApplication {
             }
             element<HTMLButtonElement>(this._document, "mute-session").textContent = this._muted ? "Unmute" : "Mute";
             this._showNotice(this._muted ? "Audio muted." : "Audio unmuted.");
+            this._presentation.sync();
         } catch (error) {
             this._showNotice(`Audio change failed: ${errorMessage(error)}`);
         }
+    }
+
+    // METHOD :: VOID -> uiPresentationSnapshot
+    // Builds the immutable runtime and library view consumed by TV mode.
+    private _presentationSnapshot(): UiPresentationSnapshot {
+        const session = this._player?.session;
+        const active = session === null || session === undefined ? null : {
+            gameId: session.machine.gameId,
+            title: this._games.find(({ gameId }) => gameId === session.machine.gameId)?.displayTitle ?? "Current game",
+            discIndex: session.discIndex,
+            discCount: session.machine.discCount,
+        };
+        return {
+            firmwareReady: this._hasSelectedFirmware(),
+            scaling: this._selectedScaling,
+            games: this._games.map(({ gameId, displayTitle, discCount, totalBytes }) => ({
+                gameId, title: displayTitle, discCount, totalBytes,
+            })),
+            session: active,
+        };
+    }
+
+    // METHOD :: VOID -> PROMISE(BOOLEAN)
+    // Pauses a running game for the Presentation menu and reports whether the menu owns that pause.
+    private async _pauseForPresentation(): Promise<boolean> {
+        const player = this._player;
+        const ownedPause = player?.status === "running";
+        if (ownedPause) await player.pause();
+        return ownedPause;
+    }
+
+    // METHOD :: BOOLEAN -> VOID
+    // Resumes only a pause taken by the Presentation menu itself.
+    private _resumeFromPresentation(ownedPause: boolean): void {
+        if (ownedPause && this._player?.status === "paused") this._player.resume();
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Requests fullscreen on the complete play stage and locks landscape when the browser permits it.
+    private async _enterPresentationFullscreen(): Promise<void> {
+        const display = this._player?.display;
+        if (display?.fullscreen === undefined) throw new Error("Fullscreen is unavailable in this browser.");
+        await display.fullscreen();
+        const orientation = browserWindow(this._document).screen.orientation as ScreenOrientation & {
+            lock?: (orientation: string) => Promise<void>;
+        };
+        if (typeof orientation.lock === "function") {
+            try { await orientation.lock("landscape"); } catch { /* Fullscreen remains useful when locking is refused. */ }
+        }
+    }
+
+    // METHOD :: VOID -> PROMISE(VOID)
+    // Leaves root fullscreen and releases a Presentation orientation lock.
+    private async _leavePresentationFullscreen(): Promise<void> {
+        const display = this._player?.display;
+        if (display?.isFullscreen === true && display.exitFullscreen !== undefined) await display.exitFullscreen();
+        try { browserWindow(this._document).screen.orientation.unlock?.(); }
+        catch { /* Some browsers expose orientation without allowing programmatic unlock. */ }
+        this._syncTouchController();
+    }
+
+    // METHOD :: NUMBER -> PROMISE(VOID)
+    // Inserts one valid disc while preserving the active Presentation session.
+    private async _changePresentationDisc(discIndex: number): Promise<void> {
+        const player = this._player;
+        const session = player?.session;
+        if (player === null || session === null || session === undefined) throw new Error("Start a game before changing discs.");
+        if (!Number.isInteger(discIndex) || discIndex < 0 || discIndex >= session.machine.discCount) {
+            throw new Error("The selected disc is unavailable.");
+        }
+        if (discIndex === session.discIndex) return;
+        await player.setDisc(discIndex);
+        this._selectedLibraryDiscIndex = discIndex;
+        this._presentation.sync();
+    }
+
+    // METHOD :: psxScalingMode -> VOID
+    // Applies one Presentation selector value to the live display.
+    private _setPresentationScaling(scaling: PsxScalingMode): void {
+        this._selectedScaling = scaling;
+        if (this._player !== null) this._player.display.scaling = scaling;
+        element<HTMLSelectElement>(this._document, "scaling-mode").value = scaling;
+        this._presentation.sync();
     }
 
     // METHOD :: VOID -> PROMISE(VOID)
@@ -1514,7 +1705,7 @@ export default class UiApplication {
     // METHOD :: VOID -> VOID
     // Restores the View form from applied runtime and controller preferences before each opening.
     private _resetViewForm(): void {
-        element<HTMLSelectElement>(this._document, "scaling-mode").value = this._player?.display.scaling ?? "fit";
+        element<HTMLSelectElement>(this._document, "scaling-mode").value = this._selectedScaling;
         element<HTMLInputElement>(this._document, "touch-controller-visible").checked = this._touchControllerVisible;
         this._syncViewActions();
     }
@@ -1542,6 +1733,7 @@ export default class UiApplication {
         const fullscreenScaling = fullscreenScalingFor(rawMode);
         const runtimeScaling = runtimeScalingFor(rawMode);
         if (fullscreenScaling !== null && !await this._enterFullscreen(fullscreenScaling)) return;
+        this._selectedScaling = runtimeScaling;
         if (fullscreenScaling === null && this._player !== null) this._player.display.scaling = runtimeScaling;
         this._touchControllerVisible = element<HTMLInputElement>(
             this._document,
@@ -1728,6 +1920,7 @@ export default class UiApplication {
         root.hidden = !this._touchControllerVisible;
         playStage.dataset.touchVisible = String(this._touchControllerVisible);
         this._touchController.enabled = this._touchControllerVisible
+            && !this._presentation.active
             && this._player?.status === "running"
             && controllerType !== "none";
     }
@@ -1882,6 +2075,13 @@ const browserStorage = (document: Document): Storage | null => {
     try { return document.defaultView?.localStorage ?? null; } catch { return null; }
 };
 
+// HELPER :: DOCUMENT -> WINDOW
+// Returns the owning browser window required by fullscreen orientation handling.
+const browserWindow = (document: Document): Window => {
+    if (document.defaultView === null) throw new Error("The production UI requires a browser Window.");
+    return document.defaultView;
+};
+
 // HELPER :: STORAGE? -> uiControllerTypePreferences
 // Loads validated per-game controller types or returns an empty versioned preference set.
 const loadControllerTypePreferences = (storage: Storage | null): UiControllerTypePreferences => {
@@ -1902,6 +2102,29 @@ const persistControllerTypePreferences = (
     preferences: UiControllerTypePreferences,
 ): void => {
     try { storage?.setItem(CONTROLLER_TYPE_STORAGE_KEY, JSON.stringify(preferences)); } catch { /* Best effort. */ }
+};
+
+// HELPER :: STORAGE? -> uiQuickStatePreferences
+// Loads validated quick-slot assignments shared by the production interface and harness.
+const loadQuickStatePreferences = (storage: Storage | null): UiQuickStatePreferences => {
+    try {
+        const source = storage?.getItem(QUICK_STATE_STORAGE_KEY);
+        if (source === null || source === undefined) return { version: 1, games: {} };
+        const value: unknown = JSON.parse(source);
+        return isUiQuickStatePreferences(value) ? value : { version: 1, games: {} };
+    } catch {
+        return { version: 1, games: {} };
+    }
+};
+
+// HELPER :: STORAGE?, uiQuickStatePreferences -> VOID
+// Persists quick-slot assignments without making browser storage availability fatal.
+const persistQuickStatePreferences = (
+    storage: Storage | null,
+    preferences: UiQuickStatePreferences,
+): void => {
+    try { storage?.setItem(QUICK_STATE_STORAGE_KEY, JSON.stringify(preferences)); }
+    catch { /* Assignments remain page-local when storage is unavailable. */ }
 };
 
 // HELPER :: FILE, psxRegion, [NUMBER] -> PROMISE(biosImage)

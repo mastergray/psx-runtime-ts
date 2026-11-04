@@ -94,6 +94,48 @@
           <div class="touch-face" role="group" aria-label="Face buttons"><button class="touch-button touch-triangle" type="button" data-touch-button="triangle" aria-label="Triangle">△</button><button class="touch-button touch-circle" type="button" data-touch-button="circle" aria-label="Circle">○</button><button class="touch-button touch-cross" type="button" data-touch-button="cross" aria-label="Cross">×</button><button class="touch-button touch-square" type="button" data-touch-button="square" aria-label="Square">□</button></div>
         </div>
       </section>
+
+      <div id="presentation-hint" class="presentation-hint" role="status" hidden>
+        L3 + R3 · Escape · two-finger tap opens the menu
+      </div>
+
+      <section id="presentation-menu" class="presentation-menu" aria-label="Presentation menu" hidden>
+        <div class="presentation-window">
+          <header class="presentation-header">
+            <p class="presentation-header-label">// Presentation Mode</p>
+            <p id="presentation-header-status">No game loaded</p>
+          </header>
+          <div class="presentation-columns">
+            <nav class="presentation-actions" aria-label="Presentation actions">
+              <button id="presentation-resume" type="button" data-presentation-focus data-presentation-column="actions"><strong>Resume</strong><small>Return to the game</small></button>
+              <button id="presentation-reset" type="button" data-presentation-focus data-presentation-column="actions"><strong>Reset</strong><small>Soft reset</small></button>
+              <button id="presentation-switch-disc" type="button" data-presentation-focus data-presentation-column="actions"><strong>Switch Disc</strong><small id="presentation-switch-disc-value">No multi-disc game</small></button>
+              <button id="presentation-scaling" type="button" data-presentation-focus data-presentation-column="actions" data-presentation-adjust="scaling"><strong>Scaling</strong><small id="presentation-scaling-value">Fit</small></button>
+              <button id="presentation-play-mode" class="presentation-play-mode" type="button" data-presentation-focus data-presentation-column="actions"><strong>Play Mode</strong><small>Switch Mode</small></button>
+            </nav>
+
+            <section class="presentation-content">
+              <div id="presentation-library-view" class="presentation-view">
+                <div class="section-heading presentation-library-heading"><div><h3>// Library</h3></div><p id="presentation-library-count">0 titles</p></div>
+                <div id="presentation-game-list" class="presentation-game-list" aria-label="Stored games"></div>
+              </div>
+
+              <div id="presentation-feedback" class="operation-feedback" data-state="idle" role="status" aria-live="polite" hidden></div>
+            </section>
+          </div>
+          <section id="presentation-disc-picker" class="presentation-disc-picker" role="dialog" aria-modal="true" aria-labelledby="presentation-disc-picker-title" hidden>
+            <p class="eyebrow">// SELECT DISC</p>
+            <h3 id="presentation-disc-picker-title">Choose a disc</h3>
+            <div id="presentation-disc-options" class="presentation-disc-options"></div>
+            <button id="presentation-disc-cancel" type="button" data-presentation-focus data-presentation-column="dialog">Cancel</button>
+          </section>
+          <section id="presentation-loading" class="presentation-loading" role="status" aria-live="polite" hidden>
+            <span class="presentation-loading-pulse" aria-hidden="true"></span>
+            <p>// LOADING</p>
+            <h3 id="presentation-loading-status">Starting game…</h3>
+          </section>
+        </div>
+      </section>
     </main>
 
     <dialog id="system-dialog" class="terminal-dialog wide-dialog" aria-labelledby="system-title">
@@ -264,6 +306,10 @@
               <span><strong>On-screen controller</strong><small>Show touch controls for player 1 beneath the game display.</small></span>
               <input id="touch-controller-visible" type="checkbox" role="switch">
             </label>
+            <div class="presentation-entry">
+              <div><strong>Presentation Mode</strong><small>Controller-first fullscreen mode for a mirrored television.</small></div>
+              <button id="enter-presentation" type="button">Enter Presentation Mode</button>
+            </div>
             <div class="button-row view-action-row"><button id="apply-view" class="primary-action" type="button">Apply</button><button id="cancel-view" type="submit" value="cancel">Cancel</button></div>
             <p id="view-feedback" role="status" aria-live="polite" hidden></p>
           </section>
