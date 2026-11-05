@@ -10,6 +10,14 @@ import type { PsxSession } from "../shared.types.js"; // Session source composed
  *
  */
 
+// TYPE :: "adaptive"|"low-latency"|"stable"|"rate-matched"
+// Audio strategy balancing latency, stall resilience, or bounded mobile rate matching.
+export type PsxAudioBufferMode = "adaptive" | "low-latency" | "stable" | "rate-matched";
+
+// TYPE :: "scheduled"|"worklet"
+// Active browser-audio implementation selected from runtime capabilities.
+export type PsxAudioBackend = "scheduled" | "worklet";
+
 // INTERFACE :: {addEventListener:(STRING, (VOID -> VOID), {passive:BOOLEAN?}? -> VOID), removeEventListener:(STRING, (VOID -> VOID) -> VOID)}
 // Browser gesture event boundary used to satisfy autoplay policy.
 export interface PsxGestureSourceLike {
@@ -27,6 +35,27 @@ export interface PsxAudioParamLike {
 // Minimal connectable Web Audio graph node.
 export interface PsxAudioNodeLike {
     connect(destination: PsxAudioNodeLike): unknown;    // Connects output to the next graph node
+}
+
+// INTERFACE :: {addModule:(STRING -> PROMISE(VOID))}
+// Secure-context module loader exposed by a Web Audio context.
+export interface PsxAudioWorkletLike {
+    addModule(moduleUrl: string): Promise<void>;    // Loads one processor module into the audio rendering scope
+}
+
+// INTERFACE :: {onmessage:((messageEvent<UNKNOWN> -> VOID))?, postMessage:(UNKNOWN, [transferable]? -> VOID), close:(VOID -> VOID)}
+// Message boundary connecting PsxAudio to its rendering-thread processor.
+export interface PsxAudioMessagePortLike {
+    onmessage: ((event: MessageEvent<unknown>) => void) | null;           // Receives queue statistics from the processor
+    postMessage(message: unknown, transfer?: Transferable[]): void;      // Transfers PCM or control messages to the processor
+    close(): void;                                                       // Releases the control-side message endpoint
+}
+
+// INTERFACE :: psxAudioNodeLike & {port:psxAudioMessagePortLike, disconnect:(VOID -> UNKNOWN)}
+// Persistent stereo source node backed by an AudioWorkletProcessor.
+export interface PsxAudioWorkletNodeLike extends PsxAudioNodeLike {
+    readonly port: PsxAudioMessagePortLike;    // Processor control and PCM transfer channel
+    disconnect(): unknown;                    // Removes the node from the output graph
 }
 
 // INTERFACE :: psxAudioNodeLike & {gain:psxAudioParamLike}
@@ -59,6 +88,7 @@ export interface PsxAudioContextLike {
     readonly sampleRate: number;                                          // Realized device sample rate
     readonly currentTime: number;                                         // Monotonic scheduling time in seconds
     readonly destination: PsxAudioNodeLike;                               // Device output node
+    readonly audioWorklet?: PsxAudioWorkletLike;                          // Secure-context processor loader when supported
     resume(): Promise<void>;                                              // Requests active playback
     close(): Promise<void>;                                               // Releases device resources
     createBuffer(channels: number, length: number, sampleRate: number): PsxAudioBufferLike; // Allocates channel storage
@@ -70,13 +100,23 @@ export interface PsxAudioContextLike {
 // Injectable context constructor receiving the core's native sample rate.
 export type PsxAudioContextFactory = (options: { readonly sampleRate: number }) => PsxAudioContextLike;
 
-// INTERFACE :: {session:psxSession, gestureSource:psxGestureSourceLike, createAudioContext:psxAudioContextFactory, volume:NUMBER?, clock:(VOID -> NUMBER)?}
+// TYPE :: psxAudioContextLike, STRING -> psxAudioWorkletNodeLike
+// Injectable constructor for the persistent stereo AudioWorklet source.
+export type PsxAudioWorkletNodeFactory = (
+    context: PsxAudioContextLike,
+    processorName: string,
+) => PsxAudioWorkletNodeLike;
+
+// INTERFACE :: {session:psxSession, gestureSource:psxGestureSourceLike, createAudioContext:psxAudioContextFactory, createAudioWorkletNode:psxAudioWorkletNodeFactory?, audioWorkletModuleUrl:STRING?, volume:NUMBER?, bufferMode:psxAudioBufferMode?, clock:(VOID -> NUMBER)?}
 // Dependencies and initial options for browser audio output.
 export interface PsxAudioConfig {
     readonly session: PsxSession;                                  // Active session producing sound events
     readonly gestureSource: PsxGestureSourceLike;                   // Event source authorizing playback
     readonly createAudioContext: PsxAudioContextFactory;            // Context construction boundary
+    readonly createAudioWorkletNode?: PsxAudioWorkletNodeFactory;   // Optional persistent-node constructor paired with its module URL
+    readonly audioWorkletModuleUrl?: string;                        // Compiled processor module paired with its node constructor
     readonly volume?: number;                                      // Initial normalized gain; defaults to one
+    readonly bufferMode?: PsxAudioBufferMode;                       // Scheduling strategy; defaults to adaptive
     readonly clock?: () => number;                                 // Optional millisecond clock for gap detection
 }
 
@@ -104,6 +144,13 @@ const isFiniteNumber = (value: unknown): value is number =>
     typeof value === "number" && Number.isFinite(value);
 
 // PREDICATE :: UNKNOWN -> BOOLEAN
+// True when value names one supported audio scheduling strategy.
+export function isPsxAudioBufferMode(value: unknown): value is PsxAudioBufferMode {
+    return value === "adaptive" || value === "low-latency" || value === "stable"
+        || value === "rate-matched";
+}
+
+// PREDICATE :: UNKNOWN -> BOOLEAN
 // True when value supplies gesture listener installation and removal.
 export function isPsxGestureSourceLike(value: unknown): value is PsxGestureSourceLike {
     return isObject(value) && typeof value.addEventListener === "function"
@@ -120,7 +167,17 @@ export function isPsxAudioContextLike(value: unknown): value is PsxAudioContextL
         && isFiniteNumber(value.currentTime) && value.currentTime >= 0
         && isObject(value.destination) && typeof value.resume === "function"
         && typeof value.close === "function" && typeof value.createBuffer === "function"
-        && typeof value.createBufferSource === "function" && typeof value.createGain === "function";
+        && typeof value.createBufferSource === "function" && typeof value.createGain === "function"
+        && (value.audioWorklet === undefined
+            || (isObject(value.audioWorklet) && typeof value.audioWorklet.addModule === "function"));
+}
+
+// PREDICATE :: UNKNOWN -> BOOLEAN
+// True when value exposes a connectable AudioWorklet node and message port.
+export function isPsxAudioWorkletNodeLike(value: unknown): value is PsxAudioWorkletNodeLike {
+    return isObject(value) && typeof value.connect === "function" && typeof value.disconnect === "function"
+        && isObject(value.port) && typeof value.port.postMessage === "function"
+        && typeof value.port.close === "function";
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN
@@ -129,8 +186,13 @@ export function isPsxAudioConfig(value: unknown): value is PsxAudioConfig {
     return isObject(value) && isPsxSession(value.session)
         && isPsxGestureSourceLike(value.gestureSource)
         && typeof value.createAudioContext === "function"
+        && ((value.createAudioWorkletNode === undefined && value.audioWorkletModuleUrl === undefined)
+            || (typeof value.createAudioWorkletNode === "function"
+                && typeof value.audioWorkletModuleUrl === "string"
+                && value.audioWorkletModuleUrl.length > 0))
         && (value.volume === undefined
             || (isFiniteNumber(value.volume) && value.volume >= 0 && value.volume <= 1))
+        && (value.bufferMode === undefined || isPsxAudioBufferMode(value.bufferMode))
         && (value.clock === undefined || typeof value.clock === "function");
 }
 

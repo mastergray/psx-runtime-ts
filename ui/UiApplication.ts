@@ -1,5 +1,6 @@
 // Dependencies:
 import {
+    isPsxAudioBufferMode,
     LibretroPsxAdapter,
     PsxAudio,
     PsxConsole,
@@ -22,6 +23,7 @@ import {
 import type {
     BiosImage,          // Stored firmware supplied when a session starts
     ControllerPort,     // Physical port used by automatic browser-gamepad binding
+    PsxAudioBufferMode, // Persisted audio buffering or bounded rate-matching strategy
     PsxFirmwareRecord,  // Stored firmware metadata rendered by System
     PsxMachineInfo,     // Active core and content identity used for state compatibility
     PsxControllerType,  // Per-game emulated controller device selected for one port
@@ -53,6 +55,7 @@ const DEFAULT_CONTROLLER_TYPES = Object.freeze({ 1: "dualshock", 2: "dualshock" 
 const TOUCH_CONTROLLER_STORAGE_KEY = "psx-runtime:ui:on-screen-controller";
 const CONTROLLER_TYPE_STORAGE_KEY = "psx-runtime:ui:controller-types";
 const QUICK_STATE_STORAGE_KEY = "psx-runtime:ui:quick-states";
+const AUDIO_BUFFER_MODE_STORAGE_KEY = "psx-runtime:ui:audio-buffer-mode";
 const QUICK_STATE_NAMES = Object.freeze(["Quick State 1", "Quick State 2"] as const);
 
 /**
@@ -95,6 +98,10 @@ export default class UiApplication {
     private _firmwareBusy = false;                               // Whether one firmware validation/storage operation is active
     private _memoryImportBusy = false;                            // Whether one card replacement is reading or persisting bytes
     private _touchControllerVisible = false;                      // Persisted preference controlling touch-surface presentation
+    private _audioBufferMode: PsxAudioBufferMode;                 // Browser-wide audio output strategy preference
+    private _audioQueueSnapshotMs = 0;                            // Queue depth captured before Audio pauses the active session
+    private _audioProductionSnapshot: number | null = null;       // Core-audio throughput captured before modal-owned pause
+    private _audioGapSnapshotMs = 0;                              // Longest delivery gap captured before modal-owned pause
 
     // CONSTRUCTOR :: uiApplicationConfig -> uiApplication
     // Retains validated composition dependencies; initialize() binds the document and loads persistent state.
@@ -115,6 +122,7 @@ export default class UiApplication {
         );
         this._controllerTypePreferences = loadControllerTypePreferences(localStorage);
         this._quickStatePreferences = loadQuickStatePreferences(localStorage);
+        this._audioBufferMode = loadAudioBufferMode(localStorage);
         this._presentation = new PresentationMode({
             document: this._document,
             storage: localStorage,
@@ -158,6 +166,7 @@ export default class UiApplication {
     // Binds declarative navigation and supported workflow controls exactly once.
     private _bindDocument(): void {
         element<HTMLInputElement>(this._document, "touch-controller-visible").checked = this._touchControllerVisible;
+        element<HTMLSelectElement>(this._document, "audio-buffer-mode").value = this._audioBufferMode;
         this._syncTouchController();
         for (const trigger of this._document.querySelectorAll<HTMLElement>("[data-open-dialog]")) {
             trigger.addEventListener("click", () => {
@@ -352,6 +361,15 @@ export default class UiApplication {
             if (audio !== null) audio.volume = volume;
             this._presentation.sync();
         });
+        element<HTMLSelectElement>(this._document, "audio-buffer-mode").addEventListener("change", (event) => {
+            const value = (event.currentTarget as HTMLSelectElement).value;
+            if (!isPsxAudioBufferMode(value)) return;
+            this._audioBufferMode = value;
+            persistAudioBufferMode(browserStorage(this._document), value);
+            const audio = this._sessionAudio();
+            if (audio !== null) audio.bufferMode = value;
+            this._renderAudioBufferStatus();
+        });
 
         element<HTMLSelectElement>(this._document, "scaling-mode").addEventListener("change", () => {
             this._syncViewActions();
@@ -449,6 +467,7 @@ export default class UiApplication {
         if (status === "running") {
             const audio = this._sessionAudio();
             if (audio !== null) {
+                audio.bufferMode = this._audioBufferMode;
                 audio.volume = this._selectedVolume();
                 if (this._muted) audio.mute();
                 void audio.unlock().catch(() => undefined);
@@ -517,6 +536,12 @@ export default class UiApplication {
             openDialog.close();
             this._switchingDialogs = false;
         }
+        if (dialogId === "volume") {
+            const audio = this._sessionAudio();
+            this._audioQueueSnapshotMs = audio?.queuedMs ?? 0;
+            this._audioProductionSnapshot = audio?.productionRate ?? null;
+            this._audioGapSnapshotMs = audio?.maximumSoundGapMs ?? 0;
+        }
         if (this._player?.status === "running") {
             await this._player.pause();
             this._resumeAfterDialog = true;
@@ -530,6 +555,7 @@ export default class UiApplication {
         }
         if (dialogId === "memory") await this._refreshMemoryCards();
         if (dialogId === "view") this._resetViewForm();
+        if (dialogId === "volume") this._renderAudioBufferStatus();
         if (dialogId === "game") {
             this._selectedGamePanel = this._player?.session === null || this._player?.session === undefined
                 ? "import"
@@ -1523,8 +1549,9 @@ export default class UiApplication {
         this._muted = false;
         const audio = this._sessionAudio();
         if (audio !== null) {
+            audio.bufferMode = this._audioBufferMode;
             audio.volume = this._selectedVolume();
-            await audio.unlock().catch(() => undefined);
+            void audio.unlock().catch(() => undefined);
         }
         this._presentation.sync();
         this._showNotice(`Session started on disc ${discIndex + 1}.`);
@@ -1979,9 +2006,33 @@ export default class UiApplication {
     }
 
     // METHOD :: VOID -> NUMBER
-    // Returns the production Volume slider as a normalized Web Audio gain.
+    // Returns the production Audio modal's volume slider as a normalized Web Audio gain.
     private _selectedVolume(): number {
         return Number(element<HTMLInputElement>(this._document, "volume-level").value) / 100;
+    }
+
+    // METHOD :: VOID -> VOID
+    // Renders cumulative underruns and the queue depth captured before modal-owned pause.
+    private _renderAudioBufferStatus(): void {
+        const audio = this._sessionAudio();
+        const underruns = audio?.underrunCount ?? 0;
+        const queued = Math.round(Math.max(audio?.queuedMs ?? 0, this._audioQueueSnapshotMs));
+        const production = this._audioProductionSnapshot ?? audio?.productionRate ?? null;
+        const maximumGap = Math.round(Math.max(audio?.maximumSoundGapMs ?? 0, this._audioGapSnapshotMs));
+        const recovery = audio?.isAdaptiveRecovery === true ? " · stable recovery active" : "";
+        const backend = audio === null
+            ? "Output idle"
+            : audio.backend === "worklet" ? "AudioWorklet" : "Scheduled fallback";
+        const productionStatus = production === null
+            ? ""
+            : ` · ${Math.round(production * 100)}% real-time production · ${maximumGap} ms max gap`;
+        const rateMatchStatus = audio?.bufferMode === "rate-matched" && audio.backend === "worklet"
+            ? ` · ${Math.round(audio.outputConsumptionRate * 100)}% output rate`
+            : "";
+        this._setText(
+            "audio-buffer-status",
+            `Audio: ${underruns} ${underruns === 1 ? "underrun" : "underruns"} · ${queued} ms queued · ${backend}${productionStatus}${rateMatchStatus}${recovery}`,
+        );
     }
 
     // METHOD :: uiStageState -> STRING
@@ -2067,6 +2118,23 @@ const storedBoolean = (storage: Storage | null, key: string): boolean => {
 // Persists one browser preference without making unavailable storage fatal to the UI.
 const storeBoolean = (storage: Storage | null, key: string, value: boolean): void => {
     try { storage?.setItem(key, String(value)); } catch { /* Preferences are best effort. */ }
+};
+
+// HELPER :: STORAGE? -> psxAudioBufferMode
+// Loads the browser-wide audio scheduling preference and safely defaults to Adaptive.
+const loadAudioBufferMode = (storage: Storage | null): PsxAudioBufferMode => {
+    try {
+        const value = storage?.getItem(AUDIO_BUFFER_MODE_STORAGE_KEY);
+        return isPsxAudioBufferMode(value) ? value : "adaptive";
+    } catch {
+        return "adaptive";
+    }
+};
+
+// HELPER :: STORAGE?, psxAudioBufferMode -> VOID
+// Persists one audio scheduling preference without making unavailable storage fatal.
+const persistAudioBufferMode = (storage: Storage | null, value: PsxAudioBufferMode): void => {
+    try { storage?.setItem(AUDIO_BUFFER_MODE_STORAGE_KEY, value); } catch { /* Preferences are best effort. */ }
 };
 
 // HELPER :: DOCUMENT -> STORAGE?

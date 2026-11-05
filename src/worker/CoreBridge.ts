@@ -244,7 +244,7 @@ export default class EmscriptenPsxCore implements WorkerCore {
             : module._psx_video_duplicate() !== 0 || videoPointer === 0 || videoBytes === 0
                 ? null
                 : {
-                    data: module.HEAPU8.slice(videoPointer, videoPointer + videoBytes),
+                    data: module.HEAPU8.subarray(videoPointer, videoPointer + videoBytes),
                     width: module._psx_video_width(),
                     height: module._psx_video_height(),
                     pitch: module._psx_video_pitch(),
@@ -255,7 +255,7 @@ export default class EmscriptenPsxCore implements WorkerCore {
         const audioPointer = options.audio ? module._psx_audio_data() : 0;
         const audio = !options.audio || audioFrames === 0 || audioPointer === 0
             ? undefined
-            : module.HEAP16.slice(
+            : module.HEAP16.subarray(
                 audioPointer / Int16Array.BYTES_PER_ELEMENT,
                 audioPointer / Int16Array.BYTES_PER_ELEMENT + audioFrames * 2,
             );

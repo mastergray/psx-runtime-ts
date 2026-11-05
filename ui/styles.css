@@ -840,6 +840,13 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
     font: 1.1rem "Share Tech Mono", monospace;
     text-align: right;
 }
+.audio-buffer-control { padding-top: 18px; border-top: 1px solid var(--line); }
+.audio-buffer-control select { width: 100%; }
+.audio-buffer-control > small { color: var(--muted); font: 0.72rem/1.35 "Share Tech Mono", monospace; }
+.dialog-section > .audio-buffer-status {
+    color: var(--muted);
+    font: 0.72rem "Share Tech Mono", monospace;
+}
 
 @media (max-width: 1180px) {
     .command-bar { align-items: stretch; overflow-x: auto; }

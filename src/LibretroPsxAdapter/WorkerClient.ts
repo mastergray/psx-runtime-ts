@@ -404,7 +404,7 @@ export default class WorkerClient {
             case "tick": this._emit("tick", undefined); break;
             case "pacing": {
                 this._tickPending = false;
-                if (!this._paused && this._playbackRate > 1 && output.frames > 0) {
+                if (!this._paused && output.frames > 0) {
                     const time = this._clock();
                     if (Number.isFinite(time) && time >= 0
                         && this._lastHostTimestamp !== null && time > this._lastHostTimestamp) {

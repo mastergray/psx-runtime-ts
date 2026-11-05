@@ -864,14 +864,32 @@ a starting placeholder and an injectable canvas/context boundary for tests.
 
 ### 8.2 `PsxAudio`
 
-`PsxAudio` follows the corrected `ArcadeAudio` queue design:
+`PsxAudio` uses a persistent rendering-thread ring where AudioWorklet is
+available and retains the bounded scheduled-source path as a fallback:
 
 - one lazily created `AudioContext`, unlocked by a user gesture;
+- one persistent stereo AudioWorklet source in a secure context;
 - de-interleaved stereo buffers tagged with the session's reported rate;
 - separate mute and normalized volume gains;
 - queue duration derived from sample counts, not callback cadence;
 - a 120 ms hard cap trimming to 60 ms; and
 - queue reset on pause, reset, state load, disc change and large timing gaps.
+
+The Audio surface has four browser-wide modes. Low Latency uses a 20 ms
+prebuffer, Stable Playback uses 80 ms, and the default Adaptive mode begins at
+20 ms then uses 80 ms for the remainder of the audio session after its first
+device-timeline underrun. Mobile Rate Match is an explicit opt-in mode for a
+device that cannot sustain real-time emulation: after at least one second of
+measurement, its Worklet consumes source frames at the rolling production
+ratio, smoothed over time and clamped to 94–100 percent. This can lower pitch
+and playback speed by at most six percent while keeping the audio queue from
+repeatedly starving; it does not alter the core or the other modes.
+
+The production Audio surface persists this choice and reports the selected
+backend, session's cumulative underruns, recent queue depth, rolling real-time
+core-audio production, realized rate-matched output speed and the largest
+recent delivery gap. The Worklet counts contiguous rendering starvation as
+one underrun and prebuffers again before resuming output.
 
 The browser may choose a different device rate; Web Audio performs conversion.
 The core is never configured to the browser rate after boot unless the selected
@@ -1184,8 +1202,8 @@ The first production slice must:
 4. list content-addressed games with title, disc count, file count and stored
    bytes, and support start, active-game disc insertion, restart, rename and
    confirmed removal;
-5. expose supported pause/resume, reset, mute, stop, scaling, fullscreen and
-   memory-card download operations;
+5. expose supported pause/resume, reset, mute, stop, scaling, fullscreen,
+   persisted audio buffering and memory-card download operations;
 6. pause a running session while a modal is open and prevent dismissal of a
    dialog while its storage mutation is active; and
 7. fit the central stage inside desktop and mobile viewports without document

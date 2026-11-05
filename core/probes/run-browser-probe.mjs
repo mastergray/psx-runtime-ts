@@ -759,7 +759,7 @@ try {
                 controllerFocus: document.activeElement?.id,
                 feedback: document.querySelector("#presentation-feedback")?.textContent,
                 feedbackHidden: document.querySelector("#presentation-feedback")?.hasAttribute("hidden"),
-                legacyActionsAbsent: ["Save State", "Load State", "Mute", "Volume", "Controllers"]
+                legacyActionsAbsent: ["Save State", "Load State", "Mute", "Audio", "Controllers"]
                     .every((label) => !actions.some((action) => action.textContent?.includes(label))),
                 libraryActionAbsent: document.querySelector("#presentation-library") === null,
                 header: document.querySelector(".presentation-header-label")?.textContent,
@@ -1168,12 +1168,18 @@ try {
             const trigger = document.querySelector("#volume-session");
             const dialog = document.querySelector("#volume-dialog");
             const range = document.querySelector("#volume-level");
+            const bufferMode = document.querySelector("#audio-buffer-mode");
             if (!(trigger instanceof HTMLButtonElement) || !(dialog instanceof HTMLDialogElement)
-                || !(range instanceof HTMLInputElement)) throw new Error("Missing Volume controls");
+                || !(range instanceof HTMLInputElement) || !(bufferMode instanceof HTMLSelectElement)) {
+                throw new Error("Missing Audio controls");
+            }
             trigger.disabled = false;
             trigger.click();
+            const initialBufferMode = bufferMode.value;
             range.value = "42";
             range.dispatchEvent(new Event("input", { bubbles: true }));
+            bufferMode.value = "stable";
+            bufferMode.dispatchEvent(new Event("change", { bubbles: true }));
             const result = {
                 label: trigger.textContent,
                 controls: trigger.getAttribute("aria-controls"),
@@ -1182,6 +1188,11 @@ try {
                 output: document.querySelector("#volume-value")?.textContent,
                 ranges: dialog.querySelectorAll("input[type='range']").length,
                 extraControls: dialog.querySelectorAll(".dialog-content button, .dialog-content select, .dialog-content input:not([type='range'])").length,
+                initialBufferMode,
+                bufferMode: bufferMode.value,
+                bufferOptions: [...bufferMode.options].map(({ value, textContent }) => [value, textContent]),
+                bufferStored: localStorage.getItem("psx-runtime:ui:audio-buffer-mode"),
+                bufferStatus: document.querySelector("#audio-buffer-status")?.textContent,
             };
             dialog.close();
             trigger.disabled = true;
@@ -1709,10 +1720,17 @@ try {
                 && emptyRegionGate.libraryDisabled && emptyRegionGate.deleteHidden && emptyRegionGate.storeHidden
                 && storedRegionGate.stage === "ready" && storedRegionGate.gameEnabled
                 && storedRegionGate.libraryEnabled && storedRegionGate.deleteVisible && storedRegionGate.storeHidden
-                && volumeControl.label === "Volume" && volumeControl.controls === "volume-dialog"
+                && volumeControl.label === "Audio" && volumeControl.controls === "volume-dialog"
                 && volumeControl.open && volumeControl.closed && volumeControl.value === "42"
                 && volumeControl.output === "42%" && volumeControl.ranges === 1
-                && volumeControl.extraControls === 0
+                && volumeControl.extraControls === 1 && volumeControl.initialBufferMode === "adaptive"
+                && volumeControl.bufferMode === "stable"
+                && volumeControl.bufferStored === "stable"
+                && volumeControl.bufferStatus === "Audio: 0 underruns · 0 ms queued · Output idle"
+                && volumeControl.bufferOptions.some(([value, label]) => value === "adaptive" && label === "Adaptive (Recommended)")
+                && volumeControl.bufferOptions.some(([value, label]) => value === "low-latency" && label === "Low Latency")
+                && volumeControl.bufferOptions.some(([value, label]) => value === "stable" && label === "Stable Playback")
+                && volumeControl.bufferOptions.some(([value, label]) => value === "rate-matched" && label === "Mobile Rate Match")
                 && touchViewInitial.checked === false && touchViewInitial.hidden
                 && touchViewInitial.touchButtons === 12 && touchViewInitial.touchSticks === 2
                 && touchViewInitial.dpad && touchViewInitial.applyLeftOfCancel && touchViewInitial.applyEnabled

@@ -1,6 +1,7 @@
 import CTGTest, { CTGTestPredicates as P } from "ctg-js-test";
 import {
     deinterleavePsxStereo,
+    isPsxAudioBufferMode,
     isPsxAudioConfig,
     isPsxDisplayConfig,
     PsxAudio,
@@ -13,7 +14,10 @@ import type {
     PsxAudioBufferLike,
     PsxAudioBufferSourceLike,
     PsxAudioContextLike,
+    PsxAudioMessagePortLike,
     PsxAudioNodeLike,
+    PsxAudioWorkletLike,
+    PsxAudioWorkletNodeLike,
     PsxCanvasContextLike,
     PsxFrameEvent,
     PsxGainNodeLike,
@@ -165,6 +169,30 @@ class FakeAudioContext implements PsxAudioContextLike {
         this.gains.push(gain);
         return gain;
     }
+}
+
+class FakeAudioWorklet implements PsxAudioWorkletLike {
+    readonly modules: string[] = [];
+    async addModule(moduleUrl: string): Promise<void> { this.modules.push(moduleUrl); }
+}
+
+class FakeWorkletPort implements PsxAudioMessagePortLike {
+    onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+    readonly messages: unknown[] = [];
+    closed = false;
+    postMessage(message: unknown): void { this.messages.push(message); }
+    close(): void { this.closed = true; }
+    emit(data: unknown): void { this.onmessage?.({ data } as MessageEvent<unknown>); }
+}
+
+class FakeWorkletNode extends FakeAudioNode implements PsxAudioWorkletNodeLike {
+    readonly port = new FakeWorkletPort();
+    disconnected = false;
+    disconnect(): void { this.disconnected = true; }
+}
+
+class FakeWorkletAudioContext extends FakeAudioContext {
+    readonly audioWorklet = new FakeAudioWorklet();
 }
 
 const sound = (frames = 735): PsxSoundEvent => {
@@ -320,6 +348,8 @@ const testFile: TestFile = {
                         queued: Number(audio.queuedMs.toFixed(3)),
                         maximum: Number(maximumQueue.toFixed(3)),
                         dropped: audio.droppedSamples,
+                        production: Number((audio.productionRate ?? 0).toFixed(3)),
+                        maximumGap: Number(audio.maximumSoundGapMs.toFixed(3)),
                     };
                     const stoppedBeforeOverload = context.sources.filter(({ stopped }) => stopped).length;
                     for (let index = 0; index < 10; index++) session.sound(first);
@@ -333,6 +363,10 @@ const testFile: TestFile = {
                         queued: Number(audio.queuedMs.toFixed(3)),
                         stopped: context.sources.filter(({ stopped }) => stopped).length > stoppedBeforeOverload,
                         lead: Number((context.sources.at(-1)!.startTime - context.currentTime).toFixed(3)),
+                        underruns: audio.underrunCount,
+                        recovery: audio.isAdaptiveRecovery,
+                        mode: audio.bufferMode,
+                        targetLead: audio.bufferLeadMs,
                     };
                     const firstBuffer = context.buffers[0]!;
                     const deviceRate = audio.deviceSampleRate;
@@ -344,8 +378,149 @@ const testFile: TestFile = {
                     const resetQueue = audio.queuedMs;
                     audio.destroy();
                     await Promise.resolve();
+                    const lowSession = new FakeSession();
+                    const lowContext = new FakeAudioContext();
+                    const low = new PsxAudio({
+                        session: lowSession,
+                        gestureSource: new FakeGestureSource(),
+                        createAudioContext: () => lowContext,
+                        clock: () => lowContext.currentTime * 1000,
+                        bufferMode: "low-latency",
+                    });
+                    lowSession.sound(first);
+                    await low.unlock();
+                    const lowInitialLead = lowContext.sources.at(-1)!.startTime - lowContext.currentTime;
+                    lowContext.currentTime = 0.1;
+                    lowSession.sound(first);
+                    const lowRecoveryLead = lowContext.sources.at(-1)!.startTime - lowContext.currentTime;
+                    const lowUnderruns = low.underrunCount;
+                    low.destroy();
+                    const stableSession = new FakeSession();
+                    const stableContext = new FakeAudioContext();
+                    const stable = new PsxAudio({
+                        session: stableSession,
+                        gestureSource: new FakeGestureSource(),
+                        createAudioContext: () => stableContext,
+                        bufferMode: "stable",
+                    });
+                    stableSession.sound(first);
+                    await stable.unlock();
+                    const stableLead = stableContext.sources.at(-1)!.startTime - stableContext.currentTime;
+                    stable.destroy();
+                    const workletSession = new FakeSession();
+                    const workletContext = new FakeWorkletAudioContext();
+                    const workletNode = new FakeWorkletNode();
+                    const worklet = new PsxAudio({
+                        session: workletSession,
+                        gestureSource: new FakeGestureSource(),
+                        createAudioContext: () => workletContext,
+                        createAudioWorkletNode: () => workletNode,
+                        audioWorkletModuleUrl: "https://example.test/PsxAudioWorklet.js",
+                        bufferMode: "stable",
+                    });
+                    workletSession.sound(first);
+                    await worklet.unlock();
+                    workletNode.port.emit({
+                        type: "stats",
+                        queuedFrames: 2_205,
+                        underruns: 2,
+                        droppedFrames: 10,
+                        adaptiveRecovery: false,
+                        consumptionRatio: 1,
+                    });
+                    worklet.bufferMode = "rate-matched";
+                    workletNode.port.emit({
+                        type: "stats",
+                        queuedFrames: 2_205,
+                        underruns: 2,
+                        droppedFrames: 10,
+                        adaptiveRecovery: false,
+                        consumptionRatio: 0.97,
+                    });
+                    const rateMatched = [worklet.bufferLeadMs, worklet.outputConsumptionRate];
+                    worklet.bufferMode = "adaptive";
+                    workletNode.port.emit({
+                        type: "stats",
+                        queuedFrames: 1_470,
+                        underruns: 3,
+                        droppedFrames: 12,
+                        adaptiveRecovery: true,
+                        consumptionRatio: 1,
+                    });
+                    const workletDiagnostics = {
+                        backend: worklet.backend,
+                        queued: Number(worklet.queuedMs.toFixed(3)),
+                        underruns: worklet.underrunCount,
+                        dropped: worklet.droppedSamples,
+                        recovery: worklet.isAdaptiveRecovery,
+                        targetLead: worklet.bufferLeadMs,
+                        modules: workletContext.audioWorklet.modules,
+                    };
+                    worklet.resetQueue();
+                    const workletMessages = workletNode.port.messages.map((message) =>
+                        typeof message === "object" && message !== null && "type" in message
+                            ? (message as { readonly type: unknown }).type
+                            : null);
+                    worklet.destroy();
+                    const matchedSession = new FakeSession();
+                    const matchedContext = new FakeWorkletAudioContext();
+                    const matchedNode = new FakeWorkletNode();
+                    const matched = new PsxAudio({
+                        session: matchedSession,
+                        gestureSource: new FakeGestureSource(),
+                        createAudioContext: () => matchedContext,
+                        createAudioWorkletNode: () => matchedNode,
+                        audioWorkletModuleUrl: "https://example.test/PsxAudioWorklet.js",
+                        clock: () => matchedContext.currentTime * 1000,
+                        bufferMode: "rate-matched",
+                    });
+                    matchedSession.sound(first);
+                    await matched.unlock();
+                    for (let frame = 1; frame <= 70; frame++) {
+                        matchedContext.currentTime = frame / (60 * 0.97);
+                        matchedSession.sound(first);
+                    }
+                    const matchedRates = matchedNode.port.messages.flatMap((message) =>
+                        typeof message === "object" && message !== null
+                            && "type" in message && message.type === "rate" && "ratio" in message
+                            && typeof message.ratio === "number"
+                            ? [Number(message.ratio.toFixed(3))]
+                            : []);
+                    const rateControl = {
+                        messages: matchedRates.length,
+                        first: matchedRates[0],
+                        last: matchedRates.at(-1),
+                        production: Number((matched.productionRate ?? 0).toFixed(3)),
+                    };
+                    matched.destroy();
                     return {
                         valid: isPsxAudioConfig(config),
+                        backend: audio.backend,
+                        modes: {
+                            predicates: [
+                                isPsxAudioBufferMode("adaptive"),
+                                isPsxAudioBufferMode("low-latency"),
+                                isPsxAudioBufferMode("stable"),
+                                isPsxAudioBufferMode("rate-matched"),
+                                isPsxAudioBufferMode("invalid"),
+                            ],
+                            invalidConfig: isPsxAudioConfig({ ...config, bufferMode: "invalid" }),
+                            low: [
+                                Number(lowInitialLead.toFixed(3)),
+                                Number(lowRecoveryLead.toFixed(3)),
+                                lowUnderruns,
+                            ],
+                            stable: Number(stableLead.toFixed(3)),
+                        },
+                        worklet: {
+                            diagnostics: workletDiagnostics,
+                            rateMatched,
+                            messages: workletMessages,
+                            resetQueue: worklet.queuedMs,
+                            closed: workletNode.port.closed,
+                            disconnected: workletNode.disconnected,
+                        },
+                        rateControl,
                         pure: {
                             channels: deinterleavePsxStereo(new Float32Array([1, -1, 0.5, -0.5]))
                                 .map((values) => [...values]),
@@ -366,6 +541,30 @@ const testFile: TestFile = {
                 })
                 .assert("audio behavior", ({ subject }) => subject, P.equals<unknown>({
                     valid: true,
+                    backend: "scheduled",
+                    modes: {
+                        predicates: [true, true, true, true, false],
+                        invalidConfig: false,
+                        low: [0.02, 0.02, 1],
+                        stable: 0.08,
+                    },
+                    worklet: {
+                        diagnostics: {
+                            backend: "worklet",
+                            queued: 33.333,
+                            underruns: 3,
+                            dropped: 24,
+                            recovery: true,
+                            targetLead: 80,
+                            modules: ["https://example.test/PsxAudioWorklet.js"],
+                        },
+                        rateMatched: [80, 0.97],
+                        messages: ["configure", "push", "configure", "rate", "configure", "reset"],
+                        resetQueue: 0,
+                        closed: true,
+                        disconnected: true,
+                    },
+                    rateControl: { messages: 5, first: 1, last: 0.97, production: 0.97 },
                     pure: {
                         channels: [[1, 0.5], [-1, -0.5]],
                         cap: { dropQueuedFrames: 3_764, dropIncomingFrames: 0 },
@@ -376,9 +575,23 @@ const testFile: TestFile = {
                     coreBufferRate: 44_100,
                     channelProbe: [0.001361, -0.001361],
                     gains: [1, 0.5],
-                    afterMinute: { queued: 36.667, maximum: 36.667, dropped: 0 },
+                    afterMinute: {
+                        queued: 36.667,
+                        maximum: 36.667,
+                        dropped: 0,
+                        production: 1,
+                        maximumGap: 16.667,
+                    },
                     afterOverload: { queued: 60, dropped: 12_642 },
-                    afterGap: { queued: 16.667, stopped: true, lead: 0.02 },
+                    afterGap: {
+                        queued: 16.667,
+                        stopped: true,
+                        lead: 0.08,
+                        underruns: 1,
+                        recovery: true,
+                        mode: "adaptive",
+                        targetLead: 80,
+                    },
                     resetQueue: 0,
                     lifecycle: [1, 1],
                 }))

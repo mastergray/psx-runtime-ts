@@ -32,7 +32,8 @@ const session = {
     machine,
     discIndex: 0,
     trayOpen: false,
-    setButton() {}, setAxis() {}, pause() {}, resume() {},
+    playbackRate: 1,
+    setButton() {}, setAxis() {}, setPlaybackRate() {}, pause() {}, resume() {},
     async reset() {}, async setDisc() {},
     async readMemoryCard() { return new Uint8Array(128 * 1024); },
     async serializeState() { return new Uint8Array(); },
@@ -85,15 +86,18 @@ try {
             && Math.round(display.layout.height) === 600
             && pixel[0] === 19 && pixel[3] === 255
             && audio.isUnlocked && audio.deviceSampleRate > 0
+            && audio.backend === "worklet"
             && audio.queuedMs <= PsxAudio.MAX_QUEUE_MS,
         backing: [canvas.width, canvas.height],
         layout: [display.layout.width, display.layout.height],
         pixel,
         audio: {
             unlocked: audio.isUnlocked,
+            backend: audio.backend,
             deviceSampleRate: audio.deviceSampleRate,
             queuedMs: audio.queuedMs,
             droppedSamples: audio.droppedSamples,
+            underruns: audio.underrunCount,
         },
     };
     audio.destroy();

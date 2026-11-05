@@ -7,7 +7,9 @@ import {
 import {
     deinterleavePsxStereo,        // Splits interleaved samples into Web Audio channels
     isPsxAudioConfig,             // Validates direct construction dependencies
+    isPsxAudioBufferMode,         // Validates live scheduling-mode changes
     isPsxAudioContextLike,        // Validates the context returned by an injected factory
+    isPsxAudioWorkletNodeLike,    // Validates the persistent node returned by an injected factory
     isPsxGestureSourceLike,       // Validates the browser gesture boundary
     psxAudioQueueCapDecision,     // Calculates deterministic latency trimming
 } from "./types.js";
@@ -19,11 +21,15 @@ import type {
 } from "../shared.types.js";
 import type {
     PsxAudioBufferSourceLike,    // Schedulable Web Audio source boundary
+    PsxAudioBackend,             // Selected scheduled or rendering-thread implementation
+    PsxAudioBufferMode,          // Output strategy balancing latency, resilience, and bounded rate matching
     PsxAudioConfig,              // Session, gesture, context, and volume dependencies
     PsxAudioContextLike,         // Minimal Web Audio context used by the runtime
     PsxAudioContextFactory,      // Injectable context constructor
     PsxGainNodeLike,             // Minimal gain-node boundary for mute and volume
     PsxGestureSourceLike,        // Event target capable of authorizing audio playback
+    PsxAudioWorkletNodeFactory,  // Injectable persistent-node constructor
+    PsxAudioWorkletNodeLike,     // Persistent rendering-thread stereo source
 } from "./types.js";
 
 /**
@@ -48,6 +54,24 @@ interface ScheduledChunk extends StereoChunk {
     readonly startTime: number;                   // Context timestamp at which playback begins
 }
 
+// INTERFACE :: {type:"stats", queuedFrames:NUMBER, underruns:NUMBER, droppedFrames:NUMBER, adaptiveRecovery:BOOLEAN, consumptionRatio:NUMBER}
+// Rendering-thread queue statistics reported by the persistent processor.
+interface WorkletStatistics {
+    readonly type: "stats";                  // Message discriminator
+    readonly queuedFrames: number;           // Stereo frames waiting in the ring
+    readonly underruns: number;              // Contiguous starvation episodes
+    readonly droppedFrames: number;          // Frames discarded by latency capping
+    readonly adaptiveRecovery: boolean;      // Whether Adaptive has entered stable recovery
+    readonly consumptionRatio: number;       // Source frames consumed for each device output frame
+}
+
+// INTERFACE :: {timeMs:NUMBER, frames:NUMBER}
+// One recent core-audio delivery used to compare emulated sound duration with wall time.
+interface AudioProductionSample {
+    readonly timeMs: number;    // Monotonic arrival time on the browser main thread
+    readonly frames: number;    // Stereo frames delivered by the core in this event
+}
+
 /**
  *
  * Class
@@ -62,18 +86,33 @@ export default class PsxAudio {
     static readonly MAX_QUEUE_MS = 120;                                                       // Hard latency ceiling before incoming audio is trimmed
     static readonly TRIM_QUEUE_MS = 60;                                                       // Target latency retained after overflow
     static readonly MIN_CHUNK_MS = 16;                                                        // Minimum pending duration scheduled as one buffer
-    static readonly LEAD_SECONDS = 0.02;                                                      // Startup cushion preventing immediate underrun
+    static readonly LEAD_SECONDS = 0.02;                                                      // Low-latency startup cushion preventing immediate underrun
+    static readonly STABLE_LEAD_SECONDS = 0.08;                                               // Mobile-oriented cushion surviving transient browser stalls
     static readonly TIMING_GAP_MS = 250;                                                      // Core event gap that resets a stale queue
+    static readonly PRODUCTION_WINDOW_MS = 5_000;                                             // Rolling interval used for source-throughput diagnostics
+    static readonly PRODUCTION_MINIMUM_MS = 1_000;                                            // Observation required before mobile rate matching begins
+    static readonly RATE_MATCH_INTERVAL_MS = 250;                                             // Minimum interval between rendering-thread rate updates
+    static readonly MINIMUM_CONSUMPTION_RATIO = 0.94;                                         // Maximum six-percent mobile slowdown
 
     /* Instance Fields */
     private readonly _session: PsxAudioConfig["session"];               // Active session producing sound events
     private readonly _gestureSource: PsxGestureSourceLike;               // Browser event target used for autoplay authorization
     private readonly _createAudioContext: PsxAudioContextFactory;        // Injectable Web Audio context factory
+    private readonly _createAudioWorkletNode: PsxAudioWorkletNodeFactory | null; // Optional persistent-node constructor
+    private readonly _audioWorkletModuleUrl: string | null;              // Compiled processor module URL paired with its constructor
     private readonly _clock: (() => number) | null;                      // Optional monotonic wall clock for gap detection
     private readonly _unsubscribeSound: Unsubscribe;                     // Session sound-listener cleanup
     private _context: PsxAudioContextLike | null = null;                 // Lazily created device audio context
     private _muteGain: PsxGainNodeLike | null = null;                    // Binary mute stage connected to scheduled sources
     private _volumeGain: PsxGainNodeLike | null = null;                  // User volume stage connected to the destination
+    private _workletNode: PsxAudioWorkletNodeLike | null = null;         // Persistent rendering-thread stereo source when available
+    private _workletInitialization: Promise<void> | null = null;         // One-time module and node initialization
+    private _workletLoading = false;                                     // Whether pending PCM must wait instead of using fallback scheduling
+    private _backend: PsxAudioBackend = "scheduled";                     // Active persistent or scheduled output implementation
+    private _workletQueuedFrames = 0;                                    // Most recently reported rendering-thread queue depth
+    private _workletConsumptionRatio = 1;                                // Most recently reported source-frame consumption ratio
+    private _workletDroppedSampleBase = 0;                               // Scheduled-path drops retained when the Worklet takes ownership
+    private _workletUnderrunBase = 0;                                    // Scheduled-path underruns retained when the Worklet takes ownership
     private _pending: StereoChunk[] = [];                                // Deinterleaved frames awaiting scheduling
     private _pendingFrames = 0;                                          // Aggregate frame count in the pending queue
     private _scheduled: ScheduledChunk[] = [];                           // Buffers placed on the device timeline
@@ -84,6 +123,12 @@ export default class PsxAudio {
     private _muted = false;                                              // Requested mute state retained before context creation
     private _volume: number;                                             // Requested normalized volume retained before context creation
     private _lastSoundMs: number | null = null;                          // Monotonic timestamp of the previous core sound event
+    private _bufferMode: PsxAudioBufferMode;                             // Active buffering or bounded rate-matching strategy
+    private _adaptiveRecovery = false;                                   // Whether adaptive mode has observed an underrun this session
+    private _hasScheduledAudio = false;                                  // Whether a prior non-reset buffer can expose a real underrun
+    private _underrunCount = 0;                                          // Device-timeline exhaustions observed during this session
+    private _productionSamples: AudioProductionSample[] = [];            // Recent core-audio deliveries used to measure sustained throughput
+    private _lastRateMatchMessageMs = Number.NEGATIVE_INFINITY;          // Latest rendering-thread rate update timestamp
     private _destroyed = false;                                          // Whether audio ownership has ended
 
     // CONSTRUCTOR :: psxAudioConfig -> psxAudio
@@ -93,8 +138,11 @@ export default class PsxAudio {
         this._session = config.session;
         this._gestureSource = config.gestureSource;
         this._createAudioContext = config.createAudioContext;
+        this._createAudioWorkletNode = config.createAudioWorkletNode ?? null;
+        this._audioWorkletModuleUrl = config.audioWorkletModuleUrl ?? null;
         this._clock = config.clock ?? null;
         this._volume = config.volume ?? 1;
+        this._bufferMode = config.bufferMode ?? "adaptive";
         this._unsubscribeSound = config.session.onSound((sound) => this._enqueue(sound));
     }
 
@@ -124,6 +172,10 @@ export default class PsxAudio {
     // Returns the aggregate interleaved samples dropped for latency control.
     get droppedSamples(): number { return this._droppedSamples; }
 
+    // GETTER :: VOID -> psxAudioBackend
+    // Returns the active persistent Worklet or scheduled-source implementation.
+    get backend(): PsxAudioBackend { return this._backend; }
+
     // GETTER :: VOID -> NUMBER
     // Estimates pending and unplayed scheduled audio duration in milliseconds.
     get queuedMs(): number {
@@ -131,10 +183,64 @@ export default class PsxAudio {
         const rate = this._session.machine.sampleRate;
         let milliseconds = this._pendingFrames / rate * 1000;
         if (context === null) return milliseconds;
+        if (this._workletNode !== null) return milliseconds + this._workletQueuedFrames / rate * 1000;
         for (const chunk of this._scheduled) {
             milliseconds += PsxAudio.remainingFrames(chunk, context.currentTime) / chunk.sampleRate * 1000;
         }
         return milliseconds;
+    }
+
+    // GETTER :: VOID -> psxAudioBufferMode
+    // Returns the active scheduling strategy.
+    get bufferMode(): PsxAudioBufferMode { return this._bufferMode; }
+
+    // GETTER :: VOID -> NUMBER
+    // Returns the lead cushion currently used when the device timeline runs dry.
+    get bufferLeadMs(): number {
+        return audioBufferLeadSeconds(this._bufferMode, this._adaptiveRecovery) * 1000;
+    }
+
+    // GETTER :: VOID -> BOOLEAN
+    // Reports whether Adaptive mode has moved into its stable recovery state.
+    get isAdaptiveRecovery(): boolean { return this._bufferMode === "adaptive" && this._adaptiveRecovery; }
+
+    // GETTER :: VOID -> NUMBER
+    // Returns cumulative device-timeline underruns for this audio session.
+    get underrunCount(): number { return this._underrunCount; }
+
+    // GETTER :: VOID -> NUMBER?
+    // Reports recent produced audio duration divided by elapsed wall time; one is real time.
+    get productionRate(): number | null {
+        if (this._productionSamples.length < 2) return null;
+        const first = this._productionSamples[0]!;
+        const last = this._productionSamples.at(-1)!;
+        const elapsedMs = last.timeMs - first.timeMs;
+        if (elapsedMs < PsxAudio.PRODUCTION_MINIMUM_MS) return null;
+        const frames = this._productionSamples
+            .slice(1)
+            .reduce((total, sample) => total + sample.frames, 0);
+        return frames / this._session.machine.sampleRate * 1000 / elapsedMs;
+    }
+
+    // GETTER :: VOID -> NUMBER
+    // Reports the longest recent wall-time gap between core-audio deliveries.
+    get maximumSoundGapMs(): number {
+        let maximum = 0;
+        for (let index = 1; index < this._productionSamples.length; index++) {
+            maximum = Math.max(
+                maximum,
+                this._productionSamples[index]!.timeMs - this._productionSamples[index - 1]!.timeMs,
+            );
+        }
+        return maximum;
+    }
+
+    // GETTER :: VOID -> NUMBER
+    // Reports source frames consumed per device frame by Mobile Rate Match.
+    get outputConsumptionRate(): number {
+        return this._backend === "worklet" && this._bufferMode === "rate-matched"
+            ? this._workletConsumptionRatio
+            : 1;
     }
 
     // SETTER :: NUMBER -> VOID
@@ -144,6 +250,18 @@ export default class PsxAudio {
         if (!Number.isFinite(value) || value < 0 || value > 1) throw invalid(value);
         this._volume = value;
         if (this._volumeGain !== null) this._volumeGain.gain.value = value;
+    }
+
+    // SETTER :: psxAudioBufferMode -> VOID
+    // Changes future dry-timeline scheduling and restarts Adaptive in low-latency mode.
+    set bufferMode(value: PsxAudioBufferMode) {
+        this._assertLive();
+        if (!isPsxAudioBufferMode(value)) throw invalid(value);
+        if (value === this._bufferMode) return;
+        this._bufferMode = value;
+        this._adaptiveRecovery = false;
+        this._workletNode?.port.postMessage({ type: "configure", mode: value });
+        this._updateWorkletRate(this._nowMs(), true);
     }
 
     /**
@@ -157,6 +275,7 @@ export default class PsxAudio {
     async unlock(): Promise<void> {
         this._assertLive();
         const context = this._ensureContext();
+        const worklet = this._ensureWorklet(context);
         if (context.state !== "running") {
             try {
                 await context.resume();
@@ -164,6 +283,7 @@ export default class PsxAudio {
                 throw audioFailed("The audio context could not be resumed.", error);
             }
         }
+        await worklet;
         this._lastSoundMs = this._nowMs();
         this._flush();
     }
@@ -205,11 +325,11 @@ export default class PsxAudio {
     // Cancels pending playback and resets timing continuity.
     resetQueue(): void {
         this._assertLive();
-        this._cancelScheduled();
-        this._pending = [];
-        this._pendingFrames = 0;
-        this._restartTrimmed = false;
+        this._resetOutputQueue();
         this._lastSoundMs = null;
+        this._productionSamples = [];
+        this._lastRateMatchMessageMs = Number.NEGATIVE_INFINITY;
+        this._updateWorkletRate(this._nowMs(), true);
     }
 
     // METHOD :: VOID -> VOID
@@ -218,6 +338,9 @@ export default class PsxAudio {
         if (this._destroyed) return;
         this._unsubscribeSound();
         this._armed?.();
+        this._workletNode?.port.close();
+        try { this._workletNode?.disconnect(); } catch { /* context close remains authoritative */ }
+        this._workletNode = null;
         this._cancelScheduled();
         this._pending = [];
         this._pendingFrames = 0;
@@ -261,32 +384,97 @@ export default class PsxAudio {
         return context;
     }
 
+    // METHOD :: psxAudioContextLike -> PROMISE(VOID)
+    // Loads and connects the persistent rendering-thread source when the browser supports it.
+    private _ensureWorklet(context: PsxAudioContextLike): Promise<void> {
+        if (this._workletInitialization !== null) return this._workletInitialization;
+        const loader = context.audioWorklet;
+        const factory = this._createAudioWorkletNode;
+        const moduleUrl = this._audioWorkletModuleUrl;
+        if (loader === undefined || factory === null || moduleUrl === null) return Promise.resolve();
+        this._workletLoading = true;
+        this._workletInitialization = (async (): Promise<void> => {
+            let node: PsxAudioWorkletNodeLike | null = null;
+            try {
+                await loader.addModule(moduleUrl);
+                if (this._destroyed) return;
+                node = factory(context, "psx-audio-ring");
+                if (!isPsxAudioWorkletNodeLike(node)) throw new TypeError("Invalid AudioWorkletNode boundary.");
+                const gain = this._muteGain;
+                if (gain === null) throw new TypeError("Audio gain graph is unavailable.");
+                node.port.onmessage = (event): void => this._receiveWorkletStatistics(event.data);
+                node.connect(gain);
+                this._workletDroppedSampleBase = this._droppedSamples;
+                this._workletUnderrunBase = this._underrunCount;
+                this._workletNode = node;
+                this._backend = "worklet";
+                node.port.postMessage({ type: "configure", mode: this._bufferMode });
+                this._updateWorkletRate(this._nowMs(), true);
+            } catch {
+                node?.port.close();
+                try { node?.disconnect(); } catch { /* fallback scheduling remains available */ }
+                this._workletNode = null;
+                this._backend = "scheduled";
+            } finally {
+                this._workletLoading = false;
+                this._flush();
+            }
+        })();
+        return this._workletInitialization;
+    }
+
+    // METHOD :: UNKNOWN -> VOID
+    // Synchronizes rendering-thread queue depth and cumulative diagnostics.
+    private _receiveWorkletStatistics(message: unknown): void {
+        if (!isWorkletStatistics(message)) return;
+        this._workletQueuedFrames = message.queuedFrames;
+        this._underrunCount = this._workletUnderrunBase + message.underruns;
+        this._droppedSamples = this._workletDroppedSampleBase + message.droppedFrames * 2;
+        this._adaptiveRecovery = this._bufferMode === "adaptive" && message.adaptiveRecovery;
+        this._workletConsumptionRatio = message.consumptionRatio;
+    }
+
+    // METHOD :: BOOLEAN? -> VOID
+    // Clears pending, scheduled, and rendering-thread PCM without resetting diagnostics.
+    private _resetOutputQueue(preserveScheduledContinuity = false): void {
+        this._workletNode?.port.postMessage({ type: "reset" });
+        this._workletQueuedFrames = 0;
+        this._cancelScheduled();
+        this._pending = [];
+        this._pendingFrames = 0;
+        this._restartTrimmed = false;
+        if (!preserveScheduledContinuity) this._hasScheduledAudio = false;
+    }
+
     // METHOD :: psxSoundEvent -> VOID
     // Deinterleaves, caps, queues, and attempts to schedule one core audio event.
     private _enqueue(sound: PsxSoundEvent): void {
         if (this._destroyed || !isPsxSoundEvent(sound) || sound.frames === 0) return;
         const now = this._nowMs();
+        this._recordProduction(now, sound.frames);
+        this._updateWorkletRate(now);
         if (this._lastSoundMs !== null && now - this._lastSoundMs > PsxAudio.TIMING_GAP_MS) {
-            this._cancelScheduled();
-            this._pending = [];
-            this._pendingFrames = 0;
-            this._restartTrimmed = false;
+            this._resetOutputQueue(true);
         }
         this._lastSoundMs = now;
-        this._prunePlayed();
         const [left, right] = deinterleavePsxStereo(sound.samples);
         const rate = this._session.machine.sampleRate;
-        const decision = psxAudioQueueCapDecision(
-            this.queuedMs,
-            sound.frames,
-            rate,
-            PsxAudio.MAX_QUEUE_MS,
-            PsxAudio.TRIM_QUEUE_MS,
-        );
-        if (decision.dropQueuedFrames > 0) this._dropQueuedFrames(decision.dropQueuedFrames);
-        this._droppedSamples += (decision.dropQueuedFrames + decision.dropIncomingFrames) * 2;
-        if (decision.dropIncomingFrames < sound.frames) {
-            const offset = decision.dropIncomingFrames;
+        let incomingOffset = 0;
+        if (this._workletNode === null) {
+            this._prunePlayed();
+            const decision = psxAudioQueueCapDecision(
+                this.queuedMs,
+                sound.frames,
+                rate,
+                PsxAudio.MAX_QUEUE_MS,
+                PsxAudio.TRIM_QUEUE_MS,
+            );
+            if (decision.dropQueuedFrames > 0) this._dropQueuedFrames(decision.dropQueuedFrames);
+            this._droppedSamples += (decision.dropQueuedFrames + decision.dropIncomingFrames) * 2;
+            incomingOffset = decision.dropIncomingFrames;
+        }
+        if (incomingOffset < sound.frames) {
+            const offset = incomingOffset;
             const chunk = offset === 0
                 ? { left, right }
                 : { left: left.subarray(offset), right: right.subarray(offset) };
@@ -296,22 +484,52 @@ export default class PsxAudio {
         this._flush();
     }
 
+    // METHOD :: NUMBER, NUMBER -> VOID
+    // Retains enough recent deliveries to calculate rolling source throughput and delivery gaps.
+    private _recordProduction(timeMs: number, frames: number): void {
+        if (!Number.isFinite(timeMs) || timeMs < 0) return;
+        this._productionSamples.push({ timeMs, frames });
+        const cutoff = timeMs - PsxAudio.PRODUCTION_WINDOW_MS;
+        while (this._productionSamples.length > 2 && this._productionSamples[1]!.timeMs < cutoff) {
+            this._productionSamples.shift();
+        }
+    }
+
+    // METHOD :: NUMBER, BOOLEAN? -> VOID
+    // Sends a bounded recent production ratio to the rendering thread at a low control rate.
+    private _updateWorkletRate(timeMs: number, force = false): void {
+        const node = this._workletNode;
+        if (node === null || this._bufferMode !== "rate-matched") return;
+        if (!force && timeMs - this._lastRateMatchMessageMs < PsxAudio.RATE_MATCH_INTERVAL_MS) return;
+        const measured = this.productionRate;
+        const ratio = measured === null
+            ? 1
+            : Math.max(PsxAudio.MINIMUM_CONSUMPTION_RATIO, Math.min(1, measured));
+        node.port.postMessage({ type: "rate", ratio });
+        this._lastRateMatchMessageMs = timeMs;
+    }
+
     // METHOD :: VOID -> VOID
     // Combines pending frames into one device buffer when scheduling is ready.
     private _flush(): void {
         const context = this._context;
         const gain = this._muteGain;
         const rate = this._session.machine.sampleRate;
-        if (this._destroyed || context?.state !== "running" || gain === null
-            || this._pendingFrames / rate * 1000 < PsxAudio.MIN_CHUNK_MS) return;
-        const left = new Float32Array(this._pendingFrames);
-        const right = new Float32Array(this._pendingFrames);
-        let offset = 0;
-        this._pending.forEach((chunk) => {
-            left.set(chunk.left, offset);
-            right.set(chunk.right, offset);
-            offset += chunk.left.length;
-        });
+        if (this._destroyed || this._workletLoading || context?.state !== "running" || gain === null) return;
+        if (this._workletNode !== null) {
+            if (this._pendingFrames === 0) return;
+            const [left, right] = combineStereoChunks(this._pending, this._pendingFrames);
+            this._pending = [];
+            this._pendingFrames = 0;
+            this._restartTrimmed = false;
+            this._workletNode.port.postMessage(
+                { type: "push", left, right },
+                [left.buffer, right.buffer],
+            );
+            return;
+        }
+        if (this._pendingFrames / rate * 1000 < PsxAudio.MIN_CHUNK_MS) return;
+        const [left, right] = combineStereoChunks(this._pending, this._pendingFrames);
         let source: PsxAudioBufferSourceLike | null = null;
         let scheduled: ScheduledChunk | null = null;
         try {
@@ -321,7 +539,15 @@ export default class PsxAudio {
             source = context.createBufferSource();
             source.buffer = buffer;
             source.connect(gain);
-            const lead = this._restartTrimmed ? 0 : PsxAudio.LEAD_SECONDS;
+            const ranDry = this._hasScheduledAudio && !this._restartTrimmed
+                && this._nextStartTime <= context.currentTime;
+            if (ranDry) {
+                this._underrunCount++;
+                if (this._bufferMode === "adaptive") this._adaptiveRecovery = true;
+            }
+            const lead = this._restartTrimmed
+                ? 0
+                : audioBufferLeadSeconds(this._bufferMode, this._adaptiveRecovery);
             const startTime = this._nextStartTime > context.currentTime
                 ? this._nextStartTime
                 : context.currentTime + lead;
@@ -337,6 +563,7 @@ export default class PsxAudio {
             this._scheduled.push(scheduled);
             source.start(startTime);
             this._nextStartTime = startTime + buffer.length / buffer.sampleRate;
+            this._hasScheduledAudio = true;
         } catch (error) {
             if (scheduled !== null) this._removeScheduled(scheduled);
             if (source !== null) {
@@ -469,10 +696,36 @@ export default class PsxAudio {
         }
         const createAudioContext: PsxAudioContextFactory = ({ sampleRate }) =>
             new AudioContextImplementation({ sampleRate }) as unknown as PsxAudioContextLike;
+        const suppliedWorkletFactory = config.createAudioWorkletNode;
+        const suppliedWorkletModuleUrl = config.audioWorkletModuleUrl;
+        if ((suppliedWorkletFactory === undefined) !== (suppliedWorkletModuleUrl === undefined)) {
+            throw invalid(config);
+        }
+        const AudioWorkletNodeImplementation = globalThis.AudioWorkletNode;
+        const browserWorklet = typeof AudioWorkletNodeImplementation === "function"
+            ? {
+                createAudioWorkletNode: ((context, processorName) => new AudioWorkletNodeImplementation(
+                    context as unknown as BaseAudioContext,
+                    processorName,
+                    {
+                        numberOfInputs: 0,
+                        numberOfOutputs: 1,
+                        outputChannelCount: [2],
+                        channelCount: 2,
+                        channelCountMode: "explicit",
+                    },
+                ) as unknown as PsxAudioWorkletNodeLike) satisfies PsxAudioWorkletNodeFactory,
+                audioWorkletModuleUrl: new URL("./PsxAudioWorklet.js", import.meta.url).href,
+            }
+            : {};
         return new PsxAudio({
             ...config,
             clock: config.clock ?? (() => performance.now()),
             createAudioContext,
+            ...(suppliedWorkletFactory === undefined ? browserWorklet : {
+                createAudioWorkletNode: suppliedWorkletFactory,
+                audioWorkletModuleUrl: suppliedWorkletModuleUrl!,
+            }),
         });
     }
 }
@@ -482,6 +735,48 @@ export default class PsxAudio {
  *  Helper Functions
  *
  */
+
+// HELPER :: [stereoChunk], NUMBER -> [float32Array, float32Array]
+// Combines ordered pending chunks into exact transferable channel buffers.
+const combineStereoChunks = (
+    chunks: ReadonlyArray<StereoChunk>,
+    frames: number,
+): readonly [Float32Array, Float32Array] => {
+    const left = new Float32Array(frames);
+    const right = new Float32Array(frames);
+    let offset = 0;
+    chunks.forEach((chunk) => {
+        left.set(chunk.left, offset);
+        right.set(chunk.right, offset);
+        offset += chunk.left.length;
+    });
+    return [left, right];
+};
+
+// HELPER :: UNKNOWN -> BOOLEAN
+// True when value is one coherent rendering-thread statistics message.
+const isWorkletStatistics = (value: unknown): value is WorkletStatistics => {
+    if (typeof value !== "object" || value === null) return false;
+    const message = value as Partial<WorkletStatistics>;
+    return message.type === "stats"
+        && typeof message.queuedFrames === "number" && Number.isInteger(message.queuedFrames)
+        && message.queuedFrames >= 0
+        && typeof message.underruns === "number" && Number.isInteger(message.underruns)
+        && message.underruns >= 0
+        && typeof message.droppedFrames === "number" && Number.isInteger(message.droppedFrames)
+        && message.droppedFrames >= 0
+        && typeof message.adaptiveRecovery === "boolean"
+        && typeof message.consumptionRatio === "number" && Number.isFinite(message.consumptionRatio)
+        && message.consumptionRatio >= PsxAudio.MINIMUM_CONSUMPTION_RATIO
+        && message.consumptionRatio <= 1;
+};
+
+// HELPER :: psxAudioBufferMode, BOOLEAN -> NUMBER
+// Resolves the dry-timeline lead in seconds for one scheduling strategy and recovery state.
+const audioBufferLeadSeconds = (mode: PsxAudioBufferMode, adaptiveRecovery: boolean): number =>
+    mode === "stable" || mode === "rate-matched" || (mode === "adaptive" && adaptiveRecovery)
+        ? PsxAudio.STABLE_LEAD_SECONDS
+        : PsxAudio.LEAD_SECONDS;
 
 // HELPER :: UNKNOWN -> psxRuntimeError
 // Creates one invalid audio configuration or property error.
