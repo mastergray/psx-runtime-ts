@@ -15,6 +15,7 @@ import type {
     PsxButtonControl,                  // Port and digital-button coordinate
     PsxFrameEvent,                     // RGBA video output from the worker
     PsxMachineInfo,                    // Active core, build, geometry, and content identity
+    PsxPerformanceTiming,              // Latest aggregated worker-stage timing window
     PsxPlaybackRate,                   // Normal or accelerated emulation-time multiplier
     PsxRumbleEvent,                    // Strong and weak motor output from the worker
     PsxSession as PsxSessionContract,  // Public session contract implemented by this class
@@ -72,6 +73,7 @@ export default class PsxSession implements PsxSessionContract {
     private _exitEmitted = false;                                                  // Whether terminal observers were already notified
     private _finalCards: Readonly<Record<ControllerPort, Uint8Array>> | null = null; // Defensive card snapshots captured at exit
     private _startupFrame: PsxFrameEvent | null = null;                            // First frame retained until a display subscribes
+    private _performance: PsxPerformanceTiming | null = null;                      // Latest worker-stage timing window
 
     // CONSTRUCTOR :: sessionWorker, restartSession -> psxSession
     // Retains a started worker and attaches its event streams.
@@ -111,6 +113,12 @@ export default class PsxSession implements PsxSessionContract {
     // Returns the requested normal or fast-forward multiplier.
     get playbackRate(): PsxPlaybackRate {
         return this._playbackRate;
+    }
+
+    // GETTER :: VOID -> psxPerformanceTiming?
+    // Returns the latest low-frequency worker timing window when instrumentation has warmed up.
+    get performance(): PsxPerformanceTiming | null {
+        return this._performance;
     }
 
     // GETTER :: VOID -> ARRAY<controllerPort, uint8Array>?
@@ -191,6 +199,7 @@ export default class PsxSession implements PsxSessionContract {
                 this._discIndex = replacement.discIndex;
                 this._trayOpen = false;
                 this._paused = false;
+                this._performance = null;
                 replacement.client.setPlaybackRate(this._playbackRate);
                 this._attachClient();
             } catch (error) {
@@ -326,6 +335,7 @@ export default class PsxSession implements PsxSessionContract {
             }),
             this._client.on("sound", (sound) => this._emit(this._soundListeners, sound)),
             this._client.on("rumble", (rumble) => this._emit(this._rumbleListeners, rumble)),
+            this._client.on("performance", (performance) => { this._performance = performance; }),
             this._client.on("failure", () => {
                 this._destroyed = true;
                 this._emitExit();

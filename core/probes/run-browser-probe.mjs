@@ -1193,6 +1193,7 @@ try {
                 bufferOptions: [...bufferMode.options].map(({ value, textContent }) => [value, textContent]),
                 bufferStored: localStorage.getItem("psx-runtime:ui:audio-buffer-mode"),
                 bufferStatus: document.querySelector("#audio-buffer-status")?.textContent,
+                workerStatus: document.querySelector("#audio-worker-status")?.textContent,
             };
             dialog.close();
             trigger.disabled = true;
@@ -1727,6 +1728,7 @@ try {
                 && volumeControl.bufferMode === "stable"
                 && volumeControl.bufferStored === "stable"
                 && volumeControl.bufferStatus === "Audio: 0 underruns · 0 ms queued · Output idle"
+                && volumeControl.workerStatus === "Worker timing: waiting for 120 frames."
                 && volumeControl.bufferOptions.some(([value, label]) => value === "adaptive" && label === "Adaptive (Recommended)")
                 && volumeControl.bufferOptions.some(([value, label]) => value === "low-latency" && label === "Low Latency")
                 && volumeControl.bufferOptions.some(([value, label]) => value === "stable" && label === "Stable Playback")

@@ -17,6 +17,7 @@ import {
 // Type dependencies:
 import type {
     PsxSoundEvent,    // Interleaved signed 16-bit stereo frames from the core
+    PsxPerformanceTiming, // Latest aggregated worker-stage timing window
     Unsubscribe,      // Cleanup for sound and gesture listeners
 } from "../shared.types.js";
 import type {
@@ -233,6 +234,12 @@ export default class PsxAudio {
             );
         }
         return maximum;
+    }
+
+    // GETTER :: VOID -> psxPerformanceTiming?
+    // Returns the latest worker-stage timing window exposed by the concrete session.
+    get workerPerformance(): PsxPerformanceTiming | null {
+        return this._session.performance ?? null;
     }
 
     // GETTER :: VOID -> NUMBER

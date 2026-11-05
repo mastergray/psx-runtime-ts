@@ -891,6 +891,13 @@ core-audio production, realized rate-matched output speed and the largest
 recent delivery gap. The Worklet counts contiguous rendering starvation as
 one underrun and prebuffers again before resuming output.
 
+The mobile-performance diagnostic path emits one aggregate every 120 emulated
+frames. It separates native core execution, AV extraction, RGBA conversion,
+PCM conversion and the immediate worker/main continuation roundtrip. The
+production Audio surface reports these averages against the machine's frame
+budget plus slowest worker and turnaround observations. Timing reports are
+diagnostic only and do not alter pacing, frame delivery or audio buffering.
+
 The browser may choose a different device rate; Web Audio performs conversion.
 The core is never configured to the browser rate after boot unless the selected
 core explicitly supports a tested runtime AV update.

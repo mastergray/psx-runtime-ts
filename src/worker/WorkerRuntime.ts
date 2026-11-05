@@ -29,6 +29,7 @@ import type {
     PsxAxis,            // Closed set of analog controls
     PsxButton,          // Closed set of digital controls
     PsxMachineInfo,     // Core startup identity and capabilities
+    PsxPerformanceTiming, // Aggregated worker-stage measurements reported to the session
     PsxPlaybackRate,    // Normal or accelerated emulation-time multiplier
     PsxRumbleEvent,     // Strong and weak motor output
 } from "../shared.types.js";
@@ -45,12 +46,20 @@ import type { CoreVideoFrame } from "./av.js";    // Raw core video frame accept
 // NOTE: <T> is the operation result type.
 type MaybePromise<T> = T | Promise<T>;
 
-// TYPE :: {video:coreVideoFrame?, audio:int16Array?, rumble:[psxRumbleEvent]?}
+// INTERFACE :: {coreMilliseconds:NUMBER, extractionMilliseconds:NUMBER}
+// Native core execution and AV-extraction timing supplied by the production bridge.
+export interface CoreRunTiming {
+    readonly coreMilliseconds: number;          // Time inside the native frame execution call
+    readonly extractionMilliseconds: number;    // Time exposing AV buffers and rumble after execution
+}
+
+// TYPE :: {video:coreVideoFrame?, audio:int16Array?, rumble:[psxRumbleEvent]?, timing:coreRunTiming?}
 // Optional video, audio, and controller output produced by one core frame.
 export interface CoreRunOutput {
     readonly video?: CoreVideoFrame | null;               // Raw frame or duplicate-frame marker
     readonly audio?: Int16Array;                           // Interleaved signed 16-bit stereo samples
     readonly rumble?: ReadonlyArray<PsxRumbleEvent>;      // Motor states changed during the frame
+    readonly timing?: CoreRunTiming;                      // Optional production-only native stage timing
 }
 
 // INTERFACE :: {video:BOOLEAN, audio:BOOLEAN, frameskipInterval:NUMBER}
@@ -100,6 +109,32 @@ export interface WorkerCore {
 // Worker-owned core lifecycle state.
 type RuntimeState = "idle" | "running" | "paused" | "exited" | "failed";
 
+// INTERFACE :: mutable timing sums and maxima for one bounded reporting window
+// Accumulates low-overhead worker-stage observations until a snapshot is emitted.
+interface PerformanceAccumulator {
+    frames: number;                       // Emulated frames observed
+    batches: number;                      // Productive worker ticks observed
+    coreMilliseconds: number;             // Aggregate native core execution time
+    extractionMilliseconds: number;       // Aggregate native AV extraction time
+    videoMilliseconds: number;            // Aggregate RGBA conversion time
+    audioMilliseconds: number;            // Aggregate PCM conversion time
+    workerMilliseconds: number;           // Aggregate complete worker frame time
+    workerMaximumMs: number;               // Slowest complete worker frame
+    turnaroundSamples: number;            // Immediate continuation roundtrips observed
+    turnaroundMilliseconds: number;       // Aggregate immediate continuation roundtrip time
+    turnaroundMaximumMs: number;           // Slowest immediate continuation roundtrip
+}
+
+// INTERFACE :: {coreMilliseconds:NUMBER, extractionMilliseconds:NUMBER, videoMilliseconds:NUMBER, audioMilliseconds:NUMBER, workerMilliseconds:NUMBER}
+// One emulated frame's measured worker stages.
+interface FramePerformance {
+    readonly coreMilliseconds: number;          // Native core execution time
+    readonly extractionMilliseconds: number;    // Native AV exposure time
+    readonly videoMilliseconds: number;         // RGBA conversion time
+    readonly audioMilliseconds: number;         // PCM conversion time
+    readonly workerMilliseconds: number;        // Complete worker time for the frame
+}
+
 /**
  *
  * Class
@@ -112,18 +147,22 @@ export default class WorkerRuntime {
     /* Instance Fields */
     private readonly _core: WorkerCore;                         // Backend core bridge owned by this runtime
     private readonly _videoPool: TransferBufferPool;            // Bounded pool of transferable RGBA buffers
+    private readonly _clock: () => number;                      // Monotonic stage and turnaround timing source
     private _tail: Promise<void> = Promise.resolve();           // Tail that serializes all command handling
     private _state: RuntimeState = "idle";                      // Current core lifecycle state
     private _generation = 0;                                    // Active main-thread client generation
     private _pacer: FramePacer | null = null;                   // Timestamp-to-frame accumulator after startup
     private _geometryKey = "";                                  // Last emitted geometry identity
     private _stopped = false;                                   // Whether core stop was already attempted
+    private _performance = createPerformanceAccumulator();      // Current bounded timing window
+    private _lastProductiveTickCompletedAt: number | null = null; // Previous productive batch completion
 
-    // CONSTRUCTOR :: workerCore, NUMBER? -> workerRuntime
+    // CONSTRUCTOR :: workerCore, NUMBER?, (VOID -> NUMBER)? -> workerRuntime
     // Retains the core and creates a bounded transferable video pool.
-    constructor(core: WorkerCore, videoBufferCount = 3) {
+    constructor(core: WorkerCore, videoBufferCount = 3, clock: () => number = monotonicClock) {
         this._core = core;
         this._videoPool = new TransferBufferPool(videoBufferCount);
+        this._clock = clock;
     }
 
     /**
@@ -177,7 +216,11 @@ export default class WorkerRuntime {
         }
         try {
             switch (command.type) {
-                case "tick": return this._tick(command.timestamp, command.playbackRate ?? 1);
+                case "tick": return this._tick(
+                    command.timestamp,
+                    command.playbackRate ?? 1,
+                    command.continuation ?? false,
+                );
                 case "set-button":
                     this._core.setButton(command.port, command.button, command.pressed);
                     return [];
@@ -190,18 +233,22 @@ export default class WorkerRuntime {
                 case "pause":
                     this._state = "paused";
                     this._pacer!.pause();
+                    this._resetPerformance();
                     return [requestSuccess(command, "pause", null)];
                 case "resume":
                     this._state = "running";
                     this._pacer!.resume();
+                    this._resetPerformance();
                     return [requestSuccess(command, "resume", null)];
                 case "reset":
                     await this._core.reset(command.kind);
                     this._pacer!.reset();
+                    this._resetPerformance();
                     return [requestSuccess(command, "reset", null)];
                 case "set-disc": {
                     const result = await this._core.setDisc(command.index);
                     this._pacer!.reset();
+                    this._resetPerformance();
                     return [requestSuccess(command, "set-disc", result)];
                 }
                 case "read-memory-card": {
@@ -217,6 +264,7 @@ export default class WorkerRuntime {
                 case "unserialize-state":
                     await this._core.unserializeState(Uint8Array.from(command.bytes));
                     this._pacer!.reset();
+                    this._resetPerformance();
                     return [requestSuccess(command, "unserialize-state", null)];
                 case "exit":
                     await this._stop();
@@ -270,22 +318,42 @@ export default class WorkerRuntime {
         }))];
     }
 
-    // METHOD :: NUMBER, psxPlaybackRate -> PROMISE([workerOutput])
+    // METHOD :: NUMBER, psxPlaybackRate, BOOLEAN -> PROMISE([workerOutput])
     // Advances pacing and converts core video, audio, rumble, and timing outputs.
-    private async _tick(timestamp: number, playbackRate: PsxPlaybackRate): Promise<WorkerOutput[]> {
+    private async _tick(
+        timestamp: number,
+        playbackRate: PsxPlaybackRate,
+        continuation: boolean,
+    ): Promise<WorkerOutput[]> {
         if (this._state !== "running") return [{ type: "pacing", generation: this._generation, frames: 0 }];
+        const tickStartedAt = this._clock();
         const maximumFrames = playbackRate === 1
             ? this._pacer!.maximumFramesPerTick
             : playbackRate + this._pacer!.maximumFramesPerTick;
         const pacing = this._pacer!.advance(timestamp, maximumFrames);
         const output: WorkerOutput[] = [];
         let droppedVideoFrames = 0;
+        if (pacing.frames > 0) {
+            this._performance.batches++;
+            if (continuation && this._lastProductiveTickCompletedAt !== null) {
+                recordTurnaround(
+                    this._performance,
+                    Math.max(0, tickStartedAt - this._lastProductiveTickCompletedAt),
+                );
+            }
+        }
         for (let frameIndex = 0; frameIndex < pacing.frames; frameIndex++) {
+            const frameStartedAt = this._clock();
+            const runStartedAt = this._clock();
             const frame = await this._core.runFrame({
                 video: true,
                 audio: playbackRate === 1,
                 frameskipInterval: playbackRate === 1 ? 0 : Math.min(playbackRate - 1, 10),
             });
+            const runFinishedAt = this._clock();
+            const nativeTiming = normalizeCoreTiming(frame.timing, runFinishedAt - runStartedAt);
+            let videoMilliseconds = 0;
+            let audioMilliseconds = 0;
             if (frame.video !== undefined && frame.video !== null) {
                 const videoBytes = frame.video.width * frame.video.height * 4;
                 const lease = this._videoPool.acquire(videoBytes);
@@ -303,7 +371,9 @@ export default class WorkerRuntime {
                 if (lease === null) {
                     droppedVideoFrames++;
                 } else {
+                    const videoStartedAt = this._clock();
                     convertVideoFrame(frame.video, lease.buffer);
+                    videoMilliseconds = Math.max(0, this._clock() - videoStartedAt);
                     output.push({
                         type: "frame",
                         generation: this._generation,
@@ -317,7 +387,9 @@ export default class WorkerRuntime {
             }
             if (playbackRate === 1 && frame.audio !== undefined && frame.audio.length > 0) {
                 if (frame.audio.length % 2 !== 0) throw new Error("Core returned non-stereo audio");
+                const audioStartedAt = this._clock();
                 const samples = convertAudioSamples(frame.audio);
+                audioMilliseconds = Math.max(0, this._clock() - audioStartedAt);
                 output.push({
                     type: "sound",
                     generation: this._generation,
@@ -330,6 +402,13 @@ export default class WorkerRuntime {
                 output.push({ type: "rumble", generation: this._generation, ...rumble });
             }
             output.push({ type: "tick", generation: this._generation });
+            recordFramePerformance(this._performance, {
+                coreMilliseconds: nativeTiming.coreMilliseconds,
+                extractionMilliseconds: nativeTiming.extractionMilliseconds,
+                videoMilliseconds,
+                audioMilliseconds,
+                workerMilliseconds: Math.max(0, this._clock() - frameStartedAt),
+            });
         }
         if (pacing.droppedMilliseconds > 0 || droppedVideoFrames > 0) {
             output.push({
@@ -339,8 +418,26 @@ export default class WorkerRuntime {
                 videoFrames: droppedVideoFrames,
             });
         }
+        if (pacing.frames > 0) {
+            this._lastProductiveTickCompletedAt = this._clock();
+            if (this._performance.frames >= PERFORMANCE_WINDOW_FRAMES) {
+                output.push({
+                    type: "performance",
+                    generation: this._generation,
+                    ...performanceSnapshot(this._performance),
+                });
+                this._performance = createPerformanceAccumulator();
+            }
+        }
         output.push({ type: "pacing", generation: this._generation, frames: pacing.frames });
         return output;
+    }
+
+    // METHOD :: VOID -> VOID
+    // Clears partial measurements at lifecycle discontinuities without retracting an emitted snapshot.
+    private _resetPerformance(): void {
+        this._performance = createPerformanceAccumulator();
+        this._lastProductiveTickCompletedAt = null;
     }
 
     // METHOD :: workerCommand, UNKNOWN -> PROMISE([workerOutput])
@@ -378,6 +475,80 @@ export default class WorkerRuntime {
  *  Helper Functions
  *
  */
+
+const PERFORMANCE_WINDOW_FRAMES = 120;
+
+// HELPER :: VOID -> performanceAccumulator
+// Creates one empty bounded worker-timing window.
+const createPerformanceAccumulator = (): PerformanceAccumulator => ({
+    frames: 0,
+    batches: 0,
+    coreMilliseconds: 0,
+    extractionMilliseconds: 0,
+    videoMilliseconds: 0,
+    audioMilliseconds: 0,
+    workerMilliseconds: 0,
+    workerMaximumMs: 0,
+    turnaroundSamples: 0,
+    turnaroundMilliseconds: 0,
+    turnaroundMaximumMs: 0,
+});
+
+// HELPER :: coreRunTiming?, NUMBER -> coreRunTiming
+// Uses production bridge stages when valid and a whole-run fallback for synthetic cores.
+const normalizeCoreTiming = (timing: CoreRunTiming | undefined, fallbackMilliseconds: number): CoreRunTiming => {
+    if (timing !== undefined && Number.isFinite(timing.coreMilliseconds) && timing.coreMilliseconds >= 0
+        && Number.isFinite(timing.extractionMilliseconds) && timing.extractionMilliseconds >= 0) return timing;
+    return {
+        coreMilliseconds: Math.max(0, fallbackMilliseconds),
+        extractionMilliseconds: 0,
+    };
+};
+
+// HELPER :: performanceAccumulator, framePerformance -> VOID
+// Adds one frame's stage measurements and updates its slowest complete-frame observation.
+const recordFramePerformance = (
+    accumulator: PerformanceAccumulator,
+    frame: FramePerformance,
+): void => {
+    accumulator.frames++;
+    accumulator.coreMilliseconds += frame.coreMilliseconds;
+    accumulator.extractionMilliseconds += frame.extractionMilliseconds;
+    accumulator.videoMilliseconds += frame.videoMilliseconds;
+    accumulator.audioMilliseconds += frame.audioMilliseconds;
+    accumulator.workerMilliseconds += frame.workerMilliseconds;
+    accumulator.workerMaximumMs = Math.max(accumulator.workerMaximumMs, frame.workerMilliseconds);
+};
+
+// HELPER :: performanceAccumulator, NUMBER -> VOID
+// Adds one immediate worker/main continuation roundtrip observation.
+const recordTurnaround = (accumulator: PerformanceAccumulator, milliseconds: number): void => {
+    accumulator.turnaroundSamples++;
+    accumulator.turnaroundMilliseconds += milliseconds;
+    accumulator.turnaroundMaximumMs = Math.max(accumulator.turnaroundMaximumMs, milliseconds);
+};
+
+// HELPER :: performanceAccumulator -> psxPerformanceTiming
+// Produces one immutable average-and-maximum timing report from a non-empty window.
+const performanceSnapshot = (accumulator: PerformanceAccumulator): PsxPerformanceTiming => ({
+    frames: accumulator.frames,
+    batches: accumulator.batches,
+    coreAverageMs: accumulator.coreMilliseconds / accumulator.frames,
+    extractionAverageMs: accumulator.extractionMilliseconds / accumulator.frames,
+    videoAverageMs: accumulator.videoMilliseconds / accumulator.frames,
+    audioAverageMs: accumulator.audioMilliseconds / accumulator.frames,
+    workerAverageMs: accumulator.workerMilliseconds / accumulator.frames,
+    workerMaximumMs: accumulator.workerMaximumMs,
+    turnaroundSamples: accumulator.turnaroundSamples,
+    turnaroundAverageMs: accumulator.turnaroundSamples === 0
+        ? 0
+        : accumulator.turnaroundMilliseconds / accumulator.turnaroundSamples,
+    turnaroundMaximumMs: accumulator.turnaroundMaximumMs,
+});
+
+// HELPER :: VOID -> NUMBER
+// Reads the realm's monotonic high-resolution clock for stage and roundtrip timing.
+const monotonicClock = (): number => performance.now();
 
 // HELPER :: workerCommand, workerRequestType, psxRuntimeError -> workerOutput
 // Builds one cloneable correlated failure response.

@@ -127,15 +127,17 @@ export default class EmscriptenPsxCore implements WorkerCore {
 
     /* Instance Fields */
     private readonly _loadModule: CoreModuleLoader;                  // Dynamic generated-module import boundary
+    private readonly _clock: () => number;                           // Monotonic stage-timing clock
     private _module: EmscriptenPsxModule | null = null;             // Live validated module after startup
     private _payload: WorkerStartPayload | null = null;             // Startup input retained for bridge lifetime
     private _stopped = false;                                       // Whether module ownership has ended
     private _rumble = [[0, 0], [0, 0]];                             // Previous native strong and weak motor values by port
 
-    // CONSTRUCTOR :: coreModuleLoader -> emscriptenPsxCore
+    // CONSTRUCTOR :: coreModuleLoader, (VOID -> NUMBER)? -> emscriptenPsxCore
     // Retains the generated-module loader for deferred worker startup.
-    constructor(loadModule: CoreModuleLoader) {
+    constructor(loadModule: CoreModuleLoader, clock: () => number = monotonicClock) {
         this._loadModule = loadModule;
+        this._clock = clock;
     }
 
     /**
@@ -228,6 +230,7 @@ export default class EmscriptenPsxCore implements WorkerCore {
     // Executes one frame and copies only requested AV payloads plus changed rumble output.
     runFrame(options: CoreRunOptions): CoreRunOutput {
         const module = this._liveModule();
+        const startedAt = this._clock();
         if (module._psx_run_frame(
             options.video ? 1 : 0,
             options.audio ? 1 : 0,
@@ -237,6 +240,7 @@ export default class EmscriptenPsxCore implements WorkerCore {
             message: "The PlayStation core failed while running a frame.",
             data: this._sanitizedLog(),
         });
+        const executedAt = this._clock();
         const videoPointer = options.video ? module._psx_video_data() : 0;
         const videoBytes = options.video ? module._psx_video_size() : 0;
         const video = !options.video
@@ -268,10 +272,15 @@ export default class EmscriptenPsxCore implements WorkerCore {
                 rumble.push({ port: (port + 1) as ControllerPort, strong: strong / 0xffff, weak: weak / 0xffff });
             }
         }
+        const extractedAt = this._clock();
         return {
             ...(video === undefined ? {} : { video }),
             ...(audio === undefined ? {} : { audio }),
             ...(rumble.length === 0 ? {} : { rumble }),
+            timing: {
+                coreMilliseconds: Math.max(0, executedAt - startedAt),
+                extractionMilliseconds: Math.max(0, extractedAt - executedAt),
+            },
         };
     }
 
@@ -460,6 +469,10 @@ const moduleFailure = (message: string, data: unknown = null): PsxRuntimeError =
     message,
     data,
 });
+
+// HELPER :: VOID -> NUMBER
+// Reads the realm's monotonic high-resolution clock for worker-stage timing.
+const monotonicClock = (): number => performance.now();
 
 // HELPER :: UNKNOWN -> BOOLEAN
 // Narrows an instantiated value to the required Emscripten module surface.

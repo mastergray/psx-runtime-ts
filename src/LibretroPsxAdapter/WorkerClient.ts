@@ -11,6 +11,7 @@ import type {
     PsxAxis,           // Closed set of analog controls
     PsxButton,         // Closed set of digital controls
     PsxMachineInfo,    // Validated startup metadata returned by the worker
+    PsxPerformanceTiming, // Aggregated worker-stage timing window
     PsxPlaybackRate,   // Normal or accelerated emulation-time multiplier
     PsxRumbleEvent,    // Browser-ready rumble output
     PsxSoundEvent,     // Browser-ready stereo audio output
@@ -51,7 +52,7 @@ type CommandBody = WorkerCommand extends infer Command
     ? Command extends WorkerCommand ? Omit<Command, "requestId" | "generation"> : never
     : never;
 
-// TYPE :: {tick:VOID, frame:psxFrameEvent, sound:psxSoundEvent, rumble:psxRumbleEvent, geometry:psxGeometry, exit:VOID, failure:psxRuntimeError}
+// TYPE :: {tick:VOID, frame:psxFrameEvent, sound:psxSoundEvent, rumble:psxRumbleEvent, geometry:psxGeometry, performance:psxPerformanceTiming, exit:VOID, failure:psxRuntimeError}
 // Event payload map exposed to a session wrapper.
 interface ClientEvents {
     readonly tick: void;                    // One completed emulation tick
@@ -59,6 +60,7 @@ interface ClientEvents {
     readonly sound: PsxSoundEvent;          // One browser-ready audio chunk
     readonly rumble: PsxRumbleEvent;        // One controller motor update
     readonly geometry: PsxGeometry;         // One dynamic video-geometry update
+    readonly performance: PsxPerformanceTiming; // One bounded worker-stage timing window
     readonly exit: void;                    // Intentional worker shutdown
     readonly failure: PsxRuntimeError;      // Terminal normalized worker failure
 }
@@ -84,6 +86,7 @@ export default class WorkerClient {
         sound: new Set(),
         rumble: new Set(),
         geometry: new Set(),
+        performance: new Set(),
         exit: new Set(),
         failure: new Set(),
     };                                                                     // Client observers partitioned by event type
@@ -307,7 +310,7 @@ export default class WorkerClient {
 
     // METHOD :: NUMBER -> VOID
     // Posts one rate-scaled tick while preserving the single-in-flight pacing boundary.
-    private _postPacingTick(time: number): void {
+    private _postPacingTick(time: number, continuation = false): void {
         if (this._emulationTimestamp === null) this._emulationTimestamp = time;
         if (this._lastHostTimestamp !== null) {
             this._emulationTimestamp += Math.max(0, time - this._lastHostTimestamp) * this._playbackRate;
@@ -319,6 +322,7 @@ export default class WorkerClient {
                 type: "tick",
                 timestamp: this._emulationTimestamp,
                 playbackRate: this._playbackRate,
+                ...(continuation ? { continuation: true } : {}),
             });
         } catch (error) {
             this._tickPending = false;
@@ -408,7 +412,7 @@ export default class WorkerClient {
                     const time = this._clock();
                     if (Number.isFinite(time) && time >= 0
                         && this._lastHostTimestamp !== null && time > this._lastHostTimestamp) {
-                        this._postPacingTick(time);
+                        this._postPacingTick(time, true);
                     }
                 }
                 break;
@@ -444,6 +448,19 @@ export default class WorkerClient {
             case "error": this._fail(output.error); break;
             case "exit": this._emit("exit", undefined); break;
             case "dropped-time": break;
+            case "performance": this._emit("performance", {
+                frames: output.frames,
+                batches: output.batches,
+                coreAverageMs: output.coreAverageMs,
+                extractionAverageMs: output.extractionAverageMs,
+                videoAverageMs: output.videoAverageMs,
+                audioAverageMs: output.audioAverageMs,
+                workerAverageMs: output.workerAverageMs,
+                workerMaximumMs: output.workerMaximumMs,
+                turnaroundSamples: output.turnaroundSamples,
+                turnaroundAverageMs: output.turnaroundAverageMs,
+                turnaroundMaximumMs: output.turnaroundMaximumMs,
+            }); break;
         }
     }
 

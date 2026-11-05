@@ -2033,6 +2033,25 @@ export default class UiApplication {
             "audio-buffer-status",
             `Audio: ${underruns} ${underruns === 1 ? "underrun" : "underruns"} · ${queued} ms queued · ${backend}${productionStatus}${rateMatchStatus}${recovery}`,
         );
+        const performance = audio?.workerPerformance ?? null;
+        if (performance === null) {
+            this._setText("audio-worker-status", "Worker timing: waiting for 120 frames.");
+            return;
+        }
+        const frameBudget = 1000 / (this._player?.session?.machine.framesPerSecond ?? 60);
+        const turnaroundPerFrame = performance.turnaroundAverageMs
+            * performance.batches / performance.frames;
+        const criticalPath = performance.workerAverageMs + turnaroundPerFrame;
+        this._setText(
+            "audio-worker-status",
+            `Worker timing: ${criticalPath.toFixed(1)} / ${frameBudget.toFixed(1)} ms budget`
+                + ` · core ${performance.coreAverageMs.toFixed(1)}`
+                + ` · extract ${performance.extractionAverageMs.toFixed(1)}`
+                + ` · video ${performance.videoAverageMs.toFixed(1)}`
+                + ` · audio ${performance.audioAverageMs.toFixed(1)}`
+                + ` · turnaround ${performance.turnaroundAverageMs.toFixed(1)} ms/batch`
+                + ` · max ${performance.workerMaximumMs.toFixed(1)} + ${performance.turnaroundMaximumMs.toFixed(1)} ms`,
+        );
     }
 
     // METHOD :: uiStageState -> STRING

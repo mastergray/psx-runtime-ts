@@ -5,6 +5,7 @@ import {
     isPsxBuildInfo,
     isPsxControllerType,
     isPsxMachineInfo,
+    isPsxPerformanceTiming,
     isPsxPlaybackRate,
     isPsxRegion,
 } from "../shared.types.js";
@@ -17,6 +18,7 @@ import type {
     PsxBuildInfo,
     PsxControllerType,
     PsxMachineInfo,
+    PsxPerformanceTiming,
     PsxPlaybackRate,
     PsxRegion,
 } from "../shared.types.js";
@@ -43,7 +45,7 @@ export interface WorkerStartPayload {
 
 export type WorkerCommand =
     | (WorkerEnvelope & { readonly type: "start"; readonly payload: WorkerStartPayload })
-    | (WorkerEnvelope & { readonly type: "tick"; readonly timestamp: number; readonly playbackRate?: PsxPlaybackRate })
+    | (WorkerEnvelope & { readonly type: "tick"; readonly timestamp: number; readonly playbackRate?: PsxPlaybackRate; readonly continuation?: boolean })
     | (WorkerEnvelope & { readonly type: "set-button"; readonly port: ControllerPort; readonly button: PsxButton; readonly pressed: boolean })
     | (WorkerEnvelope & { readonly type: "set-axis"; readonly port: ControllerPort; readonly axis: PsxAxis; readonly value: number })
     | (WorkerEnvelope & { readonly type: "pause" })
@@ -94,6 +96,7 @@ export type WorkerEvent =
     | { readonly type: "sound"; readonly generation: number; readonly samples: ArrayBuffer; readonly frames: number }
     | { readonly type: "rumble"; readonly generation: number; readonly port: ControllerPort; readonly strong: number; readonly weak: number }
     | { readonly type: "dropped-time"; readonly generation: number; readonly milliseconds: number; readonly videoFrames: number }
+    | ({ readonly type: "performance"; readonly generation: number } & PsxPerformanceTiming)
     | { readonly type: "error"; readonly generation: number; readonly error: WorkerErrorData }
     | { readonly type: "exit"; readonly generation: number };
 
@@ -174,7 +177,8 @@ export function isWorkerCommand(value: unknown): value is WorkerCommand {
     switch (value.type) {
         case "start": return isWorkerStartPayload(value.payload);
         case "tick": return isFiniteNumber(value.timestamp) && value.timestamp >= 0
-            && (value.playbackRate === undefined || isPsxPlaybackRate(value.playbackRate));
+            && (value.playbackRate === undefined || isPsxPlaybackRate(value.playbackRate))
+            && (value.continuation === undefined || typeof value.continuation === "boolean");
         case "set-button": return isControllerPort(value.port)
             && isPsxButton(value.button) && typeof value.pressed === "boolean";
         case "set-axis": return isControllerPort(value.port) && isPsxAxis(value.axis)
@@ -234,6 +238,7 @@ export function isWorkerOutput(value: unknown): value is WorkerOutput {
             && isFiniteNumber(value.weak) && value.weak >= 0 && value.weak <= 1;
         case "dropped-time": return isFiniteNumber(value.milliseconds) && value.milliseconds >= 0
             && isNonNegativeInteger(value.videoFrames);
+        case "performance": return isPsxPerformanceTiming(value);
         case "error": return isErrorData(value.error);
         default: return false;
     }

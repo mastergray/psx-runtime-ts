@@ -159,6 +159,14 @@ class SyntheticCore implements WorkerCore {
     }
 }
 
+class TimingCore extends SyntheticCore {
+    override runFrame(options: CoreRunOptions): CoreRunOutput {
+        this.frames++;
+        this.runOptions.push(options);
+        return { timing: { coreMilliseconds: 2, extractionMilliseconds: 1 } };
+    }
+}
+
 const start = command({ type: "start", requestId: 1, generation: 1, payload: startPayload });
 
 const frameOf = (outputs: WorkerOutput[]): Extract<WorkerOutput, { type: "frame" }> => {
@@ -208,9 +216,24 @@ const testFile: TestFile = {
                     { type: "sound", generation: 1, frames: 1, samples: new ArrayBuffer(8) },
                     { type: "rumble", generation: 1, port: 1, strong: 1, weak: 0 },
                     { type: "dropped-time", generation: 1, milliseconds: 1, videoFrames: 0 },
+                    {
+                        type: "performance",
+                        generation: 1,
+                        frames: 120,
+                        batches: 30,
+                        coreAverageMs: 12,
+                        extractionAverageMs: 0.2,
+                        videoAverageMs: 1.5,
+                        audioAverageMs: 0.1,
+                        workerAverageMs: 14,
+                        workerMaximumMs: 18,
+                        turnaroundSamples: 29,
+                        turnaroundAverageMs: 1,
+                        turnaroundMaximumMs: 2,
+                    },
                     { type: "frame", generation: 1, bufferId: 0, width: 2, height: 1, aspectRatio: 2, rgba: new ArrayBuffer(4) },
                 ].map(isWorkerOutput), P.equals<boolean[]>([
-                    true, true, true, true, true, true, true, true, true, false,
+                    true, true, true, true, true, true, true, true, true, true, false,
                 ]))
                 .start(undefined),
         },
@@ -300,6 +323,47 @@ const testFile: TestFile = {
                     acceleratedDroppedFrames: 2,
                     paused: 0,
                     resumed: [0, 1],
+                }))
+                .start(undefined),
+        },
+        {
+            label: "worker stage timing aggregates a low-frequency deterministic performance window",
+            run: () => CTGTest.init("worker performance")
+                .stage("measure 120 synthetic frames", async () => {
+                    let clock = 0;
+                    const runtime = new WorkerRuntime(new TimingCore(), 3, () => clock++);
+                    await runtime.dispatch(start);
+                    await runtime.dispatch(command({
+                        type: "tick", requestId: 2, generation: 1, timestamp: 0,
+                    }));
+                    let performance: Extract<WorkerOutput, { type: "performance" }> | undefined;
+                    for (let batch = 1; batch <= 30; batch++) {
+                        const outputs = await runtime.dispatch(command({
+                            type: "tick",
+                            requestId: batch + 2,
+                            generation: 1,
+                            timestamp: batch * 4 * (1000 / 60),
+                            continuation: true,
+                        }));
+                        performance = outputs.find((output): output is Extract<WorkerOutput, { type: "performance" }> =>
+                            output.type === "performance") ?? performance;
+                    }
+                    return performance;
+                })
+                .assert("stage averages", ({ subject }) => subject, P.equals<unknown>({
+                    type: "performance",
+                    generation: 1,
+                    frames: 120,
+                    batches: 30,
+                    coreAverageMs: 2,
+                    extractionAverageMs: 1,
+                    videoAverageMs: 0,
+                    audioAverageMs: 0,
+                    workerAverageMs: 3,
+                    workerMaximumMs: 3,
+                    turnaroundSamples: 29,
+                    turnaroundAverageMs: 1,
+                    turnaroundMaximumMs: 1,
                 }))
                 .start(undefined),
         },

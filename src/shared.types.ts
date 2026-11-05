@@ -165,6 +165,22 @@ export interface PsxSoundEvent {
     readonly frames: number;           // Stereo frame count represented by samples
 }
 
+// INTERFACE :: {frames:NUMBER, batches:NUMBER, coreAverageMs:NUMBER, extractionAverageMs:NUMBER, videoAverageMs:NUMBER, audioAverageMs:NUMBER, workerAverageMs:NUMBER, workerMaximumMs:NUMBER, turnaroundSamples:NUMBER, turnaroundAverageMs:NUMBER, turnaroundMaximumMs:NUMBER}
+// Low-frequency worker-stage timing aggregated over a bounded frame window.
+export interface PsxPerformanceTiming {
+    readonly frames: number;                   // Emulated frames represented by this timing window
+    readonly batches: number;                  // Productive worker ticks represented by the window
+    readonly coreAverageMs: number;            // Average native core execution time per frame
+    readonly extractionAverageMs: number;      // Average native AV extraction time per frame
+    readonly videoAverageMs: number;           // Average RGBA conversion time per frame
+    readonly audioAverageMs: number;           // Average PCM conversion time per frame
+    readonly workerAverageMs: number;          // Average complete worker processing time per frame
+    readonly workerMaximumMs: number;          // Slowest complete worker frame in the window
+    readonly turnaroundSamples: number;        // Immediate worker/main continuation roundtrips measured
+    readonly turnaroundAverageMs: number;      // Average immediate continuation roundtrip
+    readonly turnaroundMaximumMs: number;      // Slowest immediate continuation roundtrip
+}
+
 // INTERFACE :: {port:controllerPort, strong:NUMBER, weak:NUMBER}
 // Normalized strong- and weak-motor rumble state for one controller.
 export interface PsxRumbleEvent {
@@ -195,6 +211,7 @@ export interface PsxSession {
     readonly discIndex: number;            // Currently mounted zero-based disc index
     readonly trayOpen: boolean;            // True while a disc swap transaction has the virtual tray open
     readonly playbackRate: PsxPlaybackRate; // Requested emulation-time multiplier
+    readonly performance?: PsxPerformanceTiming | null; // Latest optional worker timing window
     setButton(control: PsxButtonControl, pressed: boolean): void;              // Changes one digital control state
     setAxis(control: PsxAxisControl, value: number): void;                     // Changes one normalized analog axis
     setPlaybackRate(rate: PsxPlaybackRate): void;                              // Changes the best-effort execution multiplier
@@ -525,6 +542,29 @@ export function isPsxFrameEvent(value: unknown): value is PsxFrameEvent {
 export function isPsxSoundEvent(value: unknown): value is PsxSoundEvent {
     return isObject(value) && isNonNegativeInteger(value.frames) && isFloat32Array(value.samples)
         && value.samples.length === value.frames * 2;
+}
+
+// PREDICATE :: UNKNOWN -> BOOLEAN
+// True when value contains one coherent non-negative worker timing window.
+export function isPsxPerformanceTiming(value: unknown): value is PsxPerformanceTiming {
+    if (!isObject(value) || !isPositiveInteger(value.frames) || !isPositiveInteger(value.batches)
+        || value.batches > value.frames || !isNonNegativeInteger(value.turnaroundSamples)
+        || value.turnaroundSamples > value.batches) return false;
+    const timings = [
+        value.coreAverageMs,
+        value.extractionAverageMs,
+        value.videoAverageMs,
+        value.audioAverageMs,
+        value.workerAverageMs,
+        value.workerMaximumMs,
+        value.turnaroundAverageMs,
+        value.turnaroundMaximumMs,
+    ];
+    return timings.every((timing) => isFiniteNumber(timing) && timing >= 0)
+        && (value.workerMaximumMs as number) >= (value.workerAverageMs as number)
+        && (value.turnaroundMaximumMs as number) >= (value.turnaroundAverageMs as number)
+        && (value.turnaroundSamples !== 0
+            || (value.turnaroundAverageMs === 0 && value.turnaroundMaximumMs === 0));
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN

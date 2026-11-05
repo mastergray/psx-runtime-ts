@@ -98,6 +98,8 @@ formats or settings are exposed.
 The Audio modal persists the audio-buffering mode and reports observed
 underruns, recent queue depth, real-time core-audio production, rate-matched
 output speed and the largest recent delivery gap for device-specific tuning.
+Experimental builds also aggregate worker timing every 120 frames across core
+execution, AV extraction, video/audio conversion and main-thread turnaround.
 
 Presentation Mode provides a controller-first, television-scale view of the
 same running session. The D-pad or left stick moves focus, Cross activates,
