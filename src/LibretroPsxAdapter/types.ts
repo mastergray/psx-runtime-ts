@@ -50,9 +50,9 @@ export type WorkerFactory = (url: string) => PsxWorker;
 // Monotonic millisecond clock used when scheduler timestamps are invalid.
 export type PsxClock = () => number;
 
-// TYPE :: "baseline"|"instrumented"|"sequential-read-reuse"
-// Development-only execution variant selected before a session starts.
-export type PsxDiagnosticVariant = "baseline" | "instrumented" | "sequential-read-reuse";
+// TYPE :: "production"|"baseline"|"instrumented"|"sequential-read-reuse"
+// Accepted production execution or a development comparison selected before a session starts.
+export type PsxDiagnosticVariant = "production" | "baseline" | "instrumented" | "sequential-read-reuse";
 
 // INTERFACE :: {buildUrl:STRING, build:psxBuildInfo, createWorker:workerFactory, scheduler:frameScheduler?, clock:psxClock?, diagnosticVariant:psxDiagnosticVariant?}
 // Validated dependencies retained by a libretro adapter instance.
@@ -62,7 +62,7 @@ export interface LibretroPsxAdapterConfig {
     readonly createWorker: WorkerFactory;      // Worker construction boundary
     readonly scheduler?: FrameScheduler;       // Optional deterministic pacing override
     readonly clock?: PsxClock;                 // Optional deterministic clock override
-    readonly diagnosticVariant?: PsxDiagnosticVariant; // Development-only measurement variant; defaults to baseline
+    readonly diagnosticVariant?: PsxDiagnosticVariant; // Execution/measurement variant; defaults to uninstrumented accepted D1 reuse
 }
 
 // INTERFACE :: {buildUrl:STRING, fetch:fetchLike?, createWorker:workerFactory?, scheduler:frameScheduler?, clock:psxClock?, diagnosticVariant:psxDiagnosticVariant?}
@@ -73,7 +73,7 @@ export interface LibretroPsxAdapterInitConfig {
     readonly createWorker?: WorkerFactory;     // Optional worker construction override
     readonly scheduler?: FrameScheduler;       // Optional pacing override
     readonly clock?: PsxClock;                 // Optional monotonic clock override
-    readonly diagnosticVariant?: PsxDiagnosticVariant; // Development-only measurement variant; defaults to baseline
+    readonly diagnosticVariant?: PsxDiagnosticVariant; // Execution/measurement variant; defaults to uninstrumented accepted D1 reuse
 }
 
 /**
@@ -108,9 +108,10 @@ export function isWorkerFactory(value: unknown): value is WorkerFactory {
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN
-// True when value selects a supported development-only measurement variant.
+// True when value selects the production path or a supported development comparison.
 export function isPsxDiagnosticVariant(value: unknown): value is PsxDiagnosticVariant {
-    return value === "baseline" || value === "instrumented" || value === "sequential-read-reuse";
+    return value === "production" || value === "baseline"
+        || value === "instrumented" || value === "sequential-read-reuse";
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN

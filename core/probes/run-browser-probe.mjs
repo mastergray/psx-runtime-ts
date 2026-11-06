@@ -1168,25 +1168,14 @@ try {
             const trigger = document.querySelector("#volume-session");
             const dialog = document.querySelector("#volume-dialog");
             const range = document.querySelector("#volume-level");
-            const bufferMode = document.querySelector("#audio-buffer-mode");
-            const diagnosticVariant = document.querySelector("#diagnostic-variant");
-            const downloadDiagnostics = document.querySelector("#download-diagnostics");
             if (!(trigger instanceof HTMLButtonElement) || !(dialog instanceof HTMLDialogElement)
-                || !(range instanceof HTMLInputElement) || !(bufferMode instanceof HTMLSelectElement)
-                || !(diagnosticVariant instanceof HTMLSelectElement)
-                || !(downloadDiagnostics instanceof HTMLButtonElement)) {
-                throw new Error("Missing Audio controls");
+                || !(range instanceof HTMLInputElement)) {
+                throw new Error("Missing Volume controls");
             }
             trigger.disabled = false;
             trigger.click();
-            const initialBufferMode = bufferMode.value;
             range.value = "42";
             range.dispatchEvent(new Event("input", { bubbles: true }));
-            bufferMode.value = "stable";
-            bufferMode.dispatchEvent(new Event("change", { bubbles: true }));
-            const initialDiagnosticVariant = diagnosticVariant.value;
-            diagnosticVariant.value = "instrumented";
-            diagnosticVariant.dispatchEvent(new Event("change", { bubbles: true }));
             const result = {
                 label: trigger.textContent,
                 controls: trigger.getAttribute("aria-controls"),
@@ -1195,18 +1184,7 @@ try {
                 output: document.querySelector("#volume-value")?.textContent,
                 ranges: dialog.querySelectorAll("input[type='range']").length,
                 extraControls: dialog.querySelectorAll(".dialog-content button, .dialog-content select, .dialog-content input:not([type='range'])").length,
-                initialBufferMode,
-                bufferMode: bufferMode.value,
-                bufferOptions: [...bufferMode.options].map(({ value, textContent }) => [value, textContent]),
-                bufferStored: localStorage.getItem("psx-runtime:ui:audio-buffer-mode"),
-                initialDiagnosticVariant,
-                diagnosticVariant: diagnosticVariant.value,
-                diagnosticOptions: [...diagnosticVariant.options].map(({ value, textContent }) => [value, textContent]),
-                diagnosticStored: localStorage.getItem("psx-runtime:ui:diagnostic-variant"),
-                diagnosticStatus: document.querySelector("#diagnostic-variant-status")?.textContent,
-                downloadDisabled: downloadDiagnostics.disabled,
-                bufferStatus: document.querySelector("#audio-buffer-status")?.textContent,
-                workerStatus: document.querySelector("#audio-worker-status")?.textContent,
+                configurationAbsent: dialog.querySelector("#audio-buffer-mode, #diagnostic-variant, #download-diagnostics") === null,
             };
             dialog.close();
             trigger.disabled = true;
@@ -1215,6 +1193,45 @@ try {
                 closed: !dialog.open,
             };
         });
+        await page.click("[data-open-dialog='system']");
+        await page.waitForFunction(() => document.querySelector("#system-dialog")?.hasAttribute("open"));
+        await page.click("#system-settings-tab");
+        const systemSettings = await page.evaluate(() => {
+            const panel = document.querySelector("#system-settings-panel");
+            const bufferMode = document.querySelector("#audio-buffer-mode");
+            const diagnosticVariant = document.querySelector("#diagnostic-variant");
+            const downloadDiagnostics = document.querySelector("#download-diagnostics");
+            if (!(panel instanceof HTMLElement) || !(bufferMode instanceof HTMLSelectElement)
+                || !(diagnosticVariant instanceof HTMLSelectElement)
+                || !(downloadDiagnostics instanceof HTMLButtonElement)) {
+                throw new Error("Missing System Settings controls");
+            }
+            const initialBufferMode = bufferMode.value;
+            bufferMode.value = "stable";
+            bufferMode.dispatchEvent(new Event("change", { bubbles: true }));
+            const initialDiagnosticVariant = diagnosticVariant.value;
+            diagnosticVariant.value = "instrumented";
+            diagnosticVariant.dispatchEvent(new Event("change", { bubbles: true }));
+            return {
+                selected: document.querySelector("#system-settings-tab")?.getAttribute("aria-selected"),
+                visible: !panel.hidden,
+                firmwareHidden: document.querySelector("#system-firmware-panel")?.hasAttribute("hidden"),
+                controlsHidden: document.querySelector("#system-controls-panel")?.hasAttribute("hidden"),
+                initialBufferMode,
+                bufferMode: bufferMode.value,
+                bufferOptions: [...bufferMode.options].map(({ value, textContent }) => [value, textContent]),
+                bufferStored: localStorage.getItem("psx-runtime:ui:audio-buffer-mode"),
+                initialDiagnosticVariant,
+                diagnosticVariant: diagnosticVariant.value,
+                diagnosticOptions: [...diagnosticVariant.options].map(({ value, textContent }) => [value, textContent]),
+                diagnosticStored: localStorage.getItem("psx-runtime:ui:execution-variant-v2"),
+                diagnosticStatus: document.querySelector("#diagnostic-variant-status")?.textContent,
+                downloadDisabled: downloadDiagnostics.disabled,
+                bufferStatus: document.querySelector("#audio-buffer-status")?.textContent,
+                workerStatus: document.querySelector("#audio-worker-status")?.textContent,
+            };
+        });
+        await page.click("#system-dialog button[value='cancel']");
         await page.click("[data-open-dialog='view']");
         await page.waitForFunction(() => document.querySelector("#view-dialog")?.hasAttribute("open"));
         const touchViewInitial = await page.evaluate(() => {
@@ -1734,27 +1751,31 @@ try {
                 && emptyRegionGate.libraryDisabled && emptyRegionGate.deleteHidden && emptyRegionGate.storeHidden
                 && storedRegionGate.stage === "ready" && storedRegionGate.gameEnabled
                 && storedRegionGate.libraryEnabled && storedRegionGate.deleteVisible && storedRegionGate.storeHidden
-                && volumeControl.label === "Audio" && volumeControl.controls === "volume-dialog"
+                && volumeControl.label === "Volume" && volumeControl.controls === "volume-dialog"
                 && volumeControl.open && volumeControl.closed && volumeControl.value === "42"
                 && volumeControl.output === "42%" && volumeControl.ranges === 1
-                && volumeControl.extraControls === 3 && volumeControl.initialBufferMode === "adaptive"
-                && volumeControl.bufferMode === "stable"
-                && volumeControl.bufferStored === "stable"
-                && volumeControl.initialDiagnosticVariant === "baseline"
-                && volumeControl.diagnosticVariant === "instrumented"
-                && volumeControl.diagnosticStored === "instrumented"
-                && volumeControl.diagnosticStatus === "Selected variant: Instrumented Baseline"
-                && volumeControl.downloadDisabled
-                && volumeControl.diagnosticOptions.length === 3
-                && volumeControl.diagnosticOptions.some(([value, label]) => value === "baseline" && label === "Baseline")
-                && volumeControl.diagnosticOptions.some(([value, label]) => value === "instrumented" && label === "Instrumented Baseline")
-                && volumeControl.diagnosticOptions.some(([value, label]) => value === "sequential-read-reuse" && label === "D1 · Sequential Read Reuse")
-                && volumeControl.bufferStatus === "Audio: 0 underruns · 0 ms queued · Output idle"
-                && volumeControl.workerStatus === "Worker timing: waiting for the first one-second window."
-                && volumeControl.bufferOptions.length === 3
-                && volumeControl.bufferOptions.some(([value, label]) => value === "adaptive" && label === "Adaptive (Recommended)")
-                && volumeControl.bufferOptions.some(([value, label]) => value === "low-latency" && label === "Low Latency")
-                && volumeControl.bufferOptions.some(([value, label]) => value === "stable" && label === "Stable Playback")
+                && volumeControl.extraControls === 0 && volumeControl.configurationAbsent
+                && systemSettings.selected === "true" && systemSettings.visible
+                && systemSettings.firmwareHidden && systemSettings.controlsHidden
+                && systemSettings.initialBufferMode === "adaptive"
+                && systemSettings.bufferMode === "stable"
+                && systemSettings.bufferStored === "stable"
+                && systemSettings.initialDiagnosticVariant === "production"
+                && systemSettings.diagnosticVariant === "instrumented"
+                && systemSettings.diagnosticStored === "instrumented"
+                && systemSettings.diagnosticStatus === "Selected variant: Instrumented Baseline"
+                && systemSettings.downloadDisabled
+                && systemSettings.diagnosticOptions.length === 4
+                && systemSettings.diagnosticOptions.some(([value, label]) => value === "production" && label === "Production · Sequential Read Reuse")
+                && systemSettings.diagnosticOptions.some(([value, label]) => value === "baseline" && label === "Baseline")
+                && systemSettings.diagnosticOptions.some(([value, label]) => value === "instrumented" && label === "Instrumented Baseline")
+                && systemSettings.diagnosticOptions.some(([value, label]) => value === "sequential-read-reuse" && label === "D1 · Sequential Read Reuse (Instrumented)")
+                && systemSettings.bufferStatus === "Audio: 0 underruns · 0 ms queued · Output idle"
+                && systemSettings.workerStatus === "Worker timing: waiting for the first one-second window."
+                && systemSettings.bufferOptions.length === 3
+                && systemSettings.bufferOptions.some(([value, label]) => value === "adaptive" && label === "Adaptive (Recommended)")
+                && systemSettings.bufferOptions.some(([value, label]) => value === "low-latency" && label === "Low Latency")
+                && systemSettings.bufferOptions.some(([value, label]) => value === "stable" && label === "Stable Playback")
                 && touchViewInitial.checked === false && touchViewInitial.hidden
                 && touchViewInitial.touchButtons === 12 && touchViewInitial.touchSticks === 2
                 && touchViewInitial.dpad && touchViewInitial.applyLeftOfCancel && touchViewInitial.applyEnabled
@@ -1849,6 +1870,7 @@ try {
             emptyRegionGate,
             storedRegionGate,
             volumeControl,
+            systemSettings,
             touchViewInitial,
             fullscreenWhileIdle,
             touchViewPending,

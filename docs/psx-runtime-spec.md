@@ -658,6 +658,13 @@ The worker may read small descriptor and BIOS blobs in full; it must never call
 `arrayBuffer()` or `FS.writeFile()` on a track image. Browser tests instrument
 those calls and assert the rule for a sparse synthetic large `Blob`.
 
+The production PCSX-ReARMed patch retains raw-track stdio read-ahead across
+sequential sectors. Before the normal raw BIN seek, it checks the stream's
+logical position and skips only an exact-position seek; failed position checks,
+random/backward reads and all other image/subchannel paths retain the original
+seek behavior. The accepted path is the default without diagnostic wrappers.
+Explicit development variants retain unoptimized and instrumented comparisons.
+
 ## 5. Content and firmware audit
 
 ### 5.1 `DiscSetAudit`
@@ -875,23 +882,25 @@ available and retains the bounded scheduled-source path as a fallback:
 - a 120 ms hard cap trimming to 60 ms; and
 - queue reset on pause, reset, state load, disc change and large timing gaps.
 
-The Audio surface has three browser-wide modes. Low Latency uses a 20 ms
+The audio output has three browser-wide modes. Low Latency uses a 20 ms
 prebuffer, Stable Playback uses 80 ms, and the default Adaptive mode begins at
 20 ms then uses 80 ms for the remainder of the audio session after its first
 device-timeline underrun.
 
-The production Audio surface persists this choice and reports the selected
-backend, session's cumulative underruns, recent queue depth, rolling real-time
-core-audio production and the largest recent delivery gap. The Worklet counts
+System Settings persists this choice and, for development diagnostics, reports
+the selected backend, session's cumulative underruns, recent queue depth,
+rolling real-time core-audio production and the largest recent delivery gap.
+The top-level Volume surface controls output gain only. The Worklet counts
 contiguous rendering starvation as one underrun and prebuffers again before
 resuming output.
 
-The mobile-performance diagnostic path emits one aggregate every 120 emulated
-frames. It separates native core execution, AV extraction, RGBA conversion,
-PCM conversion and the immediate worker/main continuation roundtrip. The
-production Audio surface reports these averages against the machine's frame
-budget plus slowest worker and turnaround observations. Timing reports are
-diagnostic only and do not alter pacing, frame delivery or audio buffering.
+The mobile-performance diagnostic path emits approximately one-second
+aggregates. It separates native core execution, disc access, AV extraction,
+RGBA conversion, PCM conversion and the immediate worker/main continuation
+roundtrip. System Settings reports these averages against the machine's frame
+budget plus slowest worker and turnaround observations. Instrumented timing is
+disabled by the production variant and never alters pacing, frame delivery or
+audio buffering.
 
 The browser may choose a different device rate; Web Audio performs conversion.
 The core is never configured to the browser rate after boot unless the selected
@@ -1205,7 +1214,8 @@ The first production slice must:
    bytes, and support start, active-game disc insertion, restart, rename and
    confirmed removal;
 5. expose supported pause/resume, reset, mute, stop, scaling, fullscreen,
-   persisted audio buffering and memory-card download operations;
+   a volume-only gain surface, System Settings with persisted audio buffering,
+   and memory-card download operations;
 6. pause a running session while a modal is open and prevent dismissal of a
    dialog while its storage mutation is active; and
 7. fit the central stage inside desktop and mobile viewports without document

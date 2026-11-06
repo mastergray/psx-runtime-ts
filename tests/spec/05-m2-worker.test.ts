@@ -270,7 +270,7 @@ const testFile: TestFile = {
                 .start(undefined),
         },
         {
-            label: "the bridge isolates baseline, instrumented, and sequential-read-reuse execution",
+            label: "the bridge isolates production and development execution variants",
             run: () => CTGTest.init("WORKERFS diagnostics")
                 .stage("run baseline and instrumented frames", async () => {
                     const run = async (diagnosticVariant: PsxDiagnosticVariant) => {
@@ -286,12 +286,18 @@ const testFile: TestFile = {
                         return { timing: frame.timing, sequentialReadReuse: module.sequentialReadReuse() };
                     };
                     return {
+                        production: await run("production"),
                         baseline: await run("baseline"),
                         instrumented: await run("instrumented"),
                         sequential: await run("sequential-read-reuse"),
                     };
                 })
                 .assert("I/O counters", ({ subject }) => ({
+                    production: {
+                        reads: subject.production?.timing?.discReadCalls,
+                        seeks: subject.production?.timing?.discSeekCalls,
+                        reuse: subject.production?.sequentialReadReuse,
+                    },
                     baseline: {
                         reads: subject.baseline?.timing?.discReadCalls,
                         seeks: subject.baseline?.timing?.discSeekCalls,
@@ -312,6 +318,7 @@ const testFile: TestFile = {
                         reuse: subject.sequential?.sequentialReadReuse,
                     },
                 }), P.equals<unknown>({
+                    production: { reads: 0, seeks: 0, reuse: 1 },
                     baseline: { reads: 0, seeks: 0, reuse: 0 },
                     instrumented: {
                         reads: 1,

@@ -12,7 +12,7 @@ import WorkerClient from "./WorkerClient.js";                // Owns worker mess
 import {
     isLibretroPsxAdapterConfig,        // Validates direct adapter construction dependencies
     isLibretroPsxAdapterInitConfig,    // Validates high-level browser factory input
-    isPsxDiagnosticVariant,            // Validates development-only execution variants
+    isPsxDiagnosticVariant,            // Validates production and development execution variants
     isPsxWorker,                       // Validates workers returned by an injected factory
 } from "./types.js";
 
@@ -30,7 +30,7 @@ import type {
     LibretroPsxAdapterConfig,        // Validated build and injected browser dependencies
     LibretroPsxAdapterInitConfig,    // Build URL and optional browser overrides
     PsxClock,                        // Monotonic pacing clock
-    PsxDiagnosticVariant,            // Development-only measurement variant
+    PsxDiagnosticVariant,            // Production path or development measurement variant
     WorkerFactory,                   // Module-worker construction boundary
 } from "./types.js";
 
@@ -69,7 +69,7 @@ export default class LibretroPsxAdapter implements PsxAdapter {
         this._createWorker = config.createWorker;
         this._scheduler = config.scheduler;
         this._clock = config.clock;
-        this._diagnosticVariant = config.diagnosticVariant ?? "baseline";
+        this._diagnosticVariant = config.diagnosticVariant ?? "production";
     }
 
     /**
@@ -85,13 +85,13 @@ export default class LibretroPsxAdapter implements PsxAdapter {
     }
 
     // GETTER :: VOID -> psxDiagnosticVariant
-    // Returns the development-only variant that the next session will capture.
+    // Returns the execution variant that the next session will capture.
     get diagnosticVariant(): PsxDiagnosticVariant {
         return this._diagnosticVariant;
     }
 
     // SETTER :: psxDiagnosticVariant -> VOID
-    // Selects the development-only variant for future sessions without mutating a running worker.
+    // Selects the execution variant for future sessions without mutating a running worker.
     set diagnosticVariant(value: PsxDiagnosticVariant) {
         if (!isPsxDiagnosticVariant(value)) throw invalid(value, "The diagnostic variant is invalid.");
         this._diagnosticVariant = value;

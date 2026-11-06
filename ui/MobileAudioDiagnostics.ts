@@ -2,7 +2,7 @@
 import type {
     PsxAudioBackend,        // Realized browser audio output implementation
     PsxAudioBufferMode,     // Production-facing buffering preference
-    PsxDiagnosticVariant,   // Development-only runtime execution variant
+    PsxDiagnosticVariant,   // Production execution path or explicit development comparison
     PsxMachineInfo,         // Active core, build, game, and AV identity
     PsxPerformanceTiming,   // Approximately one-second worker performance window
 } from "../src/index.js";
@@ -17,7 +17,7 @@ import type {
 // Immutable identity and browser configuration captured before one diagnostic run.
 export interface MobileAudioDiagnosticConfig {
     readonly machine: PsxMachineInfo;              // Core build and active content identity
-    readonly variant: PsxDiagnosticVariant;        // Baseline, instrumented baseline, or one measured candidate
+    readonly variant: PsxDiagnosticVariant;        // Production path or one explicit development comparison
     readonly bufferMode: PsxAudioBufferMode;       // Independent production buffering selection
     readonly startedAtMs: number;                  // Main-realm monotonic start time
     readonly href: string;                         // Served application location
@@ -176,7 +176,7 @@ export default class MobileAudioDiagnostics {
             latestSnapshot: null,
             queueMinimumMs: Number.POSITIVE_INFINITY,
             lastBackend: null,
-            measuresDiscIo: config.variant !== "baseline",
+            measuresDiscIo: config.variant === "instrumented" || config.variant === "sequential-read-reuse",
         };
     }
 

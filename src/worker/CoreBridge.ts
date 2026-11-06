@@ -195,8 +195,12 @@ export default class EmscriptenPsxCore implements WorkerCore {
             throw moduleFailure("The Emscripten PlayStation module could not be instantiated.", error instanceof Error ? error.message : null);
         }
         if (!isModule(module)) throw moduleFailure("The Emscripten module exposes an invalid core surface.");
-        if (payload.diagnosticVariant !== "baseline") instrumentWorkerFs(module.WORKERFS, this._discIo, this._clock);
-        module._psx_set_sequential_read_reuse(payload.diagnosticVariant === "sequential-read-reuse" ? 1 : 0);
+        if (payload.diagnosticVariant === "instrumented" || payload.diagnosticVariant === "sequential-read-reuse") {
+            instrumentWorkerFs(module.WORKERFS, this._discIo, this._clock);
+        }
+        module._psx_set_sequential_read_reuse(
+            payload.diagnosticVariant === "production" || payload.diagnosticVariant === "sequential-read-reuse" ? 1 : 0,
+        );
         this._module = module;
         this._payload = payload;
         try {

@@ -39,7 +39,10 @@ small normalized descriptors and sidecars are written to MEMFS.
 
 M4 adds the public libretro adapter and restartable session, validated Worker
 client, production Emscripten bridge, firmware/card installation and complete
-input, reset, disc, state and terminal-cleanup lifecycle.
+input, reset, disc, state and terminal-cleanup lifecycle. The accepted mobile
+disc-I/O path reuses sequential raw-track stdio input when the requested byte
+position already matches the stream, avoiding redundant WORKERFS read-ahead
+without changing random, backward, mixed-subchannel or compressed-image reads.
 
 M5 adds the multi-source input coordinator plus keyboard and standard-gamepad
 sources. It reference-counts shared controls, resolves opposing directions,
@@ -93,11 +96,13 @@ System, Game, Library, Memory Cards and View workflows against the real
 runtime and browser stores. The central stage reflects firmware-required,
 ready, starting, running, paused, stopping and failed states; no mock-only
 formats or settings are exposed.
-The Audio modal persists the audio-buffering mode and reports observed
-underruns, recent queue depth, real-time core-audio production and the largest
-recent delivery gap for device-specific tuning.
-Experimental builds also aggregate worker timing every 120 frames across core
-execution, AV extraction, video/audio conversion and main-thread turnaround.
+The top-level Volume modal controls only output gain. System contains Firmware,
+Controls and Settings tabs; Settings persists the audio-buffering mode and
+contains explicit development variants and downloadable mobile diagnostics.
+Production sessions use sequential-read reuse without measurement overhead.
+Instrumented variants aggregate approximately one-second windows across core
+execution, disc I/O, AV extraction, video/audio conversion and main-thread
+turnaround.
 
 Presentation Mode provides a controller-first, television-scale view of the
 same running session. The D-pad or left stick moves focus, Cross activates,

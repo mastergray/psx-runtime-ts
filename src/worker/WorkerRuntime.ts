@@ -324,7 +324,8 @@ export default class WorkerRuntime {
             if (!isPsxMachineInfo(machine)) throw new Error("Core returned invalid machine information");
             this._pacer = new FramePacer(machine.framesPerSecond);
             this._performanceWindowFrames = Math.max(1, Math.round(machine.framesPerSecond));
-            this._diagnosticsEnabled = command.payload.diagnosticVariant !== "baseline";
+            this._diagnosticsEnabled = command.payload.diagnosticVariant === "instrumented"
+                || command.payload.diagnosticVariant === "sequential-read-reuse";
             this._state = "running";
             this._geometryKey = [
                 machine.geometry.width,

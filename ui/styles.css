@@ -841,6 +841,7 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
     text-align: right;
 }
 .audio-buffer-control { padding-top: 18px; border-top: 1px solid var(--line); }
+.system-settings > .audio-buffer-control { padding-top: 0; border-top: 0; }
 .audio-buffer-control select, .diagnostic-control select { width: 100%; }
 .audio-buffer-control > small, .diagnostic-control > small { color: var(--muted); font: 0.72rem/1.35 "Share Tech Mono", monospace; }
 .diagnostic-control { padding-top: 18px; border-top: 1px solid var(--line); }

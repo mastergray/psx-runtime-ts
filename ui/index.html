@@ -44,7 +44,7 @@
         <button id="pause-session" type="button" disabled>Pause</button>
         <button id="reset-session" type="button" disabled>Reset</button>
         <button id="mute-session" type="button" disabled>Mute</button>
-        <button id="volume-session" type="button" data-open-dialog="volume" aria-controls="volume-dialog" disabled>Audio</button>
+        <button id="volume-session" type="button" data-open-dialog="volume" aria-controls="volume-dialog" disabled>Volume</button>
       </div>
 
       <div class="runtime-status" role="status" aria-live="polite">
@@ -148,6 +148,7 @@
         <div id="system-tabs" class="dialog-tabs" role="tablist" aria-label="System settings">
           <button id="system-firmware-tab" type="button" role="tab" aria-controls="system-firmware-panel" aria-selected="true">Firmware</button>
           <button id="system-controls-tab" type="button" role="tab" aria-controls="system-controls-panel" aria-selected="false">Controls</button>
+          <button id="system-settings-tab" type="button" role="tab" aria-controls="system-settings-panel" aria-selected="false">Settings</button>
         </div>
         <div class="dialog-content">
           <section id="system-firmware-panel" class="dialog-section" role="tabpanel" aria-labelledby="system-firmware-tab">
@@ -188,6 +189,34 @@
             </section>
             <div class="control-profile-actions"><button id="reset-all-mappings" class="danger-action" type="button">Reset All Mappings</button></div>
             <div id="control-storage-status" class="operation-feedback" data-state="idle" role="status" aria-live="polite">Loading control mappings…</div>
+          </section>
+          <section id="system-settings-panel" class="dialog-section system-settings" role="tabpanel" aria-labelledby="system-settings-tab" hidden>
+            <div class="section-heading"><div><span>// SETTINGS</span><h3>Runtime configuration</h3></div><p>Settings are stored in this browser and apply across games.</p></div>
+            <section class="dialog-section audio-buffer-control">
+              <label for="audio-buffer-mode">Audio Buffering</label>
+              <select id="audio-buffer-mode">
+                <option value="adaptive">Adaptive (Recommended)</option>
+                <option value="low-latency">Low Latency</option>
+                <option value="stable">Stable Playback</option>
+              </select>
+              <small>Adaptive adds buffering after starvation; Low Latency minimizes delay; Stable Playback keeps a larger cushion.</small>
+              <p id="audio-buffer-status" class="audio-buffer-status">Audio: 0 underruns · 0 ms queued · Output idle</p>
+              <p id="audio-worker-status" class="audio-buffer-status">Worker timing: waiting for the first one-second window.</p>
+            </section>
+            <section class="dialog-section diagnostic-control">
+              <label for="diagnostic-variant">Development Variant</label>
+              <select id="diagnostic-variant">
+                <option value="production" selected>Production · Sequential Read Reuse</option>
+                <option value="baseline">Baseline</option>
+                <option value="instrumented">Instrumented Baseline</option>
+                <option value="sequential-read-reuse">D1 · Sequential Read Reuse (Instrumented)</option>
+              </select>
+              <small>Production uses accepted D1 reuse without measurement overhead. Select another variant before starting only for comparisons.</small>
+              <p id="diagnostic-variant-status" class="audio-buffer-status">Selected variant: Production · Sequential Read Reuse</p>
+              <div class="diagnostic-actions">
+                <button id="download-diagnostics" type="button" disabled>Download Diagnostics</button>
+              </div>
+            </section>
           </section>
         </div>
       </form>
@@ -321,38 +350,14 @@
       <form method="dialog" class="dialog-frame">
         <header class="dialog-header">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h4l5 4V6L8 10z"></path><path d="M17 9a4 4 0 0 1 0 6M19.5 6.5a8 8 0 0 1 0 11"></path></svg>
-          <div><span>// AUDIO</span><h2 id="volume-title">[ AUDIO ]</h2></div>
-          <button class="icon-button" value="cancel" aria-label="Close Audio">×</button>
+          <div><span>// VOLUME</span><h2 id="volume-title">[ VOLUME ]</h2></div>
+          <button class="icon-button" value="cancel" aria-label="Close Volume">×</button>
         </header>
         <div class="dialog-content">
           <section class="dialog-section volume-control">
             <label for="volume-level">Volume</label>
             <input id="volume-level" type="range" min="0" max="100" step="1" value="15">
             <output id="volume-value" for="volume-level">15%</output>
-          </section>
-          <section class="dialog-section audio-buffer-control">
-            <label for="audio-buffer-mode">Audio Buffering</label>
-            <select id="audio-buffer-mode">
-              <option value="adaptive">Adaptive (Recommended)</option>
-              <option value="low-latency">Low Latency</option>
-              <option value="stable">Stable Playback</option>
-            </select>
-            <small>Adaptive adds buffering after starvation; Low Latency minimizes delay; Stable Playback keeps a larger cushion.</small>
-            <p id="audio-buffer-status" class="audio-buffer-status">Audio: 0 underruns · 0 ms queued · Output idle</p>
-            <p id="audio-worker-status" class="audio-buffer-status">Worker timing: waiting for 120 frames.</p>
-          </section>
-          <section class="dialog-section diagnostic-control">
-            <label for="diagnostic-variant">Experiment Variant</label>
-            <select id="diagnostic-variant">
-              <option value="baseline">Baseline</option>
-              <option value="instrumented">Instrumented Baseline</option>
-              <option value="sequential-read-reuse">D1 · Sequential Read Reuse</option>
-            </select>
-            <small>Select before starting a session. This is independent of Audio Buffering and cannot change while a game is active.</small>
-            <p id="diagnostic-variant-status" class="audio-buffer-status">Active variant: Baseline</p>
-            <div class="diagnostic-actions">
-              <button id="download-diagnostics" type="button" disabled>Download Diagnostics</button>
-            </div>
           </section>
         </div>
       </form>

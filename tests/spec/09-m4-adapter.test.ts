@@ -311,6 +311,7 @@ const testFile: TestFile = {
                         invalid: isLibretroPsxAdapterConfig({ ...config, createWorker: null }),
                         type: initialized.type,
                         buildIdentity: initialized.build === build,
+                        defaultVariant: initialized.diagnosticVariant,
                     };
                 })
                 .assert("validated construction", ({ subject }) => subject, P.equals<unknown>({
@@ -319,6 +320,7 @@ const testFile: TestFile = {
                     invalid: false,
                     type: "libretro-psx",
                     buildIdentity: false,
+                    defaultVariant: "production",
                 }))
                 .start(undefined),
         },

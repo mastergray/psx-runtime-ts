@@ -38,9 +38,9 @@ export type UiFeedbackState = "idle" | "working" | "success" | "error";
 // Game modal panel selected while an active session makes both workflows available.
 export type UiGamePanel = "session" | "import";
 
-// TYPE :: "firmware"|"controls"
+// TYPE :: "firmware"|"controls"|"settings"
 // System modal panel selected by its top-level tabs.
-export type UiSystemPanel = "firmware" | "controls";
+export type UiSystemPanel = "firmware" | "controls" | "settings";
 
 // TYPE :: psxScalingMode|"fullscreen-fit"|"fullscreen-stretch"
 // Deferred View selection combining windowed scaling with the two supported fullscreen presentations.

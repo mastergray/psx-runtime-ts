@@ -11,7 +11,7 @@ import {
 } from "../src/index.js";
 import ControlSettings from "./ControlSettings.js";              // Owns persistent keyboard and gamepad mappings
 import { summarizeMemoryCard } from "./MemoryCardDirectory.js"; // Interprets card directory entries for read-only display
-import MobileAudioDiagnostics from "./MobileAudioDiagnostics.js"; // Records and exports development-only D0 measurements
+import MobileAudioDiagnostics from "./MobileAudioDiagnostics.js"; // Records and exports explicitly selected development measurements
 import type { MobileAudioDiagnosticSnapshot } from "./MobileAudioDiagnostics.js"; // Background audio/worker observation shape
 import PresentationMode from "./PresentationMode/PresentationMode.js"; // Owns the controller-first television skin
 import TouchController from "./TouchController.js";            // Routes the production touch surface into session input
@@ -28,7 +28,7 @@ import type {
     ControllerPort,     // Physical port used by automatic browser-gamepad binding
     PsxAudioBufferMode, // Persisted latency-versus-resilience buffering strategy
     PsxFirmwareRecord,  // Stored firmware metadata rendered by System
-    PsxDiagnosticVariant, // Development-only runtime measurement variant
+    PsxDiagnosticVariant, // Production execution path or an explicit development comparison
     PsxMachineInfo,     // Active core and content identity used for state compatibility
     PsxControllerType,  // Per-game emulated controller device selected for one port
     PsxPlayerStatus,    // Lifecycle status rendered by the stage
@@ -47,7 +47,7 @@ import type {
     UiQuickStatePreferences, // Persisted per-game quick-slot assignments
     UiQuickStateSlot,       // Quick State 1 or 2 selected from a controller
     UiStageState,           // Closed central-stage presentation state
-    UiSystemPanel,          // Firmware or Controls System tab
+    UiSystemPanel,          // Firmware, Controls, or Settings System tab
     UiViewMode,             // Deferred windowed or fullscreen View selection
 } from "./types.js";
 import type { UiPresentationSnapshot } from "./PresentationMode/types.js"; // Runtime and library data shown in TV mode
@@ -60,7 +60,7 @@ const TOUCH_CONTROLLER_STORAGE_KEY = "psx-runtime:ui:on-screen-controller";
 const CONTROLLER_TYPE_STORAGE_KEY = "psx-runtime:ui:controller-types";
 const QUICK_STATE_STORAGE_KEY = "psx-runtime:ui:quick-states";
 const AUDIO_BUFFER_MODE_STORAGE_KEY = "psx-runtime:ui:audio-buffer-mode";
-const DIAGNOSTIC_VARIANT_STORAGE_KEY = "psx-runtime:ui:diagnostic-variant";
+const DIAGNOSTIC_VARIANT_STORAGE_KEY = "psx-runtime:ui:execution-variant-v2";
 const QUICK_STATE_NAMES = Object.freeze(["Quick State 1", "Quick State 2"] as const);
 
 /**
@@ -89,7 +89,7 @@ export default class UiApplication {
     private _selectedArchives: File[] = [];                       // Ordered ZIP selection awaiting import
     private _importedGameId: string | null = null;                // Stored identity produced by the current selection
     private _selectedGamePanel: UiGamePanel = "import";           // Current context-sensitive Game modal panel
-    private _selectedSystemPanel: UiSystemPanel = "firmware";     // Current System firmware or control-mapping panel
+    private _selectedSystemPanel: UiSystemPanel = "firmware";     // Current System firmware, controls, or settings panel
     private _controllerTypePreferences: UiControllerTypePreferences; // Per-game emulated controller devices
     private _quickStatePreferences: UiQuickStatePreferences;       // Per-game Quick State 1/2 assignments
     private _stateRecords: ReadonlyArray<PsxStateRecord> = [];     // Named states loaded for the active game
@@ -105,7 +105,7 @@ export default class UiApplication {
     private _memoryImportBusy = false;                            // Whether one card replacement is reading or persisting bytes
     private _touchControllerVisible = false;                      // Persisted preference controlling touch-surface presentation
     private _audioBufferMode: PsxAudioBufferMode;                 // Browser-wide audio output strategy preference
-    private _diagnosticVariant: PsxDiagnosticVariant;             // Development-only variant captured at session start
+    private _diagnosticVariant: PsxDiagnosticVariant;             // Production path or development comparison captured at session start
     private _audioQueueSnapshotMs = 0;                            // Queue depth captured before Audio pauses the active session
     private _audioProductionSnapshot: number | null = null;       // Core-audio throughput captured before modal-owned pause
     private _audioGapSnapshotMs = 0;                              // Longest delivery gap captured before modal-owned pause
@@ -204,6 +204,9 @@ export default class UiApplication {
         });
         element<HTMLButtonElement>(this._document, "system-controls-tab").addEventListener("click", () => {
             this._selectSystemPanel("controls");
+        });
+        element<HTMLButtonElement>(this._document, "system-settings-tab").addEventListener("click", () => {
+            this._selectSystemPanel("settings");
         });
 
         element<HTMLSelectElement>(this._document, "firmware-region").addEventListener("change", () => {
@@ -492,7 +495,7 @@ export default class UiApplication {
     private _playerStatusChanged(status: PsxPlayerStatus): void {
         if (status === "running") {
             if (this._diagnostics.isActive) this._diagnostics.event("running", performance.now());
-            else this._startDiagnostics();
+            else if (this._diagnosticVariant !== "production") this._startDiagnostics();
         } else if (this._diagnostics.isActive) {
             this._diagnostics.event(status, performance.now());
             if (status === "stopping" || status === "failed" || status === "destroyed") {
@@ -578,7 +581,7 @@ export default class UiApplication {
             openDialog.close();
             this._switchingDialogs = false;
         }
-        if (dialogId === "volume") {
+        if (dialogId === "system") {
             const audio = this._sessionAudio();
             this._audioQueueSnapshotMs = audio?.queuedMs ?? 0;
             this._audioProductionSnapshot = audio?.productionRate ?? null;
@@ -597,7 +600,6 @@ export default class UiApplication {
         }
         if (dialogId === "memory") await this._refreshMemoryCards();
         if (dialogId === "view") this._resetViewForm();
-        if (dialogId === "volume") this._renderAudioBufferStatus();
         if (dialogId === "game") {
             this._selectedGamePanel = this._player?.session === null || this._player?.session === undefined
                 ? "import"
@@ -610,17 +612,18 @@ export default class UiApplication {
     }
 
     // METHOD :: uiSystemPanel -> VOID
-    // Selects the Firmware or Controls System workflow and updates tab semantics.
+    // Selects one System workflow and updates tab and panel semantics.
     private _selectSystemPanel(panel: UiSystemPanel): void {
         this._controls.cancelCapture();
         this._selectedSystemPanel = panel;
-        for (const candidate of ["firmware", "controls"] as const) {
+        for (const candidate of ["firmware", "controls", "settings"] as const) {
             const selected = candidate === panel;
             const tab = element<HTMLButtonElement>(this._document, `system-${candidate}-tab`);
             tab.setAttribute("aria-selected", String(selected));
             tab.tabIndex = selected ? 0 : -1;
             element<HTMLElement>(this._document, `system-${candidate}-panel`).hidden = !selected;
         }
+        if (panel === "settings") this._renderAudioBufferStatus();
     }
 
     // METHOD :: VOID -> PROMISE(VOID)
@@ -2048,7 +2051,7 @@ export default class UiApplication {
     }
 
     // METHOD :: VOID -> NUMBER
-    // Returns the production Audio modal's volume slider as a normalized Web Audio gain.
+    // Returns the Volume modal's slider as a normalized Web Audio gain.
     private _selectedVolume(): number {
         return Number(element<HTMLInputElement>(this._document, "volume-level").value) / 100;
     }
@@ -2103,7 +2106,7 @@ export default class UiApplication {
     }
 
     // METHOD :: VOID -> VOID
-    // Starts non-pausing background sampling after the player has composed its running audio path.
+    // Starts development-only background sampling after the player has composed its running audio path.
     private _startDiagnostics(): void {
         const session = this._player?.session;
         const audio = this._sessionAudio();
@@ -2281,13 +2284,13 @@ const persistAudioBufferMode = (storage: Storage | null, value: PsxAudioBufferMo
 };
 
 // HELPER :: STORAGE? -> psxDiagnosticVariant
-// Loads the development-only execution variant and safely defaults to the uninstrumented baseline.
+// Loads the execution variant and defaults to the uninstrumented accepted D1 path.
 const loadDiagnosticVariant = (storage: Storage | null): PsxDiagnosticVariant => {
     try {
         const value = storage?.getItem(DIAGNOSTIC_VARIANT_STORAGE_KEY);
-        return isPsxDiagnosticVariant(value) ? value : "baseline";
+        return isPsxDiagnosticVariant(value) ? value : "production";
     } catch {
-        return "baseline";
+        return "production";
     }
 };
 
@@ -2298,10 +2301,11 @@ const persistDiagnosticVariant = (storage: Storage | null, value: PsxDiagnosticV
 };
 
 // HELPER :: psxDiagnosticVariant -> STRING
-// Maps one development execution variant to its user-facing experiment label.
+// Maps one production or development execution variant to its user-facing label.
 const diagnosticVariantLabel = (value: PsxDiagnosticVariant): string => {
+    if (value === "production") return "Production · Sequential Read Reuse";
     if (value === "instrumented") return "Instrumented Baseline";
-    if (value === "sequential-read-reuse") return "D1 · Sequential Read Reuse";
+    if (value === "sequential-read-reuse") return "D1 · Sequential Read Reuse (Instrumented)";
     return "Baseline";
 };
 
