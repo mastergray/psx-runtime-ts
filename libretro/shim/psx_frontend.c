@@ -98,7 +98,6 @@ static const char *option_value(const char *key) {
     if (strcmp(key, "pcsx_rearmed_region") == 0) return "auto";
     if (strcmp(key, "pcsx_rearmed_rgb32_output") == 0) return "disabled";
     if (strcmp(key, "pcsx_rearmed_dithering") == 0) return "disabled";
-    if (strcmp(key, "pcsx_rearmed_spu_reverb") == 0) return "disabled";
     if (strcmp(key, "pcsx_rearmed_frameskip_type") == 0) {
         return frontend.frameskip_interval == 0 ? "disabled" : "fixed_interval";
     }
