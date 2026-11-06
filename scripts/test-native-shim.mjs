@@ -14,6 +14,7 @@ const compile = spawnSync(compiler, [
     "-pedantic",
     "-I", new URL("libretro/include/", root).pathname,
     "-I", new URL("libretro/shim/", root).pathname,
+    new URL("libretro/shim/psx_disc_io.c", root).pathname,
     new URL("libretro/shim/psx_frontend.c", root).pathname,
     new URL("libretro/shim/psx_exports.c", root).pathname,
     new URL("tests/native/fake_libretro_core.c", root).pathname,

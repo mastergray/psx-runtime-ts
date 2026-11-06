@@ -17,7 +17,7 @@ import type {
 // Immutable identity and browser configuration captured before one diagnostic run.
 export interface MobileAudioDiagnosticConfig {
     readonly machine: PsxMachineInfo;              // Core build and active content identity
-    readonly variant: PsxDiagnosticVariant;        // Baseline or instrumented baseline
+    readonly variant: PsxDiagnosticVariant;        // Baseline, instrumented baseline, or one measured candidate
     readonly bufferMode: PsxAudioBufferMode;       // Independent production buffering selection
     readonly startedAtMs: number;                  // Main-realm monotonic start time
     readonly href: string;                         // Served application location
@@ -55,7 +55,7 @@ export interface MobileAudioDiagnosticFile {
     readonly text: string;        // Complete serialized content
 }
 
-// INTERFACE :: {report:diagnosticReport, startedAtMs:NUMBER, lastPerformance:psxPerformanceTiming?, latestSnapshot:mobileAudioDiagnosticSnapshot?, queueMinimumMs:NUMBER, lastBackend:psxAudioBackend?, instrumented:BOOLEAN}
+// INTERFACE :: {report:diagnosticReport, startedAtMs:NUMBER, lastPerformance:psxPerformanceTiming?, latestSnapshot:mobileAudioDiagnosticSnapshot?, queueMinimumMs:NUMBER, lastBackend:psxAudioBackend?, measuresDiscIo:BOOLEAN}
 // Recorder-owned state accumulated in the background until explicit session teardown.
 interface ActiveRun {
     readonly report: DiagnosticReport;                    // JSON report under construction
@@ -64,7 +64,7 @@ interface ActiveRun {
     latestSnapshot: MobileAudioDiagnosticSnapshot | null; // Most recent audio observation
     queueMinimumMs: number;                               // Lowest polled queue in the current bucket
     lastBackend: PsxAudioBackend | null;                  // Backend used to detect lifecycle changes
-    instrumented: boolean;                                // Whether disc and transport counters are available
+    measuresDiscIo: boolean;                              // Whether disc and transport counters are available
 }
 
 // INTERFACE :: {schemaVersion:1, identity:ARRAY<STRING, UNKNOWN>, environment:ARRAY<STRING, UNKNOWN>, configuration:ARRAY<STRING, UNKNOWN>, measurementInterval:ARRAY<STRING, UNKNOWN>, summary:ARRAY<STRING, UNKNOWN>, buckets:[diagnosticBucket], events:[diagnosticEvent], listenerObservations:[UNKNOWN], limitations:[STRING]}
@@ -176,7 +176,7 @@ export default class MobileAudioDiagnostics {
             latestSnapshot: null,
             queueMinimumMs: Number.POSITIVE_INFINITY,
             lastBackend: null,
-            instrumented: config.variant === "instrumented",
+            measuresDiscIo: config.variant !== "baseline",
         };
     }
 
@@ -216,7 +216,7 @@ export default class MobileAudioDiagnostics {
             Number.isFinite(active.queueMinimumMs) ? active.queueMinimumMs : snapshot.queuedMs,
             performance,
             snapshot,
-            active.instrumented,
+            active.measuresDiscIo,
         ));
         active.queueMinimumMs = snapshot.queuedMs;
     }
@@ -297,7 +297,7 @@ const createBucket = (
     queueMinimumMs: number,
     worker: PsxPerformanceTiming,
     audio: MobileAudioDiagnosticSnapshot,
-    instrumented: boolean,
+    measuresDiscIo: boolean,
 ): DiagnosticBucket => ({
     index,
     elapsedMs,
@@ -317,12 +317,12 @@ const createBucket = (
     turnaroundMaximumMs: worker.turnaroundMaximumMs,
     pcmHoldAverageMs: worker.pcmHoldAverageMs,
     pcmHoldMaximumMs: worker.pcmHoldMaximumMs,
-    discReadCalls: instrumented ? worker.discReadCalls : null,
-    discReadRequestedBytes: instrumented ? worker.discReadRequestedBytes : null,
-    discReadReturnedBytes: instrumented ? worker.discReadReturnedBytes : null,
-    discReadMilliseconds: instrumented ? worker.discReadMilliseconds : null,
-    discSeekCalls: instrumented ? worker.discSeekCalls : null,
-    discSeekMilliseconds: instrumented ? worker.discSeekMilliseconds : null,
+    discReadCalls: measuresDiscIo ? worker.discReadCalls : null,
+    discReadRequestedBytes: measuresDiscIo ? worker.discReadRequestedBytes : null,
+    discReadReturnedBytes: measuresDiscIo ? worker.discReadReturnedBytes : null,
+    discReadMilliseconds: measuresDiscIo ? worker.discReadMilliseconds : null,
+    discSeekCalls: measuresDiscIo ? worker.discSeekCalls : null,
+    discSeekMilliseconds: measuresDiscIo ? worker.discSeekMilliseconds : null,
     backend: audio.backend,
     deviceSampleRate: audio.deviceSampleRate,
     productionRate: audio.productionRate,

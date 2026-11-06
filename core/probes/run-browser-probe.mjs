@@ -1745,9 +1745,10 @@ try {
                 && volumeControl.diagnosticStored === "instrumented"
                 && volumeControl.diagnosticStatus === "Selected variant: Instrumented Baseline"
                 && volumeControl.downloadDisabled
-                && volumeControl.diagnosticOptions.length === 2
+                && volumeControl.diagnosticOptions.length === 3
                 && volumeControl.diagnosticOptions.some(([value, label]) => value === "baseline" && label === "Baseline")
                 && volumeControl.diagnosticOptions.some(([value, label]) => value === "instrumented" && label === "Instrumented Baseline")
+                && volumeControl.diagnosticOptions.some(([value, label]) => value === "sequential-read-reuse" && label === "D1 · Sequential Read Reuse")
                 && volumeControl.bufferStatus === "Audio: 0 underruns · 0 ms queued · Output idle"
                 && volumeControl.workerStatus === "Worker timing: waiting for the first one-second window."
                 && volumeControl.bufferOptions.length === 3

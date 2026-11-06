@@ -46,7 +46,7 @@ type WorkerFsRead = (
 type WorkerFsSeek = (stream: unknown, offset: number, whence: number) => number;
 
 // INTERFACE :: {stream_ops:{read:workerFsRead, llseek:workerFsSeek}}
-// Mutable generated WORKERFS surface wrapped only by the instrumented variant.
+// Mutable generated WORKERFS surface wrapped by variants that export disc-I/O diagnostics.
 interface WorkerFsLike {
     readonly stream_ops: {
         read: WorkerFsRead;      // Synchronous Blob read and copy operation
@@ -78,6 +78,7 @@ export interface EmscriptenPsxModule {
     lengthBytesUTF8(value: string): number; // Measures UTF-8 bytes excluding the terminator
     _psx_start(contentPath: number, optionsJson: number): number;         // Starts the shim from string pointers
     _psx_run_frame(captureVideo: number, captureAudio: number, frameskipInterval: number): number; // Executes one configured emulation frame
+    _psx_set_sequential_read_reuse(enabled: number): void;               // Enables the D1 exact-position native seek bypass
     _psx_set_button(port: number, id: number, pressed: number): void; // Sets one native digital input
     _psx_set_axis(port: number, id: number, value: number): void;     // Sets one native analog input
     _psx_reset(): number;                                            // Performs a soft core reset
@@ -194,7 +195,8 @@ export default class EmscriptenPsxCore implements WorkerCore {
             throw moduleFailure("The Emscripten PlayStation module could not be instantiated.", error instanceof Error ? error.message : null);
         }
         if (!isModule(module)) throw moduleFailure("The Emscripten module exposes an invalid core surface.");
-        if (payload.diagnosticVariant === "instrumented") instrumentWorkerFs(module.WORKERFS, this._discIo, this._clock);
+        if (payload.diagnosticVariant !== "baseline") instrumentWorkerFs(module.WORKERFS, this._discIo, this._clock);
+        module._psx_set_sequential_read_reuse(payload.diagnosticVariant === "sequential-read-reuse" ? 1 : 0);
         this._module = module;
         this._payload = payload;
         try {
@@ -604,6 +606,7 @@ const isModule = (value: unknown): value is EmscriptenPsxModule => {
         && module.HEAP16 instanceof Int16Array && typeof module._malloc === "function"
         && typeof module._free === "function" && typeof module.stringToUTF8 === "function"
         && typeof module.lengthBytesUTF8 === "function" && typeof module._psx_start === "function"
+        && typeof module._psx_set_sequential_read_reuse === "function"
         && typeof module._psx_run_frame === "function" && typeof module._psx_stop === "function";
 };
 

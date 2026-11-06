@@ -16,6 +16,7 @@ enum psx_pixel_format {
 
 int psx_start(const char *content_path, const char *options_json);
 int psx_run_frame(int capture_video, int capture_audio, unsigned frameskip_interval);
+void psx_set_sequential_read_reuse(int enabled);
 void psx_set_button(unsigned port, unsigned id, int pressed);
 void psx_set_axis(unsigned port, unsigned id, int16_t value);
 int psx_reset(void);

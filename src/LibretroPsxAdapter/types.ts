@@ -50,9 +50,9 @@ export type WorkerFactory = (url: string) => PsxWorker;
 // Monotonic millisecond clock used when scheduler timestamps are invalid.
 export type PsxClock = () => number;
 
-// TYPE :: "baseline"|"instrumented"
+// TYPE :: "baseline"|"instrumented"|"sequential-read-reuse"
 // Development-only execution variant selected before a session starts.
-export type PsxDiagnosticVariant = "baseline" | "instrumented";
+export type PsxDiagnosticVariant = "baseline" | "instrumented" | "sequential-read-reuse";
 
 // INTERFACE :: {buildUrl:STRING, build:psxBuildInfo, createWorker:workerFactory, scheduler:frameScheduler?, clock:psxClock?, diagnosticVariant:psxDiagnosticVariant?}
 // Validated dependencies retained by a libretro adapter instance.
@@ -110,7 +110,7 @@ export function isWorkerFactory(value: unknown): value is WorkerFactory {
 // PREDICATE :: UNKNOWN -> BOOLEAN
 // True when value selects a supported development-only measurement variant.
 export function isPsxDiagnosticVariant(value: unknown): value is PsxDiagnosticVariant {
-    return value === "baseline" || value === "instrumented";
+    return value === "baseline" || value === "instrumented" || value === "sequential-read-reuse";
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN

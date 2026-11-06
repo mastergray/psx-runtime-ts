@@ -15,7 +15,7 @@ import type {
     WorkerOutput,
     WorkerStartPayload,
 } from "../../src/LibretroPsxAdapter/protocol.ts";
-import type { PsxBuildInfo, PsxMachineInfo } from "../../src/index.ts";
+import type { PsxBuildInfo, PsxDiagnosticVariant, PsxMachineInfo } from "../../src/index.ts";
 import type { CoreRunOptions, CoreRunOutput, WorkerCore } from "../../src/worker/WorkerRuntime.ts";
 import type { EmscriptenPsxModule } from "../../src/worker/CoreBridge.ts";
 import type { TestFile } from "../run.ts";
@@ -177,11 +177,12 @@ const frameOf = (outputs: WorkerOutput[]): Extract<WorkerOutput, { type: "frame"
     return frame;
 };
 
-const createBridgeModule = (): EmscriptenPsxModule => {
+const createBridgeModule = (): EmscriptenPsxModule & { readonly sequentialReadReuse: () => number } => {
     const memory = new ArrayBuffer(1024 * 1024);
     const heapU8 = new Uint8Array(memory);
     const heap16 = new Int16Array(memory);
     let allocation = 1;
+    let sequentialReadReuse = 0;
     const workerFs = {
         stream_ops: {
             read: (_stream: unknown, buffer: Int8Array | Uint8Array, offset: number, length: number, _position: number): number => {
@@ -210,6 +211,7 @@ const createBridgeModule = (): EmscriptenPsxModule => {
         stringToUTF8: () => undefined,
         lengthBytesUTF8: (value) => new TextEncoder().encode(value).byteLength,
         _psx_start: () => 1,
+        _psx_set_sequential_read_reuse: (enabled) => { sequentialReadReuse = enabled; },
         _psx_run_frame: () => {
             workerFs.stream_ops.llseek({}, 2352, 0);
             workerFs.stream_ops.read({}, new Uint8Array(4), 0, 4, 2352);
@@ -249,6 +251,7 @@ const createBridgeModule = (): EmscriptenPsxModule => {
         _psx_rumble: () => 0,
         _psx_log_size: () => 0,
         _psx_log_data: () => 0,
+        sequentialReadReuse: () => sequentialReadReuse,
     };
 };
 
@@ -267,10 +270,10 @@ const testFile: TestFile = {
                 .start(undefined),
         },
         {
-            label: "the instrumented bridge counts mounted Blob reads and seeks without changing baseline execution",
+            label: "the bridge isolates baseline, instrumented, and sequential-read-reuse execution",
             run: () => CTGTest.init("WORKERFS diagnostics")
                 .stage("run baseline and instrumented frames", async () => {
-                    const run = async (diagnosticVariant: "baseline" | "instrumented") => {
+                    const run = async (diagnosticVariant: PsxDiagnosticVariant) => {
                         let clock = 0;
                         const module = createBridgeModule();
                         const core = new EmscriptenPsxCore(
@@ -280,28 +283,36 @@ const testFile: TestFile = {
                         await core.start({ ...startPayload, diagnosticVariant });
                         const frame = core.runFrame({ video: false, audio: false, frameskipInterval: 0 });
                         await core.stop();
-                        return frame.timing;
+                        return { timing: frame.timing, sequentialReadReuse: module.sequentialReadReuse() };
                     };
                     return {
                         baseline: await run("baseline"),
                         instrumented: await run("instrumented"),
+                        sequential: await run("sequential-read-reuse"),
                     };
                 })
                 .assert("I/O counters", ({ subject }) => ({
                     baseline: {
-                        reads: subject.baseline?.discReadCalls,
-                        seeks: subject.baseline?.discSeekCalls,
+                        reads: subject.baseline?.timing?.discReadCalls,
+                        seeks: subject.baseline?.timing?.discSeekCalls,
+                        reuse: subject.baseline?.sequentialReadReuse,
                     },
                     instrumented: {
-                        reads: subject.instrumented?.discReadCalls,
-                        requested: subject.instrumented?.discReadRequestedBytes,
-                        returned: subject.instrumented?.discReadReturnedBytes,
-                        readMs: subject.instrumented?.discReadMilliseconds,
-                        seeks: subject.instrumented?.discSeekCalls,
-                        seekMs: subject.instrumented?.discSeekMilliseconds,
+                        reads: subject.instrumented?.timing?.discReadCalls,
+                        requested: subject.instrumented?.timing?.discReadRequestedBytes,
+                        returned: subject.instrumented?.timing?.discReadReturnedBytes,
+                        readMs: subject.instrumented?.timing?.discReadMilliseconds,
+                        seeks: subject.instrumented?.timing?.discSeekCalls,
+                        seekMs: subject.instrumented?.timing?.discSeekMilliseconds,
+                        reuse: subject.instrumented?.sequentialReadReuse,
+                    },
+                    sequential: {
+                        reads: subject.sequential?.timing?.discReadCalls,
+                        seeks: subject.sequential?.timing?.discSeekCalls,
+                        reuse: subject.sequential?.sequentialReadReuse,
                     },
                 }), P.equals<unknown>({
-                    baseline: { reads: 0, seeks: 0 },
+                    baseline: { reads: 0, seeks: 0, reuse: 0 },
                     instrumented: {
                         reads: 1,
                         requested: 4,
@@ -309,7 +320,9 @@ const testFile: TestFile = {
                         readMs: 1,
                         seeks: 1,
                         seekMs: 1,
+                        reuse: 0,
                     },
+                    sequential: { reads: 1, seeks: 1, reuse: 1 },
                 }))
                 .start(undefined),
         },

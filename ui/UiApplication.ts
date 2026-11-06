@@ -2075,7 +2075,7 @@ export default class UiApplication {
         const performance = audio?.workerPerformance ?? null;
         this._setText(
             "diagnostic-variant-status",
-            `${this._diagnostics.isActive ? "Active" : "Selected"} variant: ${this._diagnosticVariant === "instrumented" ? "Instrumented Baseline" : "Baseline"}`
+            `${this._diagnostics.isActive ? "Active" : "Selected"} variant: ${diagnosticVariantLabel(this._diagnosticVariant)}`
                 + (this._diagnostics.hasCompleted && !this._diagnostics.isActive ? " · completed report ready" : ""),
         );
         if (performance === null) {
@@ -2295,6 +2295,14 @@ const loadDiagnosticVariant = (storage: Storage | null): PsxDiagnosticVariant =>
 // Persists the variant selected for future sessions without changing an active worker.
 const persistDiagnosticVariant = (storage: Storage | null, value: PsxDiagnosticVariant): void => {
     try { storage?.setItem(DIAGNOSTIC_VARIANT_STORAGE_KEY, value); } catch { /* Preferences are best effort. */ }
+};
+
+// HELPER :: psxDiagnosticVariant -> STRING
+// Maps one development execution variant to its user-facing experiment label.
+const diagnosticVariantLabel = (value: PsxDiagnosticVariant): string => {
+    if (value === "instrumented") return "Instrumented Baseline";
+    if (value === "sequential-read-reuse") return "D1 · Sequential Read Reuse";
+    return "Baseline";
 };
 
 // HELPER :: DOCUMENT, STRING, STRING, STRING -> VOID

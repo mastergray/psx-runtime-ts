@@ -44,6 +44,11 @@ const toolchain: PsxToolchainIdentity = {
     emscriptenReleaseCommit: toolchainManifest.emscriptenReleaseCommit,
     emccCommit: toolchainManifest.emccCommit,
 };
+const patchNames = (await readdir(resolve(root, "core/patches")))
+    .filter((name) => name.endsWith(".patch"))
+    .sort((left, right) => left.localeCompare(right));
+const patchPaths = patchNames.map((name) => resolve(root, "core/patches", name));
+const appliedPatchPaths: string[] = [];
 
 const pythonShim = await mkdtemp(resolve(tmpdir(), "psx-runtime-python-"));
 await symlink(python, resolve(pythonShim, "python3"));
@@ -74,6 +79,8 @@ try {
     if (actualSourceCommit !== source.commit || actualSourceTree !== source.tree) {
         throw new Error("Selected core source identity does not match core/SOURCE.json");
     }
+    const trackedChanges = run("git", ["status", "--porcelain", "--untracked-files=no"], sourceRoot);
+    if (trackedChanges.length > 0) throw new Error("Selected core source checkout has tracked changes");
     const submoduleStatus = run("git", ["submodule", "status", "--recursive"], sourceRoot)
         .split("\n").filter(Boolean);
     const actualSubmodules = Object.fromEntries(submoduleStatus.map((line) => {
@@ -91,6 +98,12 @@ try {
         throw new Error("emcc does not match the pinned version and commit");
     }
 
+    for (const patchPath of patchPaths) {
+        run("git", ["apply", "--check", patchPath], sourceRoot);
+        run("git", ["apply", patchPath], sourceRoot);
+        appliedPatchPaths.push(patchPath);
+    }
+
     run(resolve(emscriptenBin, "emmake"), ["make", ...recipe.makeArguments, "clean"], sourceRoot);
     run(resolve(emscriptenBin, "emmake"), ["make", ...recipe.makeArguments, "-j8"], sourceRoot);
     const archiveSource = resolve(sourceRoot, "pcsx_rearmed_libretro_emscripten.bc");
@@ -101,6 +114,7 @@ try {
     await mkdir(resolve(outputRoot, "notices"), { recursive: true });
     const emcc = resolve(emscriptenBin, "emcc");
     run(emcc, [
+        resolve(root, "libretro/shim/psx_disc_io.c"),
         resolve(root, "libretro/shim/psx_frontend.c"),
         resolve(root, "libretro/shim/psx_exports.c"),
         archive,
@@ -126,9 +140,6 @@ try {
     await copyFile(resolve(root, "core/build.json"), resolve(outputRoot, "BUILD-RECIPE.json"));
     await copyFile(resolve(root, "docs/core-distribution.md"), resolve(outputRoot, "SOURCE-OFFER.md"));
 
-    const patchNames = (await readdir(resolve(root, "core/patches")))
-        .filter((name) => name.endsWith(".patch"))
-        .sort((left, right) => left.localeCompare(right));
     const patches = await Promise.all(patchNames.map(async (name) => ({
         name,
         sha256: sha256(await readFile(resolve(root, "core/patches", name))),
@@ -163,5 +174,11 @@ try {
         artifacts,
     }));
 } finally {
-    await rm(pythonShim, { recursive: true, force: true });
+    try {
+        for (const patchPath of appliedPatchPaths.reverse()) {
+            run("git", ["apply", "--reverse", patchPath], sourceRoot);
+        }
+    } finally {
+        await rm(pythonShim, { recursive: true, force: true });
+    }
 }

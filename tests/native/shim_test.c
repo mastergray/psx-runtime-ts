@@ -1,4 +1,5 @@
 #include "psx_frontend.h"
+#include "psx_disc_io.h"
 #include "libretro.h"
 
 #include <assert.h>
@@ -18,7 +19,69 @@ unsigned fake_initial_image_count(void);
 const char *fake_initial_image_path(void);
 const char *fake_disc_trace(void);
 
+#define DISC_TEST_BYTES 20000u
+#define DISC_TEST_READS 7u
+#define DISC_TEST_MAX_READ 2352u
+
+struct disc_test_read {
+    off_t offset;
+    size_t length;
+};
+
+static const struct disc_test_read disc_test_reads[DISC_TEST_READS] = {
+    { 0, 2352 },
+    { 2352, 2352 },
+    { 4704, 2352 },
+    { 128, 512 },
+    { 640, 2352 },
+    { 19900, 200 },
+    { 20000, 32 },
+};
+
+static void run_disc_read_sequence(
+    int enabled,
+    unsigned char output[DISC_TEST_READS][DISC_TEST_MAX_READ],
+    size_t returned[DISC_TEST_READS],
+    unsigned long *skips
+) {
+    unsigned char content[DISC_TEST_BYTES];
+    FILE *file = tmpfile();
+    assert(file != NULL);
+    for (size_t index = 0; index < sizeof(content); index++) {
+        content[index] = (unsigned char) ((index * 31u) % 251u);
+    }
+    assert(fwrite(content, 1, sizeof(content), file) == sizeof(content));
+    assert(fflush(file) == 0);
+    psx_set_sequential_read_reuse(enabled);
+    for (size_t index = 0; index < DISC_TEST_READS; index++) {
+        assert(psx_runtime_disc_seek(file, disc_test_reads[index].offset) == 0);
+        returned[index] = fread(output[index], 1, disc_test_reads[index].length, file);
+    }
+    *skips = psx_sequential_read_reuse_skips();
+    assert(fclose(file) == 0);
+}
+
+static void test_sequential_read_reuse(void) {
+    unsigned char baseline[DISC_TEST_READS][DISC_TEST_MAX_READ] = {{0}};
+    unsigned char candidate[DISC_TEST_READS][DISC_TEST_MAX_READ] = {{0}};
+    size_t baseline_returned[DISC_TEST_READS] = {0};
+    size_t candidate_returned[DISC_TEST_READS] = {0};
+    unsigned long baseline_skips = 0;
+    unsigned long candidate_skips = 0;
+    run_disc_read_sequence(0, baseline, baseline_returned, &baseline_skips);
+    run_disc_read_sequence(1, candidate, candidate_returned, &candidate_skips);
+    assert(baseline_skips == 0);
+    assert(candidate_skips == 4);
+    for (size_t index = 0; index < DISC_TEST_READS; index++) {
+        assert(candidate_returned[index] == baseline_returned[index]);
+        assert(memcmp(candidate[index], baseline[index], baseline_returned[index]) == 0);
+    }
+    assert(candidate_returned[5] == 100);
+    assert(candidate_returned[6] == 0);
+}
+
 int main(void) {
+    test_sequential_read_reuse();
     assert(psx_start(
         "/content/index/game.cue",
         "{\"controllers\":{\"1\":\"dualshock\",\"2\":\"digital\"},"

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 
 import CTGTest, { CTGTestPredicates as P } from "ctg-js-test";
 import {
@@ -9,6 +9,7 @@ import {
     isPsxBuildRecipe,
     isPsxSourceIdentity,
     isPsxToolchainIdentity,
+    sha256,
     sourceTreeHash,
 } from "../../scripts/core-build/buildInfo.ts";
 import { isPsxBuildInfo } from "../../src/index.ts";
@@ -40,15 +41,23 @@ const toolchain: PsxToolchainIdentity = {
     emscriptenReleaseCommit: (toolchainValue as { emscriptenReleaseCommit: string }).emscriptenReleaseCommit,
     emccCommit: (toolchainValue as { emccCommit: string }).emccCommit,
 };
-const shimFiles = await Promise.all([
+const shimPaths = [
     "libretro/include/libretro.h",
-    "libretro/shim/psx_frontend.h",
-    "libretro/shim/psx_frontend_internal.h",
-    "libretro/shim/psx_frontend.c",
-    "libretro/shim/psx_exports.c",
-].map(async (path) => ({ path, contents: await readFile(new URL(`../../${path}`, import.meta.url)) })));
+    ...(await readdir(new URL("../../libretro/shim/", import.meta.url)))
+        .filter((name) => name.endsWith(".c") || name.endsWith(".h"))
+        .map((name) => `libretro/shim/${name}`),
+].sort((left, right) => left.localeCompare(right));
+const shimFiles = await Promise.all(shimPaths
+    .map(async (path) => ({ path, contents: await readFile(new URL(`../../${path}`, import.meta.url)) })));
+const patchNames = (await readdir(new URL("../../core/patches/", import.meta.url)))
+    .filter((name) => name.endsWith(".patch"))
+    .sort((left, right) => left.localeCompare(right));
+const patches = await Promise.all(patchNames.map(async (name) => ({
+    name,
+    sha256: sha256(await readFile(new URL(`../../core/patches/${name}`, import.meta.url))),
+})));
 const shimHash = sourceTreeHash(shimFiles);
-const identity = buildIdentityFor(recipe, source, toolchain, [], shimHash);
+const identity = buildIdentityFor(recipe, source, toolchain, patches, shimHash);
 
 const testFile: TestFile = {
     label: "M1 deterministic build metadata",
@@ -105,7 +114,7 @@ const testFile: TestFile = {
                     };
                     const base = buildIdFor(identity);
                     const ids = {
-                        reordered: buildIdFor(buildIdentityFor(recipe, reversedSource, toolchain, [], shimHash)),
+                        reordered: buildIdFor(buildIdentityFor(recipe, reversedSource, toolchain, patches, shimHash)),
                         source: buildIdFor({ ...identity, source: { ...source, tree: "b".repeat(40) } }),
                         patch: buildIdFor({ ...identity, patches: [{ name: "0001.patch", sha256: "c".repeat(64) }] }),
                         shim: buildIdFor({ ...identity, shimSha256: "d".repeat(64) }),

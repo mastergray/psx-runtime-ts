@@ -1,0 +1,28 @@
+diff --git a/libpcsxcore/cdriso.c b/libpcsxcore/cdriso.c
+--- a/libpcsxcore/cdriso.c
++++ b/libpcsxcore/cdriso.c
+@@ -90,6 +90,8 @@ static int (*cdimg_read_func)(FILE *f, unsigned int base, void *dest, int sector
+ static int (*cdimg_read_sub_func)(FILE *f, int sector, void *dest);
+ 
+ static void DecodeRawSubData(unsigned char *subbuffer);
++
++int psx_runtime_disc_seek(FILE *stream, off_t offset);
+ 
+ struct trackinfo {
+ 	enum cdrType type;
+@@ -1221,12 +1223,14 @@ static int opensbifile(const char *isoname) {
+ 
+ static int cdread_normal(FILE *f, unsigned int base, void *dest, int sector)
+ {
++	off_t offset;
+ 	int ret;
+ 	if (!f)
+ 		return -1;
+ 	if (!dest)
+ 		dest = cdbuffer;
+-	if (fseeko(f, base + sector * CD_FRAMESIZE_RAW, SEEK_SET))
++	offset = base + sector * CD_FRAMESIZE_RAW;
++	if (psx_runtime_disc_seek(f, offset))
+ 		goto fail_io;
+ 	ret = fread(dest, 1, CD_FRAMESIZE_RAW, f);
+ 	if (ret <= 0)

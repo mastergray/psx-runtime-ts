@@ -68,7 +68,7 @@
     "-sNO_EXIT_RUNTIME=1",
     "-sASYNCIFY=0",
     "-sEXPORTED_RUNTIME_METHODS=FS,WORKERFS,HEAPU8,HEAP16,HEAP32,UTF8ToString,stringToUTF8,lengthBytesUTF8",
-    "-sEXPORTED_FUNCTIONS=_malloc,_free,_psx_start,_psx_run_frame,_psx_set_button,_psx_set_axis,_psx_reset,_psx_serialize_size,_psx_serialize,_psx_unserialize,_psx_memory_card_size,_psx_read_memory_card,_psx_write_memory_card,_psx_set_disc,_psx_disc_count,_psx_stop,_psx_video_width,_psx_video_height,_psx_base_width,_psx_base_height,_psx_video_pitch,_psx_video_format,_psx_video_data,_psx_video_size,_psx_video_duplicate,_psx_audio_data,_psx_audio_frames,_psx_frames_per_second,_psx_sample_rate,_psx_is_pal,_psx_aspect_ratio,_psx_max_width,_psx_max_height,_psx_disc_index,_psx_tray_open,_psx_rumble,_psx_log_size,_psx_log_data"
+    "-sEXPORTED_FUNCTIONS=_malloc,_free,_psx_start,_psx_run_frame,_psx_set_sequential_read_reuse,_psx_set_button,_psx_set_axis,_psx_reset,_psx_serialize_size,_psx_serialize,_psx_unserialize,_psx_memory_card_size,_psx_read_memory_card,_psx_write_memory_card,_psx_set_disc,_psx_disc_count,_psx_stop,_psx_video_width,_psx_video_height,_psx_base_width,_psx_base_height,_psx_video_pitch,_psx_video_format,_psx_video_data,_psx_video_size,_psx_video_duplicate,_psx_audio_data,_psx_audio_frames,_psx_frames_per_second,_psx_sample_rate,_psx_is_pal,_psx_aspect_ratio,_psx_max_width,_psx_max_height,_psx_disc_index,_psx_tray_open,_psx_rumble,_psx_log_size,_psx_log_data"
   ],
   "licenses": [
     {
