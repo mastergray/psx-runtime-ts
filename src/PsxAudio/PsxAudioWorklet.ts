@@ -4,9 +4,9 @@
  *
  */
 
-// TYPE :: "adaptive"|"low-latency"|"stable"|"rate-matched"
+// TYPE :: "adaptive"|"low-latency"|"stable"
 // Rendering-thread scheduling strategy sent by PsxAudio.
-type WorkletBufferMode = "adaptive" | "low-latency" | "stable" | "rate-matched";
+type WorkletBufferMode = "adaptive" | "low-latency" | "stable";
 
 // INTERFACE :: {type:"configure", mode:workletBufferMode}
 // Updates the prebuffer target used after startup or starvation.
@@ -29,16 +29,9 @@ interface ResetMessage {
     readonly type: "reset";    // Reset-message discriminator
 }
 
-// INTERFACE :: {type:"rate", ratio:NUMBER}
-// Updates the bounded source-frame consumption ratio used by mobile rate matching.
-interface RateMessage {
-    readonly type: "rate";      // Control-message discriminator
-    readonly ratio: number;     // Source frames consumed per output frame
-}
-
-// TYPE :: configureMessage|pushMessage|resetMessage|rateMessage
+// TYPE :: configureMessage|pushMessage|resetMessage
 // Complete control-side input accepted by the processor.
-type WorkletInputMessage = ConfigureMessage | PushMessage | ResetMessage | RateMessage;
+type WorkletInputMessage = ConfigureMessage | PushMessage | ResetMessage;
 
 // INTERFACE :: {left:float32Array, right:float32Array, readIndex:NUMBER, size:NUMBER, phase:NUMBER, consumptionRatio:NUMBER, targetConsumptionRatio:NUMBER, started:BOOLEAN, mode:workletBufferMode, adaptiveRecovery:BOOLEAN, underruns:NUMBER, droppedFrames:NUMBER}
 // Mutable bounded stereo ring and diagnostics owned by the rendering thread.
@@ -117,7 +110,6 @@ const MAXIMUM_BUFFER_MS = 120;
 const TRIM_BUFFER_MS = 60;
 const LOW_LATENCY_TARGET_MS = 20;
 const STABLE_TARGET_MS = 80;
-const MINIMUM_CONSUMPTION_RATIO = 0.94;
 const RATE_SMOOTHING_PER_FRAME = 0.0001;
 
 // HELPER :: NUMBER -> NUMBER
@@ -148,7 +140,7 @@ const createWorkletState = (): WorkletState => {
 // HELPER :: UNKNOWN -> BOOLEAN
 // True when value names one supported rendering-thread buffer mode.
 const isWorkletBufferMode = (value: unknown): value is WorkletBufferMode =>
-    value === "adaptive" || value === "low-latency" || value === "stable" || value === "rate-matched";
+    value === "adaptive" || value === "low-latency" || value === "stable";
 
 // HELPER :: UNKNOWN -> BOOLEAN
 // True when value is a non-null object suitable for message inspection.
@@ -169,13 +161,6 @@ const handleWorkletMessage = (state: WorkletState, port: MessagePort, message: u
         postStatistics(state, port);
         return;
     }
-    if (message.type === "rate" && typeof message.ratio === "number" && Number.isFinite(message.ratio)) {
-        state.targetConsumptionRatio = state.mode === "rate-matched"
-            ? Math.max(MINIMUM_CONSUMPTION_RATIO, Math.min(1, message.ratio))
-            : 1;
-        postStatistics(state, port);
-        return;
-    }
     if (message.type === "reset") {
         clearQueue(state);
         postStatistics(state, port);
@@ -191,8 +176,7 @@ const handleWorkletMessage = (state: WorkletState, port: MessagePort, message: u
 // HELPER :: workletState -> NUMBER
 // Returns the prebuffer target for the active strategy and recovery state.
 const targetFrames = (state: WorkletState): number =>
-    state.mode === "stable" || state.mode === "rate-matched"
-        || (state.mode === "adaptive" && state.adaptiveRecovery)
+    state.mode === "stable" || (state.mode === "adaptive" && state.adaptiveRecovery)
         ? framesForMilliseconds(STABLE_TARGET_MS)
         : framesForMilliseconds(LOW_LATENCY_TARGET_MS);
 

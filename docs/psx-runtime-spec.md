@@ -875,21 +875,16 @@ available and retains the bounded scheduled-source path as a fallback:
 - a 120 ms hard cap trimming to 60 ms; and
 - queue reset on pause, reset, state load, disc change and large timing gaps.
 
-The Audio surface has four browser-wide modes. Low Latency uses a 20 ms
+The Audio surface has three browser-wide modes. Low Latency uses a 20 ms
 prebuffer, Stable Playback uses 80 ms, and the default Adaptive mode begins at
 20 ms then uses 80 ms for the remainder of the audio session after its first
-device-timeline underrun. Mobile Rate Match is an explicit opt-in mode for a
-device that cannot sustain real-time emulation: after at least one second of
-measurement, its Worklet consumes source frames at the rolling production
-ratio, smoothed over time and clamped to 94–100 percent. This can lower pitch
-and playback speed by at most six percent while keeping the audio queue from
-repeatedly starving; it does not alter the core or the other modes.
+device-timeline underrun.
 
 The production Audio surface persists this choice and reports the selected
 backend, session's cumulative underruns, recent queue depth, rolling real-time
-core-audio production, realized rate-matched output speed and the largest
-recent delivery gap. The Worklet counts contiguous rendering starvation as
-one underrun and prebuffers again before resuming output.
+core-audio production and the largest recent delivery gap. The Worklet counts
+contiguous rendering starvation as one underrun and prebuffers again before
+resuming output.
 
 The mobile-performance diagnostic path emits one aggregate every 120 emulated
 frames. It separates native core execution, AV extraction, RGBA conversion,

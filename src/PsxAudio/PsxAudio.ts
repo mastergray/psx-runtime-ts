@@ -23,7 +23,7 @@ import type {
 import type {
     PsxAudioBufferSourceLike,    // Schedulable Web Audio source boundary
     PsxAudioBackend,             // Selected scheduled or rendering-thread implementation
-    PsxAudioBufferMode,          // Output strategy balancing latency, resilience, and bounded rate matching
+    PsxAudioBufferMode,          // Output strategy balancing latency and stall resilience
     PsxAudioConfig,              // Session, gesture, context, and volume dependencies
     PsxAudioContextLike,         // Minimal Web Audio context used by the runtime
     PsxAudioContextFactory,      // Injectable context constructor
@@ -91,9 +91,7 @@ export default class PsxAudio {
     static readonly STABLE_LEAD_SECONDS = 0.08;                                               // Mobile-oriented cushion surviving transient browser stalls
     static readonly TIMING_GAP_MS = 250;                                                      // Core event gap that resets a stale queue
     static readonly PRODUCTION_WINDOW_MS = 5_000;                                             // Rolling interval used for source-throughput diagnostics
-    static readonly PRODUCTION_MINIMUM_MS = 1_000;                                            // Observation required before mobile rate matching begins
-    static readonly RATE_MATCH_INTERVAL_MS = 250;                                             // Minimum interval between rendering-thread rate updates
-    static readonly MINIMUM_CONSUMPTION_RATIO = 0.94;                                         // Maximum six-percent mobile slowdown
+    static readonly PRODUCTION_MINIMUM_MS = 1_000;                                            // Observation required before reporting sustained throughput
 
     /* Instance Fields */
     private readonly _session: PsxAudioConfig["session"];               // Active session producing sound events
@@ -111,7 +109,6 @@ export default class PsxAudio {
     private _workletLoading = false;                                     // Whether pending PCM must wait instead of using fallback scheduling
     private _backend: PsxAudioBackend = "scheduled";                     // Active persistent or scheduled output implementation
     private _workletQueuedFrames = 0;                                    // Most recently reported rendering-thread queue depth
-    private _workletConsumptionRatio = 1;                                // Most recently reported source-frame consumption ratio
     private _workletDroppedSampleBase = 0;                               // Scheduled-path drops retained when the Worklet takes ownership
     private _workletUnderrunBase = 0;                                    // Scheduled-path underruns retained when the Worklet takes ownership
     private _pending: StereoChunk[] = [];                                // Deinterleaved frames awaiting scheduling
@@ -124,12 +121,11 @@ export default class PsxAudio {
     private _muted = false;                                              // Requested mute state retained before context creation
     private _volume: number;                                             // Requested normalized volume retained before context creation
     private _lastSoundMs: number | null = null;                          // Monotonic timestamp of the previous core sound event
-    private _bufferMode: PsxAudioBufferMode;                             // Active buffering or bounded rate-matching strategy
+    private _bufferMode: PsxAudioBufferMode;                             // Active latency-versus-resilience strategy
     private _adaptiveRecovery = false;                                   // Whether adaptive mode has observed an underrun this session
     private _hasScheduledAudio = false;                                  // Whether a prior non-reset buffer can expose a real underrun
     private _underrunCount = 0;                                          // Device-timeline exhaustions observed during this session
     private _productionSamples: AudioProductionSample[] = [];            // Recent core-audio deliveries used to measure sustained throughput
-    private _lastRateMatchMessageMs = Number.NEGATIVE_INFINITY;          // Latest rendering-thread rate update timestamp
     private _destroyed = false;                                          // Whether audio ownership has ended
 
     // CONSTRUCTOR :: psxAudioConfig -> psxAudio
@@ -242,14 +238,6 @@ export default class PsxAudio {
         return this._session.performance ?? null;
     }
 
-    // GETTER :: VOID -> NUMBER
-    // Reports source frames consumed per device frame by Mobile Rate Match.
-    get outputConsumptionRate(): number {
-        return this._backend === "worklet" && this._bufferMode === "rate-matched"
-            ? this._workletConsumptionRatio
-            : 1;
-    }
-
     // SETTER :: NUMBER -> VOID
     // Sets normalized output volume and updates an existing gain stage.
     set volume(value: number) {
@@ -268,7 +256,6 @@ export default class PsxAudio {
         this._bufferMode = value;
         this._adaptiveRecovery = false;
         this._workletNode?.port.postMessage({ type: "configure", mode: value });
-        this._updateWorkletRate(this._nowMs(), true);
     }
 
     /**
@@ -335,8 +322,6 @@ export default class PsxAudio {
         this._resetOutputQueue();
         this._lastSoundMs = null;
         this._productionSamples = [];
-        this._lastRateMatchMessageMs = Number.NEGATIVE_INFINITY;
-        this._updateWorkletRate(this._nowMs(), true);
     }
 
     // METHOD :: VOID -> VOID
@@ -416,7 +401,6 @@ export default class PsxAudio {
                 this._workletNode = node;
                 this._backend = "worklet";
                 node.port.postMessage({ type: "configure", mode: this._bufferMode });
-                this._updateWorkletRate(this._nowMs(), true);
             } catch {
                 node?.port.close();
                 try { node?.disconnect(); } catch { /* fallback scheduling remains available */ }
@@ -438,7 +422,6 @@ export default class PsxAudio {
         this._underrunCount = this._workletUnderrunBase + message.underruns;
         this._droppedSamples = this._workletDroppedSampleBase + message.droppedFrames * 2;
         this._adaptiveRecovery = this._bufferMode === "adaptive" && message.adaptiveRecovery;
-        this._workletConsumptionRatio = message.consumptionRatio;
     }
 
     // METHOD :: BOOLEAN? -> VOID
@@ -459,7 +442,6 @@ export default class PsxAudio {
         if (this._destroyed || !isPsxSoundEvent(sound) || sound.frames === 0) return;
         const now = this._nowMs();
         this._recordProduction(now, sound.frames);
-        this._updateWorkletRate(now);
         if (this._lastSoundMs !== null && now - this._lastSoundMs > PsxAudio.TIMING_GAP_MS) {
             this._resetOutputQueue(true);
         }
@@ -500,20 +482,6 @@ export default class PsxAudio {
         while (this._productionSamples.length > 2 && this._productionSamples[1]!.timeMs < cutoff) {
             this._productionSamples.shift();
         }
-    }
-
-    // METHOD :: NUMBER, BOOLEAN? -> VOID
-    // Sends a bounded recent production ratio to the rendering thread at a low control rate.
-    private _updateWorkletRate(timeMs: number, force = false): void {
-        const node = this._workletNode;
-        if (node === null || this._bufferMode !== "rate-matched") return;
-        if (!force && timeMs - this._lastRateMatchMessageMs < PsxAudio.RATE_MATCH_INTERVAL_MS) return;
-        const measured = this.productionRate;
-        const ratio = measured === null
-            ? 1
-            : Math.max(PsxAudio.MINIMUM_CONSUMPTION_RATIO, Math.min(1, measured));
-        node.port.postMessage({ type: "rate", ratio });
-        this._lastRateMatchMessageMs = timeMs;
     }
 
     // METHOD :: VOID -> VOID
@@ -773,15 +741,13 @@ const isWorkletStatistics = (value: unknown): value is WorkletStatistics => {
         && typeof message.droppedFrames === "number" && Number.isInteger(message.droppedFrames)
         && message.droppedFrames >= 0
         && typeof message.adaptiveRecovery === "boolean"
-        && typeof message.consumptionRatio === "number" && Number.isFinite(message.consumptionRatio)
-        && message.consumptionRatio >= PsxAudio.MINIMUM_CONSUMPTION_RATIO
-        && message.consumptionRatio <= 1;
+        && typeof message.consumptionRatio === "number" && message.consumptionRatio === 1;
 };
 
 // HELPER :: psxAudioBufferMode, BOOLEAN -> NUMBER
 // Resolves the dry-timeline lead in seconds for one scheduling strategy and recovery state.
 const audioBufferLeadSeconds = (mode: PsxAudioBufferMode, adaptiveRecovery: boolean): number =>
-    mode === "stable" || mode === "rate-matched" || (mode === "adaptive" && adaptiveRecovery)
+    mode === "stable" || (mode === "adaptive" && adaptiveRecovery)
         ? PsxAudio.STABLE_LEAD_SECONDS
         : PsxAudio.LEAD_SECONDS;
 

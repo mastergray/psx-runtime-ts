@@ -23,7 +23,7 @@ import {
 import type {
     BiosImage,          // Stored firmware supplied when a session starts
     ControllerPort,     // Physical port used by automatic browser-gamepad binding
-    PsxAudioBufferMode, // Persisted audio buffering or bounded rate-matching strategy
+    PsxAudioBufferMode, // Persisted latency-versus-resilience buffering strategy
     PsxFirmwareRecord,  // Stored firmware metadata rendered by System
     PsxMachineInfo,     // Active core and content identity used for state compatibility
     PsxControllerType,  // Per-game emulated controller device selected for one port
@@ -2026,12 +2026,9 @@ export default class UiApplication {
         const productionStatus = production === null
             ? ""
             : ` · ${Math.round(production * 100)}% real-time production · ${maximumGap} ms max gap`;
-        const rateMatchStatus = audio?.bufferMode === "rate-matched" && audio.backend === "worklet"
-            ? ` · ${Math.round(audio.outputConsumptionRate * 100)}% output rate`
-            : "";
         this._setText(
             "audio-buffer-status",
-            `Audio: ${underruns} ${underruns === 1 ? "underrun" : "underruns"} · ${queued} ms queued · ${backend}${productionStatus}${rateMatchStatus}${recovery}`,
+            `Audio: ${underruns} ${underruns === 1 ? "underrun" : "underruns"} · ${queued} ms queued · ${backend}${productionStatus}${recovery}`,
         );
         const performance = audio?.workerPerformance ?? null;
         if (performance === null) {
@@ -2144,6 +2141,10 @@ const storeBoolean = (storage: Storage | null, key: string, value: boolean): voi
 const loadAudioBufferMode = (storage: Storage | null): PsxAudioBufferMode => {
     try {
         const value = storage?.getItem(AUDIO_BUFFER_MODE_STORAGE_KEY);
+        if (value === "rate-matched") {
+            persistAudioBufferMode(storage, "adaptive");
+            return "adaptive";
+        }
         return isPsxAudioBufferMode(value) ? value : "adaptive";
     } catch {
         return "adaptive";

@@ -1729,10 +1729,10 @@ try {
                 && volumeControl.bufferStored === "stable"
                 && volumeControl.bufferStatus === "Audio: 0 underruns · 0 ms queued · Output idle"
                 && volumeControl.workerStatus === "Worker timing: waiting for 120 frames."
+                && volumeControl.bufferOptions.length === 3
                 && volumeControl.bufferOptions.some(([value, label]) => value === "adaptive" && label === "Adaptive (Recommended)")
                 && volumeControl.bufferOptions.some(([value, label]) => value === "low-latency" && label === "Low Latency")
                 && volumeControl.bufferOptions.some(([value, label]) => value === "stable" && label === "Stable Playback")
-                && volumeControl.bufferOptions.some(([value, label]) => value === "rate-matched" && label === "Mobile Rate Match")
                 && touchViewInitial.checked === false && touchViewInitial.hidden
                 && touchViewInitial.touchButtons === 12 && touchViewInitial.touchSticks === 2
                 && touchViewInitial.dpad && touchViewInitial.applyLeftOfCancel && touchViewInitial.applyEnabled

@@ -49,9 +49,7 @@ M6 adds aspect-correct `fit`, `integer`, `fill` and `stretch` display modes,
 dynamic canvas backing geometry, fullscreen and filtering controls, plus lazy
 stereo Web Audio playback with independent mute/volume and a bounded queue.
 Its browser-wide Adaptive, Low Latency and Stable Playback modes let mobile
-devices trade a small scheduling cushion for smoother cut-scene audio. The
-opt-in Mobile Rate Match mode follows measured emulation throughput, bounded
-to a maximum six-percent slowdown, when a device cannot sustain real time.
+devices trade a small scheduling cushion for smoother cut-scene audio.
 Secure contexts use a persistent AudioWorklet stereo ring; unsupported origins
 and browsers retain bounded AudioBufferSource scheduling as a fallback.
 
@@ -96,8 +94,8 @@ runtime and browser stores. The central stage reflects firmware-required,
 ready, starting, running, paused, stopping and failed states; no mock-only
 formats or settings are exposed.
 The Audio modal persists the audio-buffering mode and reports observed
-underruns, recent queue depth, real-time core-audio production, rate-matched
-output speed and the largest recent delivery gap for device-specific tuning.
+underruns, recent queue depth, real-time core-audio production and the largest
+recent delivery gap for device-specific tuning.
 Experimental builds also aggregate worker timing every 120 frames across core
 execution, AV extraction, video/audio conversion and main-thread turnaround.
 

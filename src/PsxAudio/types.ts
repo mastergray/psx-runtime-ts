@@ -10,9 +10,9 @@ import type { PsxSession } from "../shared.types.js"; // Session source composed
  *
  */
 
-// TYPE :: "adaptive"|"low-latency"|"stable"|"rate-matched"
-// Audio strategy balancing latency, stall resilience, or bounded mobile rate matching.
-export type PsxAudioBufferMode = "adaptive" | "low-latency" | "stable" | "rate-matched";
+// TYPE :: "adaptive"|"low-latency"|"stable"
+// Audio buffering strategy balancing latency and stall resilience.
+export type PsxAudioBufferMode = "adaptive" | "low-latency" | "stable";
 
 // TYPE :: "scheduled"|"worklet"
 // Active browser-audio implementation selected from runtime capabilities.
@@ -146,8 +146,7 @@ const isFiniteNumber = (value: unknown): value is number =>
 // PREDICATE :: UNKNOWN -> BOOLEAN
 // True when value names one supported audio scheduling strategy.
 export function isPsxAudioBufferMode(value: unknown): value is PsxAudioBufferMode {
-    return value === "adaptive" || value === "low-latency" || value === "stable"
-        || value === "rate-matched";
+    return value === "adaptive" || value === "low-latency" || value === "stable";
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN

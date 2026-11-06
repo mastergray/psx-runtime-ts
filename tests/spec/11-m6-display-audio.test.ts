@@ -428,16 +428,6 @@ const testFile: TestFile = {
                         adaptiveRecovery: false,
                         consumptionRatio: 1,
                     });
-                    worklet.bufferMode = "rate-matched";
-                    workletNode.port.emit({
-                        type: "stats",
-                        queuedFrames: 2_205,
-                        underruns: 2,
-                        droppedFrames: 10,
-                        adaptiveRecovery: false,
-                        consumptionRatio: 0.97,
-                    });
-                    const rateMatched = [worklet.bufferLeadMs, worklet.outputConsumptionRate];
                     worklet.bufferMode = "adaptive";
                     workletNode.port.emit({
                         type: "stats",
@@ -462,37 +452,6 @@ const testFile: TestFile = {
                             ? (message as { readonly type: unknown }).type
                             : null);
                     worklet.destroy();
-                    const matchedSession = new FakeSession();
-                    const matchedContext = new FakeWorkletAudioContext();
-                    const matchedNode = new FakeWorkletNode();
-                    const matched = new PsxAudio({
-                        session: matchedSession,
-                        gestureSource: new FakeGestureSource(),
-                        createAudioContext: () => matchedContext,
-                        createAudioWorkletNode: () => matchedNode,
-                        audioWorkletModuleUrl: "https://example.test/PsxAudioWorklet.js",
-                        clock: () => matchedContext.currentTime * 1000,
-                        bufferMode: "rate-matched",
-                    });
-                    matchedSession.sound(first);
-                    await matched.unlock();
-                    for (let frame = 1; frame <= 70; frame++) {
-                        matchedContext.currentTime = frame / (60 * 0.97);
-                        matchedSession.sound(first);
-                    }
-                    const matchedRates = matchedNode.port.messages.flatMap((message) =>
-                        typeof message === "object" && message !== null
-                            && "type" in message && message.type === "rate" && "ratio" in message
-                            && typeof message.ratio === "number"
-                            ? [Number(message.ratio.toFixed(3))]
-                            : []);
-                    const rateControl = {
-                        messages: matchedRates.length,
-                        first: matchedRates[0],
-                        last: matchedRates.at(-1),
-                        production: Number((matched.productionRate ?? 0).toFixed(3)),
-                    };
-                    matched.destroy();
                     return {
                         valid: isPsxAudioConfig(config),
                         backend: audio.backend,
@@ -514,13 +473,11 @@ const testFile: TestFile = {
                         },
                         worklet: {
                             diagnostics: workletDiagnostics,
-                            rateMatched,
                             messages: workletMessages,
                             resetQueue: worklet.queuedMs,
                             closed: workletNode.port.closed,
                             disconnected: workletNode.disconnected,
                         },
-                        rateControl,
                         pure: {
                             channels: deinterleavePsxStereo(new Float32Array([1, -1, 0.5, -0.5]))
                                 .map((values) => [...values]),
@@ -543,7 +500,7 @@ const testFile: TestFile = {
                     valid: true,
                     backend: "scheduled",
                     modes: {
-                        predicates: [true, true, true, true, false],
+                        predicates: [true, true, true, false, false],
                         invalidConfig: false,
                         low: [0.02, 0.02, 1],
                         stable: 0.08,
@@ -558,13 +515,11 @@ const testFile: TestFile = {
                             targetLead: 80,
                             modules: ["https://example.test/PsxAudioWorklet.js"],
                         },
-                        rateMatched: [80, 0.97],
-                        messages: ["configure", "push", "configure", "rate", "configure", "reset"],
+                        messages: ["configure", "push", "configure", "reset"],
                         resetQueue: 0,
                         closed: true,
                         disconnected: true,
                     },
-                    rateControl: { messages: 5, first: 1, last: 0.97, production: 0.97 },
                     pure: {
                         channels: [[1, 0.5], [-1, -0.5]],
                         cap: { dropQueuedFrames: 3_764, dropIncomingFrames: 0 },
