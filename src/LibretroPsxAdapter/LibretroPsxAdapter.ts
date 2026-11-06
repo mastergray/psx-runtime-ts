@@ -12,6 +12,7 @@ import WorkerClient from "./WorkerClient.js";                // Owns worker mess
 import {
     isLibretroPsxAdapterConfig,        // Validates direct adapter construction dependencies
     isLibretroPsxAdapterInitConfig,    // Validates high-level browser factory input
+    isPsxDiagnosticVariant,            // Validates development-only execution variants
     isPsxWorker,                       // Validates workers returned by an injected factory
 } from "./types.js";
 
@@ -29,6 +30,7 @@ import type {
     LibretroPsxAdapterConfig,        // Validated build and injected browser dependencies
     LibretroPsxAdapterInitConfig,    // Build URL and optional browser overrides
     PsxClock,                        // Monotonic pacing clock
+    PsxDiagnosticVariant,            // Development-only measurement variant
     WorkerFactory,                   // Module-worker construction boundary
 } from "./types.js";
 
@@ -51,6 +53,7 @@ export default class LibretroPsxAdapter implements PsxAdapter {
     private readonly _createWorker: WorkerFactory;                         // Module-worker construction boundary
     private readonly _scheduler?: FrameScheduler;                          // Optional injected animation-frame boundary
     private readonly _clock?: PsxClock;                                    // Optional injected monotonic pacing clock
+    private _diagnosticVariant: PsxDiagnosticVariant;                       // Variant captured by each newly started worker
     private _generation = 0;                                               // Monotonic worker generation used to reject stale events
 
     // CONSTRUCTOR :: libretroPsxAdapterConfig -> libretroPsxAdapter
@@ -66,6 +69,7 @@ export default class LibretroPsxAdapter implements PsxAdapter {
         this._createWorker = config.createWorker;
         this._scheduler = config.scheduler;
         this._clock = config.clock;
+        this._diagnosticVariant = config.diagnosticVariant ?? "baseline";
     }
 
     /**
@@ -78,6 +82,19 @@ export default class LibretroPsxAdapter implements PsxAdapter {
     // Returns validated immutable core-build metadata.
     get build(): LibretroPsxAdapterConfig["build"] {
         return this._build;
+    }
+
+    // GETTER :: VOID -> psxDiagnosticVariant
+    // Returns the development-only variant that the next session will capture.
+    get diagnosticVariant(): PsxDiagnosticVariant {
+        return this._diagnosticVariant;
+    }
+
+    // SETTER :: psxDiagnosticVariant -> VOID
+    // Selects the development-only variant for future sessions without mutating a running worker.
+    set diagnosticVariant(value: PsxDiagnosticVariant) {
+        if (!isPsxDiagnosticVariant(value)) throw invalid(value, "The diagnostic variant is invalid.");
+        this._diagnosticVariant = value;
     }
 
     /**
@@ -133,6 +150,7 @@ export default class LibretroPsxAdapter implements PsxAdapter {
         const workerUrl = resolveBuildUrl(this._buildUrl, "core.worker.js");
         const moduleUrl = resolveBuildUrl(this._buildUrl, "psx-core.js");
         const biosPath = `/system/${this._build.firmware.systemFilenames[config.bios.region]}`;
+        const diagnosticVariant = this._diagnosticVariant;
 
         const startWorker = async (
             cards: Readonly<Record<ControllerPort, Uint8Array>>,
@@ -159,6 +177,7 @@ export default class LibretroPsxAdapter implements PsxAdapter {
                 initialDiscIndex,
                 controllers,
                 options: config.options ?? {},
+                diagnosticVariant,
             };
             try {
                 const machine = await client.start(payload);
@@ -228,6 +247,7 @@ export default class LibretroPsxAdapter implements PsxAdapter {
             createWorker: config.createWorker ?? browserWorkerFactory(),
             ...(config.scheduler === undefined ? {} : { scheduler: config.scheduler }),
             ...(config.clock === undefined ? {} : { clock: config.clock }),
+            ...(config.diagnosticVariant === undefined ? {} : { diagnosticVariant: config.diagnosticVariant }),
         });
     }
 }

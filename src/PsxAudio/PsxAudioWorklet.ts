@@ -33,7 +33,7 @@ interface ResetMessage {
 // Complete control-side input accepted by the processor.
 type WorkletInputMessage = ConfigureMessage | PushMessage | ResetMessage;
 
-// INTERFACE :: {left:float32Array, right:float32Array, readIndex:NUMBER, size:NUMBER, phase:NUMBER, consumptionRatio:NUMBER, targetConsumptionRatio:NUMBER, started:BOOLEAN, mode:workletBufferMode, adaptiveRecovery:BOOLEAN, underruns:NUMBER, droppedFrames:NUMBER}
+// INTERFACE :: {left:float32Array, right:float32Array, readIndex:NUMBER, size:NUMBER, phase:NUMBER, consumptionRatio:NUMBER, targetConsumptionRatio:NUMBER, started:BOOLEAN, mode:workletBufferMode, adaptiveRecovery:BOOLEAN, underruns:NUMBER, droppedFrames:NUMBER, hasPlayed:BOOLEAN, starvationFrames:NUMBER, currentStarvationFrames:NUMBER, longestStarvationFrames:NUMBER}
 // Mutable bounded stereo ring and diagnostics owned by the rendering thread.
 interface WorkletState {
     readonly left: Float32Array;          // Fixed-capacity left-channel ring
@@ -48,6 +48,10 @@ interface WorkletState {
     adaptiveRecovery: boolean;            // Whether Adaptive has observed starvation
     underruns: number;                    // Cumulative contiguous starvation episodes
     droppedFrames: number;                // Cumulative frames discarded by the hard cap
+    hasPlayed: boolean;                   // Whether real PCM has reached output since the last reset
+    starvationFrames: number;             // Cumulative post-start silent output frames
+    currentStarvationFrames: number;      // Silent frames in the active starvation episode
+    longestStarvationFrames: number;      // Longest contiguous post-start starvation episode
 }
 
 // INTERFACE :: {port:messagePort}
@@ -134,6 +138,10 @@ const createWorkletState = (): WorkletState => {
         adaptiveRecovery: false,
         underruns: 0,
         droppedFrames: 0,
+        hasPlayed: false,
+        starvationFrames: 0,
+        currentStarvationFrames: 0,
+        longestStarvationFrames: 0,
     };
 };
 
@@ -158,6 +166,8 @@ const handleWorkletMessage = (state: WorkletState, port: MessagePort, message: u
         state.phase = 0;
         state.consumptionRatio = 1;
         state.targetConsumptionRatio = 1;
+        state.hasPlayed = false;
+        state.currentStarvationFrames = 0;
         postStatistics(state, port);
         return;
     }
@@ -216,6 +226,8 @@ const clearQueue = (state: WorkletState): void => {
     state.size = 0;
     state.phase = 0;
     state.started = false;
+    state.hasPlayed = false;
+    state.currentStarvationFrames = 0;
 };
 
 // HELPER :: workletState, messagePort, float32Array, float32Array -> VOID
@@ -229,7 +241,11 @@ const renderQuantum = (
     left.fill(0);
     right.fill(0);
     if (!state.started && state.size >= targetFrames(state)) state.started = true;
-    if (!state.started) return;
+    if (!state.started) {
+        if (state.hasPlayed) recordStarvationFrames(state, left.length);
+        return;
+    }
+    if (state.currentStarvationFrames > 0) state.currentStarvationFrames = 0;
     let rendered = 0;
     for (; rendered < left.length && state.size > 0; rendered++) {
         const nextIndex = state.size > 1
@@ -248,12 +264,26 @@ const renderQuantum = (
             state.size--;
         }
     }
+    if (rendered > 0) state.hasPlayed = true;
     if (rendered === left.length) return;
+    recordStarvationFrames(state, left.length - rendered);
     state.underruns++;
     if (state.mode === "adaptive") state.adaptiveRecovery = true;
     state.started = false;
     state.phase = 0;
     postStatistics(state, port);
+};
+
+// HELPER :: workletState, NUMBER -> VOID
+// Adds post-start silent output to cumulative and contiguous starvation counters.
+const recordStarvationFrames = (state: WorkletState, frames: number): void => {
+    if (frames <= 0) return;
+    state.starvationFrames += frames;
+    state.currentStarvationFrames += frames;
+    state.longestStarvationFrames = Math.max(
+        state.longestStarvationFrames,
+        state.currentStarvationFrames,
+    );
 };
 
 // HELPER :: workletState, messagePort -> VOID
@@ -264,6 +294,8 @@ const postStatistics = (state: WorkletState, port: MessagePort): void => {
         queuedFrames: state.size,
         underruns: state.underruns,
         droppedFrames: state.droppedFrames,
+        starvationFrames: state.starvationFrames,
+        longestStarvationFrames: state.longestStarvationFrames,
         adaptiveRecovery: state.adaptiveRecovery,
         consumptionRatio: state.consumptionRatio,
     });

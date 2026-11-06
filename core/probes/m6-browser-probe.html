@@ -76,7 +76,10 @@ try {
         samples,
         frames: 735,
     }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitUntil(() => audio.underrunCount > 0, 1000);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    soundListeners.forEach((listener) => listener({ samples, frames: 735 }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
     const context = canvas.getContext("2d");
     const pixel = [...context.getImageData(0, 0, 1, 1).data];
     const result = {
@@ -87,7 +90,9 @@ try {
             && pixel[0] === 19 && pixel[3] === 255
             && audio.isUnlocked && audio.deviceSampleRate > 0
             && audio.backend === "worklet"
-            && audio.queuedMs <= PsxAudio.MAX_QUEUE_MS,
+            && audio.queuedMs <= PsxAudio.MAX_QUEUE_MS
+            && audio.starvationMs > 0
+            && audio.longestStarvationMs > 0,
         backing: [canvas.width, canvas.height],
         layout: [display.layout.width, display.layout.height],
         pixel,
@@ -98,6 +103,8 @@ try {
             queuedMs: audio.queuedMs,
             droppedSamples: audio.droppedSamples,
             underruns: audio.underrunCount,
+            starvationMs: audio.starvationMs,
+            longestStarvationMs: audio.longestStarvationMs,
         },
     };
     audio.destroy();

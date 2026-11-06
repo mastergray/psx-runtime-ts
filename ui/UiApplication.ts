@@ -1,6 +1,7 @@
 // Dependencies:
 import {
     isPsxAudioBufferMode,
+    isPsxDiagnosticVariant,
     LibretroPsxAdapter,
     PsxAudio,
     PsxConsole,
@@ -10,6 +11,8 @@ import {
 } from "../src/index.js";
 import ControlSettings from "./ControlSettings.js";              // Owns persistent keyboard and gamepad mappings
 import { summarizeMemoryCard } from "./MemoryCardDirectory.js"; // Interprets card directory entries for read-only display
+import MobileAudioDiagnostics from "./MobileAudioDiagnostics.js"; // Records and exports development-only D0 measurements
+import type { MobileAudioDiagnosticSnapshot } from "./MobileAudioDiagnostics.js"; // Background audio/worker observation shape
 import PresentationMode from "./PresentationMode/PresentationMode.js"; // Owns the controller-first television skin
 import TouchController from "./TouchController.js";            // Routes the production touch surface into session input
 import {
@@ -25,6 +28,7 @@ import type {
     ControllerPort,     // Physical port used by automatic browser-gamepad binding
     PsxAudioBufferMode, // Persisted latency-versus-resilience buffering strategy
     PsxFirmwareRecord,  // Stored firmware metadata rendered by System
+    PsxDiagnosticVariant, // Development-only runtime measurement variant
     PsxMachineInfo,     // Active core and content identity used for state compatibility
     PsxControllerType,  // Per-game emulated controller device selected for one port
     PsxPlayerStatus,    // Lifecycle status rendered by the stage
@@ -56,6 +60,7 @@ const TOUCH_CONTROLLER_STORAGE_KEY = "psx-runtime:ui:on-screen-controller";
 const CONTROLLER_TYPE_STORAGE_KEY = "psx-runtime:ui:controller-types";
 const QUICK_STATE_STORAGE_KEY = "psx-runtime:ui:quick-states";
 const AUDIO_BUFFER_MODE_STORAGE_KEY = "psx-runtime:ui:audio-buffer-mode";
+const DIAGNOSTIC_VARIANT_STORAGE_KEY = "psx-runtime:ui:diagnostic-variant";
 const QUICK_STATE_NAMES = Object.freeze(["Quick State 1", "Quick State 2"] as const);
 
 /**
@@ -75,6 +80,7 @@ export default class UiApplication {
     private readonly _controls: ControlSettings;                  // Persistent two-player physical input configuration
     private readonly _presentation: PresentationMode;             // Controller-first fullscreen television skin
     private readonly _touchController: TouchController;           // Player-one pointer controller rendered below or over the stage
+    private readonly _diagnostics = new MobileAudioDiagnostics(); // Background recorder retained across one session stop
     private readonly _firmware = new Map<PsxRegion, PsxFirmwareRecord>(); // Stored firmware records by region
     private _adapter: LibretroPsxAdapter | null = null;           // Loaded core metadata and worker factory
     private _runtime: PsxConsole | null = null;                   // Composed browser runtime
@@ -99,9 +105,11 @@ export default class UiApplication {
     private _memoryImportBusy = false;                            // Whether one card replacement is reading or persisting bytes
     private _touchControllerVisible = false;                      // Persisted preference controlling touch-surface presentation
     private _audioBufferMode: PsxAudioBufferMode;                 // Browser-wide audio output strategy preference
+    private _diagnosticVariant: PsxDiagnosticVariant;             // Development-only variant captured at session start
     private _audioQueueSnapshotMs = 0;                            // Queue depth captured before Audio pauses the active session
     private _audioProductionSnapshot: number | null = null;       // Core-audio throughput captured before modal-owned pause
     private _audioGapSnapshotMs = 0;                              // Longest delivery gap captured before modal-owned pause
+    private _diagnosticTimer: ReturnType<typeof globalThis.setInterval> | null = null; // Non-pausing background sample timer
 
     // CONSTRUCTOR :: uiApplicationConfig -> uiApplication
     // Retains validated composition dependencies; initialize() binds the document and loads persistent state.
@@ -123,6 +131,7 @@ export default class UiApplication {
         this._controllerTypePreferences = loadControllerTypePreferences(localStorage);
         this._quickStatePreferences = loadQuickStatePreferences(localStorage);
         this._audioBufferMode = loadAudioBufferMode(localStorage);
+        this._diagnosticVariant = loadDiagnosticVariant(localStorage);
         this._presentation = new PresentationMode({
             document: this._document,
             storage: localStorage,
@@ -152,7 +161,10 @@ export default class UiApplication {
         this._bindDocument();
         this._renderStage("loading");
         try {
-            this._adapter = await LibretroPsxAdapter.init({ buildUrl: this._buildUrl });
+            this._adapter = await LibretroPsxAdapter.init({
+                buildUrl: this._buildUrl,
+                diagnosticVariant: this._diagnosticVariant,
+            });
             this._createRuntime(this._adapter);
             await Promise.all([this._refreshFirmware(), this._refreshLibrary(), this._refreshMemoryCards()]);
             this._renderStage(this._hasSelectedFirmware() ? "ready" : "firmware-required");
@@ -167,6 +179,7 @@ export default class UiApplication {
     private _bindDocument(): void {
         element<HTMLInputElement>(this._document, "touch-controller-visible").checked = this._touchControllerVisible;
         element<HTMLSelectElement>(this._document, "audio-buffer-mode").value = this._audioBufferMode;
+        element<HTMLSelectElement>(this._document, "diagnostic-variant").value = this._diagnosticVariant;
         this._syncTouchController();
         for (const trigger of this._document.querySelectorAll<HTMLElement>("[data-open-dialog]")) {
             trigger.addEventListener("click", () => {
@@ -370,6 +383,22 @@ export default class UiApplication {
             if (audio !== null) audio.bufferMode = value;
             this._renderAudioBufferStatus();
         });
+        element<HTMLSelectElement>(this._document, "diagnostic-variant").addEventListener("change", (event) => {
+            const select = event.currentTarget as HTMLSelectElement;
+            const value = select.value;
+            if (!isPsxDiagnosticVariant(value)) return;
+            if (this._player?.status !== "idle") {
+                select.value = this._diagnosticVariant;
+                return;
+            }
+            this._diagnosticVariant = value;
+            persistDiagnosticVariant(browserStorage(this._document), value);
+            if (this._adapter !== null) this._adapter.diagnosticVariant = value;
+            this._renderAudioBufferStatus();
+        });
+        element<HTMLButtonElement>(this._document, "download-diagnostics").addEventListener("click", () => {
+            this._downloadDiagnostics();
+        });
 
         element<HTMLSelectElement>(this._document, "scaling-mode").addEventListener("change", () => {
             this._syncViewActions();
@@ -461,6 +490,15 @@ export default class UiApplication {
     // METHOD :: psxPlayerStatus -> VOID
     // Synchronizes stage presentation and session controls with one lifecycle transition.
     private _playerStatusChanged(status: PsxPlayerStatus): void {
+        if (status === "running") {
+            if (this._diagnostics.isActive) this._diagnostics.event("running", performance.now());
+            else this._startDiagnostics();
+        } else if (this._diagnostics.isActive) {
+            this._diagnostics.event(status, performance.now());
+            if (status === "stopping" || status === "failed" || status === "destroyed") {
+                this._finishDiagnostics(status);
+            }
+        }
         this._renderStage(status === "idle"
             ? (this._hasSelectedFirmware() ? "ready" : "firmware-required")
             : status);
@@ -494,7 +532,11 @@ export default class UiApplication {
         element<HTMLButtonElement>(this._document, "pause-session").textContent = state === "paused" ? "Resume" : "Pause";
         element<HTMLButtonElement>(this._document, "reset-session").disabled = state !== "running" && state !== "paused";
         element<HTMLButtonElement>(this._document, "mute-session").disabled = state !== "running" && state !== "paused";
-        element<HTMLButtonElement>(this._document, "volume-session").disabled = state !== "running" && state !== "paused";
+        element<HTMLButtonElement>(this._document, "volume-session").disabled = state === "loading";
+        const diagnosticsLocked = state !== "ready" && state !== "firmware-required" && state !== "idle";
+        element<HTMLSelectElement>(this._document, "diagnostic-variant").disabled = diagnosticsLocked;
+        element<HTMLButtonElement>(this._document, "download-diagnostics").disabled = diagnosticsLocked
+            || !this._diagnostics.hasCompleted;
         const systemStop = element<HTMLButtonElement>(this._document, "system-stop-session");
         systemStop.hidden = !sessionActive;
         systemStop.disabled = !sessionActive;
@@ -2031,8 +2073,13 @@ export default class UiApplication {
             `Audio: ${underruns} ${underruns === 1 ? "underrun" : "underruns"} · ${queued} ms queued · ${backend}${productionStatus}${recovery}`,
         );
         const performance = audio?.workerPerformance ?? null;
+        this._setText(
+            "diagnostic-variant-status",
+            `${this._diagnostics.isActive ? "Active" : "Selected"} variant: ${this._diagnosticVariant === "instrumented" ? "Instrumented Baseline" : "Baseline"}`
+                + (this._diagnostics.hasCompleted && !this._diagnostics.isActive ? " · completed report ready" : ""),
+        );
         if (performance === null) {
-            this._setText("audio-worker-status", "Worker timing: waiting for 120 frames.");
+            this._setText("audio-worker-status", "Worker timing: waiting for the first one-second window.");
             return;
         }
         const frameBudget = 1000 / (this._player?.session?.machine.framesPerSecond ?? 60);
@@ -2047,8 +2094,84 @@ export default class UiApplication {
                 + ` · video ${performance.videoAverageMs.toFixed(1)}`
                 + ` · audio ${performance.audioAverageMs.toFixed(1)}`
                 + ` · turnaround ${performance.turnaroundAverageMs.toFixed(1)} ms/batch`
-                + ` · max ${performance.workerMaximumMs.toFixed(1)} + ${performance.turnaroundMaximumMs.toFixed(1)} ms`,
+                + ` · max ${performance.workerMaximumMs.toFixed(1)} + ${performance.turnaroundMaximumMs.toFixed(1)} ms`
+                + ` · batch ${performance.batchAverageFrames.toFixed(1)}f/${performance.batchAverageMs.toFixed(1)} ms`
+                + ` · PCM hold ${performance.pcmHoldAverageMs.toFixed(1)} ms`
+                + ` · disc ${performance.discReadCalls} reads/${performance.discReadMilliseconds.toFixed(1)} ms`
+                + ` · seeks ${performance.discSeekCalls}`,
         );
+    }
+
+    // METHOD :: VOID -> VOID
+    // Starts non-pausing background sampling after the player has composed its running audio path.
+    private _startDiagnostics(): void {
+        const session = this._player?.session;
+        const audio = this._sessionAudio();
+        if (session === null || session === undefined || audio === null) return;
+        const navigatorMemory = navigator as Navigator & { readonly deviceMemory?: number };
+        const startedAtMs = performance.now();
+        this._diagnostics.start({
+            machine: session.machine,
+            variant: this._diagnosticVariant,
+            bufferMode: this._audioBufferMode,
+            startedAtMs,
+            href: globalThis.location.href,
+            userAgent: navigator.userAgent,
+            hardwareConcurrency: navigator.hardwareConcurrency,
+            ...(navigatorMemory.deviceMemory === undefined ? {} : { deviceMemory: navigatorMemory.deviceMemory }),
+        });
+        this._sampleDiagnostics();
+        if (this._diagnosticTimer !== null) globalThis.clearInterval(this._diagnosticTimer);
+        this._diagnosticTimer = globalThis.setInterval(() => this._sampleDiagnostics(), 250);
+    }
+
+    // METHOD :: VOID -> VOID
+    // Captures one low-cost queue/audio observation and any newly completed worker window.
+    private _sampleDiagnostics(): void {
+        const snapshot = this._diagnosticSnapshot();
+        if (snapshot !== null) this._diagnostics.observe(snapshot);
+    }
+
+    // METHOD :: STRING -> VOID
+    // Finalizes diagnostics before player teardown removes the active audio counters.
+    private _finishDiagnostics(reason: string): void {
+        if (this._diagnosticTimer !== null) {
+            globalThis.clearInterval(this._diagnosticTimer);
+            this._diagnosticTimer = null;
+        }
+        this._diagnostics.finish(this._diagnosticSnapshot(), reason);
+    }
+
+    // METHOD :: VOID -> mobileAudioDiagnosticSnapshot?
+    // Reads current concrete audio and worker metrics without changing session state.
+    private _diagnosticSnapshot(): MobileAudioDiagnosticSnapshot | null {
+        const audio = this._sessionAudio();
+        if (audio === null) return null;
+        return {
+            capturedAtMs: performance.now(),
+            performance: audio.workerPerformance,
+            backend: audio.backend,
+            deviceSampleRate: audio.deviceSampleRate,
+            queuedMs: audio.queuedMs,
+            underrunCount: audio.underrunCount,
+            starvationMs: audio.starvationMs,
+            longestStarvationMs: audio.longestStarvationMs,
+            droppedSamples: audio.droppedSamples,
+            productionRate: audio.productionRate,
+            maximumSoundGapMs: audio.maximumSoundGapMs,
+            transportSamples: audio.transportSamples,
+            productionToPostAverageMs: audio.productionToPostAverageMs,
+            postToReceiptAverageMs: audio.postToReceiptAverageMs,
+            transportAverageMs: audio.transportAverageMs,
+            transportMaximumMs: audio.transportMaximumMs,
+        };
+    }
+
+    // METHOD :: VOID -> VOID
+    // Downloads completed JSON and matching compact CSV without touching the stopped runtime.
+    private _downloadDiagnostics(): void {
+        const files = this._diagnostics.files();
+        for (const file of files) downloadText(this._document, file.filename, file.mimeType, file.text);
     }
 
     // METHOD :: uiStageState -> STRING
@@ -2155,6 +2278,34 @@ const loadAudioBufferMode = (storage: Storage | null): PsxAudioBufferMode => {
 // Persists one audio scheduling preference without making unavailable storage fatal.
 const persistAudioBufferMode = (storage: Storage | null, value: PsxAudioBufferMode): void => {
     try { storage?.setItem(AUDIO_BUFFER_MODE_STORAGE_KEY, value); } catch { /* Preferences are best effort. */ }
+};
+
+// HELPER :: STORAGE? -> psxDiagnosticVariant
+// Loads the development-only execution variant and safely defaults to the uninstrumented baseline.
+const loadDiagnosticVariant = (storage: Storage | null): PsxDiagnosticVariant => {
+    try {
+        const value = storage?.getItem(DIAGNOSTIC_VARIANT_STORAGE_KEY);
+        return isPsxDiagnosticVariant(value) ? value : "baseline";
+    } catch {
+        return "baseline";
+    }
+};
+
+// HELPER :: STORAGE?, psxDiagnosticVariant -> VOID
+// Persists the variant selected for future sessions without changing an active worker.
+const persistDiagnosticVariant = (storage: Storage | null, value: PsxDiagnosticVariant): void => {
+    try { storage?.setItem(DIAGNOSTIC_VARIANT_STORAGE_KEY, value); } catch { /* Preferences are best effort. */ }
+};
+
+// HELPER :: DOCUMENT, STRING, STRING, STRING -> VOID
+// Starts one local text download and releases its temporary object URL on the next task.
+const downloadText = (document: Document, filename: string, mimeType: string, value: string): void => {
+    const url = URL.createObjectURL(new Blob([value], { type: mimeType }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    globalThis.setTimeout(() => URL.revokeObjectURL(url), 0);
 };
 
 // HELPER :: DOCUMENT -> STORAGE?

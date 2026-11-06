@@ -8,7 +8,7 @@ import TransferBufferPool from "../../src/worker/TransferBufferPool.ts";
 import WorkerEndpoint from "../../src/worker/WorkerEndpoint.ts";
 import WorkerRuntime from "../../src/worker/WorkerRuntime.ts";
 import { convertAudioSamples, convertVideoFrame } from "../../src/worker/av.ts";
-import { LIBRETRO_BUTTON_IDS } from "../../src/worker/CoreBridge.ts";
+import EmscriptenPsxCore, { LIBRETRO_BUTTON_IDS } from "../../src/worker/CoreBridge.ts";
 
 import type {
     WorkerCommand,
@@ -17,6 +17,7 @@ import type {
 } from "../../src/LibretroPsxAdapter/protocol.ts";
 import type { PsxBuildInfo, PsxMachineInfo } from "../../src/index.ts";
 import type { CoreRunOptions, CoreRunOutput, WorkerCore } from "../../src/worker/WorkerRuntime.ts";
+import type { EmscriptenPsxModule } from "../../src/worker/CoreBridge.ts";
 import type { TestFile } from "../run.ts";
 
 const buildId = "a".repeat(64);
@@ -74,6 +75,7 @@ const startPayload: WorkerStartPayload = {
     initialDiscIndex: 0,
     controllers: { 1: "dualshock", 2: "digital" },
     options: {},
+    diagnosticVariant: "baseline",
 };
 
 const command = <T extends WorkerCommand>(value: T): T => value;
@@ -175,6 +177,81 @@ const frameOf = (outputs: WorkerOutput[]): Extract<WorkerOutput, { type: "frame"
     return frame;
 };
 
+const createBridgeModule = (): EmscriptenPsxModule => {
+    const memory = new ArrayBuffer(1024 * 1024);
+    const heapU8 = new Uint8Array(memory);
+    const heap16 = new Int16Array(memory);
+    let allocation = 1;
+    const workerFs = {
+        stream_ops: {
+            read: (_stream: unknown, buffer: Int8Array | Uint8Array, offset: number, length: number, _position: number): number => {
+                const returned = Math.min(3, length);
+                for (let index = 0; index < returned; index++) buffer[offset + index] = index + 1;
+                return returned;
+            },
+            llseek: (_stream: unknown, offset: number, _whence: number): number => offset,
+        },
+    };
+    return {
+        FS: {
+            mkdir: () => undefined,
+            mount: () => undefined,
+            writeFile: () => undefined,
+        },
+        WORKERFS: workerFs,
+        HEAPU8: heapU8,
+        HEAP16: heap16,
+        _malloc: (bytes) => {
+            const pointer = allocation;
+            allocation += bytes;
+            return pointer;
+        },
+        _free: () => undefined,
+        stringToUTF8: () => undefined,
+        lengthBytesUTF8: (value) => new TextEncoder().encode(value).byteLength,
+        _psx_start: () => 1,
+        _psx_run_frame: () => {
+            workerFs.stream_ops.llseek({}, 2352, 0);
+            workerFs.stream_ops.read({}, new Uint8Array(4), 0, 4, 2352);
+            return 1;
+        },
+        _psx_set_button: () => undefined,
+        _psx_set_axis: () => undefined,
+        _psx_reset: () => 1,
+        _psx_serialize_size: () => 1,
+        _psx_serialize: () => 1,
+        _psx_unserialize: () => 1,
+        _psx_memory_card_size: () => 128 * 1024,
+        _psx_read_memory_card: () => 1,
+        _psx_write_memory_card: () => 1,
+        _psx_set_disc: () => 1,
+        _psx_disc_count: () => 1,
+        _psx_stop: () => undefined,
+        _psx_video_width: () => 2,
+        _psx_video_height: () => 1,
+        _psx_base_width: () => 2,
+        _psx_base_height: () => 1,
+        _psx_video_pitch: () => 4,
+        _psx_video_format: () => 2,
+        _psx_video_data: () => 0,
+        _psx_video_size: () => 0,
+        _psx_video_duplicate: () => 1,
+        _psx_audio_data: () => 0,
+        _psx_audio_frames: () => 0,
+        _psx_frames_per_second: () => 60,
+        _psx_sample_rate: () => 44_100,
+        _psx_is_pal: () => 0,
+        _psx_aspect_ratio: () => 2,
+        _psx_max_width: () => 4,
+        _psx_max_height: () => 2,
+        _psx_disc_index: () => 0,
+        _psx_tray_open: () => 0,
+        _psx_rumble: () => 0,
+        _psx_log_size: () => 0,
+        _psx_log_data: () => 0,
+    };
+};
+
 const testFile: TestFile = {
     label: "M2 Worker foundation",
     cases: [
@@ -187,6 +264,53 @@ const testFile: TestFile = {
                     circle: LIBRETRO_BUTTON_IDS.circle,
                     triangle: LIBRETRO_BUTTON_IDS.triangle,
                 }), P.equals<unknown>({ cross: 0, square: 1, circle: 8, triangle: 9 }))
+                .start(undefined),
+        },
+        {
+            label: "the instrumented bridge counts mounted Blob reads and seeks without changing baseline execution",
+            run: () => CTGTest.init("WORKERFS diagnostics")
+                .stage("run baseline and instrumented frames", async () => {
+                    const run = async (diagnosticVariant: "baseline" | "instrumented") => {
+                        let clock = 0;
+                        const module = createBridgeModule();
+                        const core = new EmscriptenPsxCore(
+                            async () => async () => module,
+                            () => clock++,
+                        );
+                        await core.start({ ...startPayload, diagnosticVariant });
+                        const frame = core.runFrame({ video: false, audio: false, frameskipInterval: 0 });
+                        await core.stop();
+                        return frame.timing;
+                    };
+                    return {
+                        baseline: await run("baseline"),
+                        instrumented: await run("instrumented"),
+                    };
+                })
+                .assert("I/O counters", ({ subject }) => ({
+                    baseline: {
+                        reads: subject.baseline?.discReadCalls,
+                        seeks: subject.baseline?.discSeekCalls,
+                    },
+                    instrumented: {
+                        reads: subject.instrumented?.discReadCalls,
+                        requested: subject.instrumented?.discReadRequestedBytes,
+                        returned: subject.instrumented?.discReadReturnedBytes,
+                        readMs: subject.instrumented?.discReadMilliseconds,
+                        seeks: subject.instrumented?.discSeekCalls,
+                        seekMs: subject.instrumented?.discSeekMilliseconds,
+                    },
+                }), P.equals<unknown>({
+                    baseline: { reads: 0, seeks: 0 },
+                    instrumented: {
+                        reads: 1,
+                        requested: 4,
+                        returned: 3,
+                        readMs: 1,
+                        seeks: 1,
+                        seekMs: 1,
+                    },
+                }))
                 .start(undefined),
         },
         {
@@ -221,6 +345,10 @@ const testFile: TestFile = {
                         generation: 1,
                         frames: 120,
                         batches: 30,
+                        batchAverageFrames: 4,
+                        batchMaximumFrames: 4,
+                        batchAverageMs: 60,
+                        batchMaximumMs: 70,
                         coreAverageMs: 12,
                         extractionAverageMs: 0.2,
                         videoAverageMs: 1.5,
@@ -230,6 +358,15 @@ const testFile: TestFile = {
                         turnaroundSamples: 29,
                         turnaroundAverageMs: 1,
                         turnaroundMaximumMs: 2,
+                        pcmHoldSamples: 120,
+                        pcmHoldAverageMs: 20,
+                        pcmHoldMaximumMs: 50,
+                        discReadCalls: 240,
+                        discReadRequestedBytes: 16_384,
+                        discReadReturnedBytes: 16_384,
+                        discReadMilliseconds: 30,
+                        discSeekCalls: 120,
+                        discSeekMilliseconds: 2,
                     },
                     { type: "frame", generation: 1, bufferId: 0, width: 2, height: 1, aspectRatio: 2, rgba: new ArrayBuffer(4) },
                 ].map(isWorkerOutput), P.equals<boolean[]>([
@@ -327,9 +464,9 @@ const testFile: TestFile = {
                 .start(undefined),
         },
         {
-            label: "worker stage timing aggregates a low-frequency deterministic performance window",
+            label: "worker stage timing aggregates a one-second deterministic performance window",
             run: () => CTGTest.init("worker performance")
-                .stage("measure 120 synthetic frames", async () => {
+                .stage("measure 60 synthetic frames", async () => {
                     let clock = 0;
                     const runtime = new WorkerRuntime(new TimingCore(), 3, () => clock++);
                     await runtime.dispatch(start);
@@ -337,7 +474,7 @@ const testFile: TestFile = {
                         type: "tick", requestId: 2, generation: 1, timestamp: 0,
                     }));
                     let performance: Extract<WorkerOutput, { type: "performance" }> | undefined;
-                    for (let batch = 1; batch <= 30; batch++) {
+                    for (let batch = 1; batch <= 15; batch++) {
                         const outputs = await runtime.dispatch(command({
                             type: "tick",
                             requestId: batch + 2,
@@ -353,17 +490,30 @@ const testFile: TestFile = {
                 .assert("stage averages", ({ subject }) => subject, P.equals<unknown>({
                     type: "performance",
                     generation: 1,
-                    frames: 120,
-                    batches: 30,
+                    frames: 60,
+                    batches: 15,
+                    batchAverageFrames: 4,
+                    batchMaximumFrames: 4,
+                    batchAverageMs: 17,
+                    batchMaximumMs: 17,
                     coreAverageMs: 2,
                     extractionAverageMs: 1,
                     videoAverageMs: 0,
                     audioAverageMs: 0,
                     workerAverageMs: 3,
                     workerMaximumMs: 3,
-                    turnaroundSamples: 29,
+                    turnaroundSamples: 14,
                     turnaroundAverageMs: 1,
                     turnaroundMaximumMs: 1,
+                    pcmHoldSamples: 0,
+                    pcmHoldAverageMs: 0,
+                    pcmHoldMaximumMs: 0,
+                    discReadCalls: 0,
+                    discReadRequestedBytes: 0,
+                    discReadReturnedBytes: 0,
+                    discReadMilliseconds: 0,
+                    discSeekCalls: 0,
+                    discSeekMilliseconds: 0,
                 }))
                 .start(undefined),
         },

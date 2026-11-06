@@ -31,6 +31,40 @@ interface CoreFileSystem {
     writeFile(path: string, bytes: Uint8Array): unknown;    // Writes one copied byte file
 }
 
+// TYPE :: UNKNOWN, int8Array|uint8Array, NUMBER, NUMBER, NUMBER -> NUMBER
+// WORKERFS read operation invoked by Emscripten for a mounted disc Blob.
+type WorkerFsRead = (
+    stream: unknown,
+    buffer: Int8Array | Uint8Array,
+    offset: number,
+    length: number,
+    position: number,
+) => number;
+
+// TYPE :: UNKNOWN, NUMBER, NUMBER -> NUMBER
+// WORKERFS seek operation invoked by Emscripten for a mounted disc Blob.
+type WorkerFsSeek = (stream: unknown, offset: number, whence: number) => number;
+
+// INTERFACE :: {stream_ops:{read:workerFsRead, llseek:workerFsSeek}}
+// Mutable generated WORKERFS surface wrapped only by the instrumented variant.
+interface WorkerFsLike {
+    readonly stream_ops: {
+        read: WorkerFsRead;      // Synchronous Blob read and copy operation
+        llseek: WorkerFsSeek;    // Logical stream-position operation
+    };
+}
+
+// INTERFACE :: {readCalls:NUMBER, readRequestedBytes:NUMBER, readReturnedBytes:NUMBER, readMilliseconds:NUMBER, seekCalls:NUMBER, seekMilliseconds:NUMBER}
+// Accumulates synchronous disc operations across the active worker session.
+interface DiscIoTotals {
+    readCalls: number;             // Underlying WORKERFS read operations
+    readRequestedBytes: number;    // Bytes requested from mounted Blobs
+    readReturnedBytes: number;     // Bytes actually returned to Emscripten
+    readMilliseconds: number;      // Time inside WORKERFS reads
+    seekCalls: number;             // WORKERFS logical seek operations
+    seekMilliseconds: number;      // Time inside WORKERFS seeks
+}
+
 // TYPE :: Generated Emscripten heap, filesystem, and PSX C ABI
 // Runtime module boundary validated before any core operation.
 export interface EmscriptenPsxModule {
@@ -132,6 +166,7 @@ export default class EmscriptenPsxCore implements WorkerCore {
     private _payload: WorkerStartPayload | null = null;             // Startup input retained for bridge lifetime
     private _stopped = false;                                       // Whether module ownership has ended
     private _rumble = [[0, 0], [0, 0]];                             // Previous native strong and weak motor values by port
+    private readonly _discIo = createDiscIoTotals();                // Instrumented WORKERFS counters or zero-valued baseline
 
     // CONSTRUCTOR :: coreModuleLoader, (VOID -> NUMBER)? -> emscriptenPsxCore
     // Retains the generated-module loader for deferred worker startup.
@@ -159,6 +194,7 @@ export default class EmscriptenPsxCore implements WorkerCore {
             throw moduleFailure("The Emscripten PlayStation module could not be instantiated.", error instanceof Error ? error.message : null);
         }
         if (!isModule(module)) throw moduleFailure("The Emscripten module exposes an invalid core surface.");
+        if (payload.diagnosticVariant === "instrumented") instrumentWorkerFs(module.WORKERFS, this._discIo, this._clock);
         this._module = module;
         this._payload = payload;
         try {
@@ -230,6 +266,7 @@ export default class EmscriptenPsxCore implements WorkerCore {
     // Executes one frame and copies only requested AV payloads plus changed rumble output.
     runFrame(options: CoreRunOptions): CoreRunOutput {
         const module = this._liveModule();
+        const discIoBefore = copyDiscIoTotals(this._discIo);
         const startedAt = this._clock();
         if (module._psx_run_frame(
             options.video ? 1 : 0,
@@ -273,6 +310,7 @@ export default class EmscriptenPsxCore implements WorkerCore {
             }
         }
         const extractedAt = this._clock();
+        const discIo = subtractDiscIoTotals(this._discIo, discIoBefore);
         return {
             ...(video === undefined ? {} : { video }),
             ...(audio === undefined ? {} : { audio }),
@@ -280,6 +318,12 @@ export default class EmscriptenPsxCore implements WorkerCore {
             timing: {
                 coreMilliseconds: Math.max(0, executedAt - startedAt),
                 extractionMilliseconds: Math.max(0, extractedAt - executedAt),
+                discReadCalls: discIo.readCalls,
+                discReadRequestedBytes: discIo.readRequestedBytes,
+                discReadReturnedBytes: discIo.readReturnedBytes,
+                discReadMilliseconds: discIo.readMilliseconds,
+                discSeekCalls: discIo.seekCalls,
+                discSeekMilliseconds: discIo.seekMilliseconds,
             },
         };
     }
@@ -473,6 +517,81 @@ const moduleFailure = (message: string, data: unknown = null): PsxRuntimeError =
 // HELPER :: VOID -> NUMBER
 // Reads the realm's monotonic high-resolution clock for worker-stage timing.
 const monotonicClock = (): number => performance.now();
+
+// HELPER :: VOID -> discIoTotals
+// Creates zero-valued aggregate WORKERFS counters.
+const createDiscIoTotals = (): DiscIoTotals => ({
+    readCalls: 0,
+    readRequestedBytes: 0,
+    readReturnedBytes: 0,
+    readMilliseconds: 0,
+    seekCalls: 0,
+    seekMilliseconds: 0,
+});
+
+// HELPER :: discIoTotals -> discIoTotals
+// Copies aggregate WORKERFS counters at a frame boundary.
+const copyDiscIoTotals = (totals: DiscIoTotals): DiscIoTotals => ({ ...totals });
+
+// HELPER :: discIoTotals, discIoTotals -> discIoTotals
+// Calculates the non-negative WORKERFS activity performed during one frame.
+const subtractDiscIoTotals = (after: DiscIoTotals, before: DiscIoTotals): DiscIoTotals => ({
+    readCalls: Math.max(0, after.readCalls - before.readCalls),
+    readRequestedBytes: Math.max(0, after.readRequestedBytes - before.readRequestedBytes),
+    readReturnedBytes: Math.max(0, after.readReturnedBytes - before.readReturnedBytes),
+    readMilliseconds: Math.max(0, after.readMilliseconds - before.readMilliseconds),
+    seekCalls: Math.max(0, after.seekCalls - before.seekCalls),
+    seekMilliseconds: Math.max(0, after.seekMilliseconds - before.seekMilliseconds),
+});
+
+// HELPER :: UNKNOWN, discIoTotals, (VOID -> NUMBER) -> VOID
+// Wraps the repository-consumed WORKERFS boundary with bounded aggregate timing and byte counters.
+const instrumentWorkerFs = (value: unknown, totals: DiscIoTotals, clock: () => number): void => {
+    if (!isWorkerFs(value)) throw moduleFailure("The Emscripten module exposes an invalid WORKERFS surface.");
+    const originalRead = value.stream_ops.read;
+    const originalSeek = value.stream_ops.llseek;
+    value.stream_ops.read = function instrumentedRead(
+        stream: unknown,
+        buffer: Int8Array | Uint8Array,
+        offset: number,
+        length: number,
+        position: number,
+    ): number {
+        const startedAt = clock();
+        totals.readCalls++;
+        totals.readRequestedBytes += Math.max(0, length);
+        try {
+            const returned = Reflect.apply(originalRead, this, [stream, buffer, offset, length, position]) as number;
+            totals.readReturnedBytes += Math.max(0, returned);
+            return returned;
+        } finally {
+            totals.readMilliseconds += Math.max(0, clock() - startedAt);
+        }
+    };
+    value.stream_ops.llseek = function instrumentedSeek(
+        stream: unknown,
+        offset: number,
+        whence: number,
+    ): number {
+        const startedAt = clock();
+        totals.seekCalls++;
+        try {
+            return Reflect.apply(originalSeek, this, [stream, offset, whence]) as number;
+        } finally {
+            totals.seekMilliseconds += Math.max(0, clock() - startedAt);
+        }
+    };
+};
+
+// HELPER :: UNKNOWN -> BOOLEAN
+// Narrows a generated WORKERFS object to the operations wrapped by D0 diagnostics.
+const isWorkerFs = (value: unknown): value is WorkerFsLike => {
+    if (typeof value !== "object" || value === null || !("stream_ops" in value)) return false;
+    const operations = (value as { readonly stream_ops?: unknown }).stream_ops;
+    return typeof operations === "object" && operations !== null
+        && "read" in operations && typeof operations.read === "function"
+        && "llseek" in operations && typeof operations.llseek === "function";
+};
 
 // HELPER :: UNKNOWN -> BOOLEAN
 // Narrows an instantiated value to the required Emscripten module surface.

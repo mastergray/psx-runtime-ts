@@ -436,10 +436,22 @@ export default class WorkerClient {
                 this._post({ type: "return-video-buffer", bufferId: output.bufferId, buffer: output.rgba }, [output.rgba]);
                 break;
             }
-            case "sound": this._emit("sound", {
-                samples: new Float32Array(output.samples),
-                frames: output.frames,
-            }); break;
+            case "sound": {
+                const receivedAtMs = output.postedAtMs === undefined ? null : monotonicEpochClock();
+                this._emit("sound", {
+                    samples: new Float32Array(output.samples),
+                    frames: output.frames,
+                    ...(output.producedAtMs === undefined || output.postedAtMs === undefined
+                        || receivedAtMs === null || !Number.isFinite(receivedAtMs)
+                        ? {}
+                        : { transport: {
+                            productionToPostMs: Math.max(0, output.postedAtMs - output.producedAtMs),
+                            postToReceiptMs: Math.max(0, receivedAtMs - output.postedAtMs),
+                            productionToReceiptMs: Math.max(0, receivedAtMs - output.producedAtMs),
+                        } }),
+                });
+                break;
+            }
             case "rumble": this._emit("rumble", {
                 port: output.port,
                 strong: output.strong,
@@ -451,6 +463,10 @@ export default class WorkerClient {
             case "performance": this._emit("performance", {
                 frames: output.frames,
                 batches: output.batches,
+                batchAverageFrames: output.batchAverageFrames,
+                batchMaximumFrames: output.batchMaximumFrames,
+                batchAverageMs: output.batchAverageMs,
+                batchMaximumMs: output.batchMaximumMs,
                 coreAverageMs: output.coreAverageMs,
                 extractionAverageMs: output.extractionAverageMs,
                 videoAverageMs: output.videoAverageMs,
@@ -460,6 +476,15 @@ export default class WorkerClient {
                 turnaroundSamples: output.turnaroundSamples,
                 turnaroundAverageMs: output.turnaroundAverageMs,
                 turnaroundMaximumMs: output.turnaroundMaximumMs,
+                pcmHoldSamples: output.pcmHoldSamples,
+                pcmHoldAverageMs: output.pcmHoldAverageMs,
+                pcmHoldMaximumMs: output.pcmHoldMaximumMs,
+                discReadCalls: output.discReadCalls,
+                discReadRequestedBytes: output.discReadRequestedBytes,
+                discReadReturnedBytes: output.discReadReturnedBytes,
+                discReadMilliseconds: output.discReadMilliseconds,
+                discSeekCalls: output.discSeekCalls,
+                discSeekMilliseconds: output.discSeekMilliseconds,
             }); break;
         }
     }
@@ -497,6 +522,10 @@ export default class WorkerClient {
  *  Helper Functions
  *
  */
+
+// HELPER :: VOID -> NUMBER
+// Reads a cross-realm-comparable monotonic epoch timestamp for instrumented PCM receipt.
+const monotonicEpochClock = (): number => performance.timeOrigin + performance.now();
 
 // HELPER :: UNKNOWN, STRING -> psxRuntimeError
 // Preserves structured runtime errors and normalizes arbitrary worker failures.

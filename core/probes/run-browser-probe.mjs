@@ -1169,8 +1169,12 @@ try {
             const dialog = document.querySelector("#volume-dialog");
             const range = document.querySelector("#volume-level");
             const bufferMode = document.querySelector("#audio-buffer-mode");
+            const diagnosticVariant = document.querySelector("#diagnostic-variant");
+            const downloadDiagnostics = document.querySelector("#download-diagnostics");
             if (!(trigger instanceof HTMLButtonElement) || !(dialog instanceof HTMLDialogElement)
-                || !(range instanceof HTMLInputElement) || !(bufferMode instanceof HTMLSelectElement)) {
+                || !(range instanceof HTMLInputElement) || !(bufferMode instanceof HTMLSelectElement)
+                || !(diagnosticVariant instanceof HTMLSelectElement)
+                || !(downloadDiagnostics instanceof HTMLButtonElement)) {
                 throw new Error("Missing Audio controls");
             }
             trigger.disabled = false;
@@ -1180,6 +1184,9 @@ try {
             range.dispatchEvent(new Event("input", { bubbles: true }));
             bufferMode.value = "stable";
             bufferMode.dispatchEvent(new Event("change", { bubbles: true }));
+            const initialDiagnosticVariant = diagnosticVariant.value;
+            diagnosticVariant.value = "instrumented";
+            diagnosticVariant.dispatchEvent(new Event("change", { bubbles: true }));
             const result = {
                 label: trigger.textContent,
                 controls: trigger.getAttribute("aria-controls"),
@@ -1192,6 +1199,12 @@ try {
                 bufferMode: bufferMode.value,
                 bufferOptions: [...bufferMode.options].map(({ value, textContent }) => [value, textContent]),
                 bufferStored: localStorage.getItem("psx-runtime:ui:audio-buffer-mode"),
+                initialDiagnosticVariant,
+                diagnosticVariant: diagnosticVariant.value,
+                diagnosticOptions: [...diagnosticVariant.options].map(({ value, textContent }) => [value, textContent]),
+                diagnosticStored: localStorage.getItem("psx-runtime:ui:diagnostic-variant"),
+                diagnosticStatus: document.querySelector("#diagnostic-variant-status")?.textContent,
+                downloadDisabled: downloadDiagnostics.disabled,
                 bufferStatus: document.querySelector("#audio-buffer-status")?.textContent,
                 workerStatus: document.querySelector("#audio-worker-status")?.textContent,
             };
@@ -1724,11 +1737,19 @@ try {
                 && volumeControl.label === "Audio" && volumeControl.controls === "volume-dialog"
                 && volumeControl.open && volumeControl.closed && volumeControl.value === "42"
                 && volumeControl.output === "42%" && volumeControl.ranges === 1
-                && volumeControl.extraControls === 1 && volumeControl.initialBufferMode === "adaptive"
+                && volumeControl.extraControls === 3 && volumeControl.initialBufferMode === "adaptive"
                 && volumeControl.bufferMode === "stable"
                 && volumeControl.bufferStored === "stable"
+                && volumeControl.initialDiagnosticVariant === "baseline"
+                && volumeControl.diagnosticVariant === "instrumented"
+                && volumeControl.diagnosticStored === "instrumented"
+                && volumeControl.diagnosticStatus === "Selected variant: Instrumented Baseline"
+                && volumeControl.downloadDisabled
+                && volumeControl.diagnosticOptions.length === 2
+                && volumeControl.diagnosticOptions.some(([value, label]) => value === "baseline" && label === "Baseline")
+                && volumeControl.diagnosticOptions.some(([value, label]) => value === "instrumented" && label === "Instrumented Baseline")
                 && volumeControl.bufferStatus === "Audio: 0 underruns · 0 ms queued · Output idle"
-                && volumeControl.workerStatus === "Worker timing: waiting for 120 frames."
+                && volumeControl.workerStatus === "Worker timing: waiting for the first one-second window."
                 && volumeControl.bufferOptions.length === 3
                 && volumeControl.bufferOptions.some(([value, label]) => value === "adaptive" && label === "Adaptive (Recommended)")
                 && volumeControl.bufferOptions.some(([value, label]) => value === "low-latency" && label === "Low Latency")

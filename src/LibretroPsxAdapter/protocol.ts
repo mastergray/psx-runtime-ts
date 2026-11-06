@@ -10,6 +10,7 @@ import {
     isPsxRegion,
 } from "../shared.types.js";
 import { isMountPlan } from "../worker/MountPlan.js";
+import { isPsxDiagnosticVariant } from "./types.js";
 
 import type {
     ControllerPort,
@@ -23,6 +24,7 @@ import type {
     PsxRegion,
 } from "../shared.types.js";
 import type { MountPlan } from "../worker/MountPlan.js";
+import type { PsxDiagnosticVariant } from "./types.js";
 
 interface WorkerEnvelope {
     readonly requestId: number;
@@ -41,6 +43,7 @@ export interface WorkerStartPayload {
     readonly initialDiscIndex: number;
     readonly controllers: Readonly<Record<ControllerPort, PsxControllerType>>;
     readonly options: Readonly<Record<string, string | number | boolean>>;
+    readonly diagnosticVariant: PsxDiagnosticVariant;
 }
 
 export type WorkerCommand =
@@ -93,7 +96,7 @@ export type WorkerEvent =
     | { readonly type: "pacing"; readonly generation: number; readonly frames: number }
     | { readonly type: "geometry"; readonly generation: number; readonly width: number; readonly height: number; readonly aspectRatio: number }
     | { readonly type: "frame"; readonly generation: number; readonly bufferId: number; readonly width: number; readonly height: number; readonly aspectRatio: number; readonly rgba: ArrayBuffer }
-    | { readonly type: "sound"; readonly generation: number; readonly samples: ArrayBuffer; readonly frames: number }
+    | { readonly type: "sound"; readonly generation: number; readonly samples: ArrayBuffer; readonly frames: number; readonly producedAtMs?: number; readonly postedAtMs?: number }
     | { readonly type: "rumble"; readonly generation: number; readonly port: ControllerPort; readonly strong: number; readonly weak: number }
     | { readonly type: "dropped-time"; readonly generation: number; readonly milliseconds: number; readonly videoFrames: number }
     | ({ readonly type: "performance"; readonly generation: number } & PsxPerformanceTiming)
@@ -168,7 +171,8 @@ export function isWorkerStartPayload(value: unknown): value is WorkerStartPayloa
         && typeof value.initialDiscIndex === "number"
         && Number.isSafeInteger(value.initialDiscIndex) && value.initialDiscIndex >= 0
         && value.initialDiscIndex < value.mountPlan.descriptors.filter(({ path }) => path.endsWith(".cue")).length
-        && isControllerRecord(value.controllers) && isOptions(value.options);
+        && isControllerRecord(value.controllers) && isOptions(value.options)
+        && isPsxDiagnosticVariant(value.diagnosticVariant);
 }
 
 export function isWorkerCommand(value: unknown): value is WorkerCommand {
@@ -232,7 +236,11 @@ export function isWorkerOutput(value: unknown): value is WorkerOutput {
             && isArrayBuffer(value.rgba)
             && value.rgba.byteLength === (value.width as number) * (value.height as number) * 4;
         case "sound": return isArrayBuffer(value.samples) && isNonNegativeInteger(value.frames)
-            && value.samples.byteLength === value.frames * 2 * Float32Array.BYTES_PER_ELEMENT;
+            && value.samples.byteLength === value.frames * 2 * Float32Array.BYTES_PER_ELEMENT
+            && ((value.producedAtMs === undefined && value.postedAtMs === undefined)
+                || (isFiniteNumber(value.producedAtMs) && value.producedAtMs >= 0
+                    && (value.postedAtMs === undefined
+                        || (isFiniteNumber(value.postedAtMs) && value.postedAtMs >= value.producedAtMs))));
         case "rumble": return isControllerPort(value.port)
             && isFiniteNumber(value.strong) && value.strong >= 0 && value.strong <= 1
             && isFiniteNumber(value.weak) && value.weak >= 0 && value.weak <= 1;

@@ -55,13 +55,15 @@ interface ScheduledChunk extends StereoChunk {
     readonly startTime: number;                   // Context timestamp at which playback begins
 }
 
-// INTERFACE :: {type:"stats", queuedFrames:NUMBER, underruns:NUMBER, droppedFrames:NUMBER, adaptiveRecovery:BOOLEAN, consumptionRatio:NUMBER}
+// INTERFACE :: {type:"stats", queuedFrames:NUMBER, underruns:NUMBER, droppedFrames:NUMBER, starvationFrames:NUMBER, longestStarvationFrames:NUMBER, adaptiveRecovery:BOOLEAN, consumptionRatio:NUMBER}
 // Rendering-thread queue statistics reported by the persistent processor.
 interface WorkletStatistics {
     readonly type: "stats";                  // Message discriminator
     readonly queuedFrames: number;           // Stereo frames waiting in the ring
     readonly underruns: number;              // Contiguous starvation episodes
     readonly droppedFrames: number;          // Frames discarded by latency capping
+    readonly starvationFrames: number;       // Cumulative post-start silent output frames
+    readonly longestStarvationFrames: number; // Longest contiguous post-start starvation episode
     readonly adaptiveRecovery: boolean;      // Whether Adaptive has entered stable recovery
     readonly consumptionRatio: number;       // Source frames consumed for each device output frame
 }
@@ -111,6 +113,8 @@ export default class PsxAudio {
     private _workletQueuedFrames = 0;                                    // Most recently reported rendering-thread queue depth
     private _workletDroppedSampleBase = 0;                               // Scheduled-path drops retained when the Worklet takes ownership
     private _workletUnderrunBase = 0;                                    // Scheduled-path underruns retained when the Worklet takes ownership
+    private _workletStarvationFrames = 0;                                // Post-start silent output frames reported by the Worklet
+    private _workletLongestStarvationFrames = 0;                         // Longest Worklet starvation episode
     private _pending: StereoChunk[] = [];                                // Deinterleaved frames awaiting scheduling
     private _pendingFrames = 0;                                          // Aggregate frame count in the pending queue
     private _scheduled: ScheduledChunk[] = [];                           // Buffers placed on the device timeline
@@ -126,6 +130,11 @@ export default class PsxAudio {
     private _hasScheduledAudio = false;                                  // Whether a prior non-reset buffer can expose a real underrun
     private _underrunCount = 0;                                          // Device-timeline exhaustions observed during this session
     private _productionSamples: AudioProductionSample[] = [];            // Recent core-audio deliveries used to measure sustained throughput
+    private _transportSamples = 0;                                       // Instrumented PCM payloads received on the main thread
+    private _productionToPostMilliseconds = 0;                           // Aggregate completed-PCM wait before endpoint post
+    private _postToReceiptMilliseconds = 0;                              // Aggregate endpoint-post to main-receipt delay
+    private _transportMilliseconds = 0;                                  // Aggregate completed-PCM to main-receipt delay
+    private _transportMaximumMs = 0;                                     // Longest completed-PCM to main-receipt delay
     private _destroyed = false;                                          // Whether audio ownership has ended
 
     // CONSTRUCTOR :: psxAudioConfig -> psxAudio
@@ -204,6 +213,58 @@ export default class PsxAudio {
     // GETTER :: VOID -> NUMBER
     // Returns cumulative device-timeline underruns for this audio session.
     get underrunCount(): number { return this._underrunCount; }
+
+    // GETTER :: VOID -> NUMBER?
+    // Reports cumulative post-start silent output duration when the Worklet backend can measure it.
+    get starvationMs(): number | null {
+        const rate = this._context?.sampleRate;
+        return this._backend === "worklet" && rate !== undefined
+            ? this._workletStarvationFrames / rate * 1000
+            : null;
+    }
+
+    // GETTER :: VOID -> NUMBER?
+    // Reports the longest contiguous post-start silent output duration when measurable.
+    get longestStarvationMs(): number | null {
+        const rate = this._context?.sampleRate;
+        return this._backend === "worklet" && rate !== undefined
+            ? this._workletLongestStarvationFrames / rate * 1000
+            : null;
+    }
+
+    // GETTER :: VOID -> NUMBER
+    // Reports how many instrumented PCM payloads contributed transport timing.
+    get transportSamples(): number { return this._transportSamples; }
+
+    // GETTER :: VOID -> NUMBER?
+    // Reports average completed-PCM wait before the Worker endpoint posted it.
+    get productionToPostAverageMs(): number | null {
+        return this._transportSamples === 0
+            ? null
+            : this._productionToPostMilliseconds / this._transportSamples;
+    }
+
+    // GETTER :: VOID -> NUMBER?
+    // Reports average endpoint-post to main-thread receipt delay.
+    get postToReceiptAverageMs(): number | null {
+        return this._transportSamples === 0
+            ? null
+            : this._postToReceiptMilliseconds / this._transportSamples;
+    }
+
+    // GETTER :: VOID -> NUMBER?
+    // Reports average completed-PCM to main-thread receipt delay.
+    get transportAverageMs(): number | null {
+        return this._transportSamples === 0
+            ? null
+            : this._transportMilliseconds / this._transportSamples;
+    }
+
+    // GETTER :: VOID -> NUMBER?
+    // Reports the longest completed-PCM to main-thread receipt delay.
+    get transportMaximumMs(): number | null {
+        return this._transportSamples === 0 ? null : this._transportMaximumMs;
+    }
 
     // GETTER :: VOID -> NUMBER?
     // Reports recent produced audio duration divided by elapsed wall time; one is real time.
@@ -421,6 +482,8 @@ export default class PsxAudio {
         this._workletQueuedFrames = message.queuedFrames;
         this._underrunCount = this._workletUnderrunBase + message.underruns;
         this._droppedSamples = this._workletDroppedSampleBase + message.droppedFrames * 2;
+        this._workletStarvationFrames = message.starvationFrames;
+        this._workletLongestStarvationFrames = message.longestStarvationFrames;
         this._adaptiveRecovery = this._bufferMode === "adaptive" && message.adaptiveRecovery;
     }
 
@@ -442,6 +505,16 @@ export default class PsxAudio {
         if (this._destroyed || !isPsxSoundEvent(sound) || sound.frames === 0) return;
         const now = this._nowMs();
         this._recordProduction(now, sound.frames);
+        if (sound.transport !== undefined) {
+            this._transportSamples++;
+            this._productionToPostMilliseconds += sound.transport.productionToPostMs;
+            this._postToReceiptMilliseconds += sound.transport.postToReceiptMs;
+            this._transportMilliseconds += sound.transport.productionToReceiptMs;
+            this._transportMaximumMs = Math.max(
+                this._transportMaximumMs,
+                sound.transport.productionToReceiptMs,
+            );
+        }
         if (this._lastSoundMs !== null && now - this._lastSoundMs > PsxAudio.TIMING_GAP_MS) {
             this._resetOutputQueue(true);
         }
@@ -740,6 +813,11 @@ const isWorkletStatistics = (value: unknown): value is WorkletStatistics => {
         && message.underruns >= 0
         && typeof message.droppedFrames === "number" && Number.isInteger(message.droppedFrames)
         && message.droppedFrames >= 0
+        && typeof message.starvationFrames === "number" && Number.isInteger(message.starvationFrames)
+        && message.starvationFrames >= 0
+        && typeof message.longestStarvationFrames === "number" && Number.isInteger(message.longestStarvationFrames)
+        && message.longestStarvationFrames >= 0
+        && message.longestStarvationFrames <= message.starvationFrames
         && typeof message.adaptiveRecovery === "boolean"
         && typeof message.consumptionRatio === "number" && message.consumptionRatio === 1;
 };

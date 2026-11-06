@@ -30,12 +30,14 @@ export default class WorkerEndpoint {
     /* Instance Fields */
     private readonly _runtime: WorkerRuntime;       // Runtime that validates and executes incoming commands
     private readonly _target: WorkerPostTarget;     // Worker-global destination for validated outputs
+    private readonly _clock: () => number;          // Monotonic post timestamp used only by instrumented PCM
 
-    // CONSTRUCTOR :: workerRuntime, workerPostTarget -> workerEndpoint
+    // CONSTRUCTOR :: workerRuntime, workerPostTarget, (VOID -> NUMBER)? -> workerEndpoint
     // Creates an endpoint around one runtime and one posting boundary.
-    constructor(runtime: WorkerRuntime, target: WorkerPostTarget) {
+    constructor(runtime: WorkerRuntime, target: WorkerPostTarget, clock: () => number = monotonicClock) {
         this._runtime = runtime;
         this._target = target;
+        this._clock = clock;
     }
 
     /**
@@ -51,7 +53,11 @@ export default class WorkerEndpoint {
             const outputs = await this._runtime.dispatch(value);
             for (const output of outputs) {
                 if (!isWorkerOutput(output)) throw new Error("Worker runtime produced an invalid message");
-                this._target.postMessage(output, transferablesFor(output));
+                const posted = output.type === "sound" && output.producedAtMs !== undefined
+                    ? { ...output, postedAtMs: Math.max(output.producedAtMs, this._clock()) }
+                    : output;
+                if (!isWorkerOutput(posted)) throw new Error("Worker endpoint produced an invalid message");
+                this._target.postMessage(posted, transferablesFor(posted));
             }
         } catch (caught) {
             const error = PsxRuntimeError.is(caught)
@@ -76,6 +82,10 @@ export default class WorkerEndpoint {
  *  Helper Functions
  *
  */
+
+// HELPER :: VOID -> NUMBER
+// Reads a cross-realm-comparable monotonic epoch timestamp immediately before an instrumented post.
+const monotonicClock = (): number => performance.timeOrigin + performance.now();
 
 // HELPER :: UNKNOWN -> NUMBER
 // Recovers a valid generation for errors raised before command validation.

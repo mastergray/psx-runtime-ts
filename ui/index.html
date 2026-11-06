@@ -341,6 +341,18 @@
             <p id="audio-buffer-status" class="audio-buffer-status">Audio: 0 underruns · 0 ms queued · Output idle</p>
             <p id="audio-worker-status" class="audio-buffer-status">Worker timing: waiting for 120 frames.</p>
           </section>
+          <section class="dialog-section diagnostic-control">
+            <label for="diagnostic-variant">Experiment Variant</label>
+            <select id="diagnostic-variant">
+              <option value="baseline">Baseline</option>
+              <option value="instrumented">Instrumented Baseline</option>
+            </select>
+            <small>Select before starting a session. This is independent of Audio Buffering and cannot change while a game is active.</small>
+            <p id="diagnostic-variant-status" class="audio-buffer-status">Active variant: Baseline</p>
+            <div class="diagnostic-actions">
+              <button id="download-diagnostics" type="button" disabled>Download Diagnostics</button>
+            </div>
+          </section>
         </div>
       </form>
     </dialog>

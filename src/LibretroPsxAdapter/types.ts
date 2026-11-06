@@ -50,7 +50,11 @@ export type WorkerFactory = (url: string) => PsxWorker;
 // Monotonic millisecond clock used when scheduler timestamps are invalid.
 export type PsxClock = () => number;
 
-// INTERFACE :: {buildUrl:STRING, build:psxBuildInfo, createWorker:workerFactory, scheduler:frameScheduler?, clock:psxClock?}
+// TYPE :: "baseline"|"instrumented"
+// Development-only execution variant selected before a session starts.
+export type PsxDiagnosticVariant = "baseline" | "instrumented";
+
+// INTERFACE :: {buildUrl:STRING, build:psxBuildInfo, createWorker:workerFactory, scheduler:frameScheduler?, clock:psxClock?, diagnosticVariant:psxDiagnosticVariant?}
 // Validated dependencies retained by a libretro adapter instance.
 export interface LibretroPsxAdapterConfig {
     readonly buildUrl: string;                 // Root used to resolve worker and module artifacts
@@ -58,9 +62,10 @@ export interface LibretroPsxAdapterConfig {
     readonly createWorker: WorkerFactory;      // Worker construction boundary
     readonly scheduler?: FrameScheduler;       // Optional deterministic pacing override
     readonly clock?: PsxClock;                 // Optional deterministic clock override
+    readonly diagnosticVariant?: PsxDiagnosticVariant; // Development-only measurement variant; defaults to baseline
 }
 
-// INTERFACE :: {buildUrl:STRING, fetch:fetchLike?, createWorker:workerFactory?, scheduler:frameScheduler?, clock:psxClock?}
+// INTERFACE :: {buildUrl:STRING, fetch:fetchLike?, createWorker:workerFactory?, scheduler:frameScheduler?, clock:psxClock?, diagnosticVariant:psxDiagnosticVariant?}
 // High-level factory input used before build metadata has been fetched.
 export interface LibretroPsxAdapterInitConfig {
     readonly buildUrl: string;                 // Root containing build.json and core artifacts
@@ -68,6 +73,7 @@ export interface LibretroPsxAdapterInitConfig {
     readonly createWorker?: WorkerFactory;     // Optional worker construction override
     readonly scheduler?: FrameScheduler;       // Optional pacing override
     readonly clock?: PsxClock;                 // Optional monotonic clock override
+    readonly diagnosticVariant?: PsxDiagnosticVariant; // Development-only measurement variant; defaults to baseline
 }
 
 /**
@@ -102,12 +108,19 @@ export function isWorkerFactory(value: unknown): value is WorkerFactory {
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN
+// True when value selects a supported development-only measurement variant.
+export function isPsxDiagnosticVariant(value: unknown): value is PsxDiagnosticVariant {
+    return value === "baseline" || value === "instrumented";
+}
+
+// PREDICATE :: UNKNOWN -> BOOLEAN
 // True when value supplies validated build metadata and runtime worker dependencies.
 export function isLibretroPsxAdapterConfig(value: unknown): value is LibretroPsxAdapterConfig {
     return isObject(value) && isNonEmptyString(value.buildUrl) && isPsxBuildInfo(value.build)
         && isWorkerFactory(value.createWorker)
         && (value.scheduler === undefined || isFrameScheduler(value.scheduler))
-        && (value.clock === undefined || typeof value.clock === "function");
+        && (value.clock === undefined || typeof value.clock === "function")
+        && (value.diagnosticVariant === undefined || isPsxDiagnosticVariant(value.diagnosticVariant));
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN
@@ -117,7 +130,8 @@ export function isLibretroPsxAdapterInitConfig(value: unknown): value is Libretr
         && (value.fetch === undefined || typeof value.fetch === "function")
         && (value.createWorker === undefined || isWorkerFactory(value.createWorker))
         && (value.scheduler === undefined || isFrameScheduler(value.scheduler))
-        && (value.clock === undefined || typeof value.clock === "function");
+        && (value.clock === undefined || typeof value.clock === "function")
+        && (value.diagnosticVariant === undefined || isPsxDiagnosticVariant(value.diagnosticVariant));
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN

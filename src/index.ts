@@ -35,11 +35,13 @@ export {
 export {
     isLibretroPsxAdapterConfig,
     isLibretroPsxAdapterInitConfig,
+    isPsxDiagnosticVariant,
     isPsxWorker,
     isWorkerFactory,
     type LibretroPsxAdapterConfig,
     type LibretroPsxAdapterInitConfig,
     type PsxClock,
+    type PsxDiagnosticVariant,
     type PsxWorker,
     type WorkerFactory,
     type WorkerErrorEventLike,
@@ -231,6 +233,7 @@ export {
     isPsxRumbleEvent,
     isPsxSession,
     isPsxSoundEvent,
+    isPsxSoundTransportTiming,
     isPsxStartConfig,
 } from "./shared.types.js";
 
@@ -265,6 +268,7 @@ export type {
     PsxRumbleEvent,
     PsxSession,
     PsxSoundEvent,
+    PsxSoundTransportTiming,
     PsxStartConfig,
     Unsubscribe,
 } from "./shared.types.js";

@@ -46,11 +46,17 @@ import type { CoreVideoFrame } from "./av.js";    // Raw core video frame accept
 // NOTE: <T> is the operation result type.
 type MaybePromise<T> = T | Promise<T>;
 
-// INTERFACE :: {coreMilliseconds:NUMBER, extractionMilliseconds:NUMBER}
+// INTERFACE :: {coreMilliseconds:NUMBER, extractionMilliseconds:NUMBER, discReadCalls:NUMBER?, discReadRequestedBytes:NUMBER?, discReadReturnedBytes:NUMBER?, discReadMilliseconds:NUMBER?, discSeekCalls:NUMBER?, discSeekMilliseconds:NUMBER?}
 // Native core execution and AV-extraction timing supplied by the production bridge.
 export interface CoreRunTiming {
     readonly coreMilliseconds: number;          // Time inside the native frame execution call
     readonly extractionMilliseconds: number;    // Time exposing AV buffers and rumble after execution
+    readonly discReadCalls?: number;             // Underlying mounted-Blob reads during the frame
+    readonly discReadRequestedBytes?: number;    // Bytes requested by those reads
+    readonly discReadReturnedBytes?: number;     // Bytes returned by those reads
+    readonly discReadMilliseconds?: number;      // Synchronous WORKERFS read time during the frame
+    readonly discSeekCalls?: number;             // WORKERFS logical seeks during the frame
+    readonly discSeekMilliseconds?: number;      // Synchronous WORKERFS seek time during the frame
 }
 
 // TYPE :: {video:coreVideoFrame?, audio:int16Array?, rumble:[psxRumbleEvent]?, timing:coreRunTiming?}
@@ -109,11 +115,15 @@ export interface WorkerCore {
 // Worker-owned core lifecycle state.
 type RuntimeState = "idle" | "running" | "paused" | "exited" | "failed";
 
-// INTERFACE :: mutable timing sums and maxima for one bounded reporting window
+// INTERFACE :: {frames:NUMBER, batches:NUMBER, batchFrames:NUMBER, batchMaximumFrames:NUMBER, batchMilliseconds:NUMBER, batchMaximumMs:NUMBER, coreMilliseconds:NUMBER, extractionMilliseconds:NUMBER, videoMilliseconds:NUMBER, audioMilliseconds:NUMBER, workerMilliseconds:NUMBER, workerMaximumMs:NUMBER, turnaroundSamples:NUMBER, turnaroundMilliseconds:NUMBER, turnaroundMaximumMs:NUMBER, pcmHoldSamples:NUMBER, pcmHoldMilliseconds:NUMBER, pcmHoldMaximumMs:NUMBER, discReadCalls:NUMBER, discReadRequestedBytes:NUMBER, discReadReturnedBytes:NUMBER, discReadMilliseconds:NUMBER, discSeekCalls:NUMBER, discSeekMilliseconds:NUMBER}
 // Accumulates low-overhead worker-stage observations until a snapshot is emitted.
 interface PerformanceAccumulator {
     frames: number;                       // Emulated frames observed
     batches: number;                      // Productive worker ticks observed
+    batchFrames: number;                  // Aggregate frames processed by productive ticks
+    batchMaximumFrames: number;           // Largest productive tick in frames
+    batchMilliseconds: number;            // Aggregate productive tick duration
+    batchMaximumMs: number;               // Slowest productive tick
     coreMilliseconds: number;             // Aggregate native core execution time
     extractionMilliseconds: number;       // Aggregate native AV extraction time
     videoMilliseconds: number;            // Aggregate RGBA conversion time
@@ -123,9 +133,18 @@ interface PerformanceAccumulator {
     turnaroundSamples: number;            // Immediate continuation roundtrips observed
     turnaroundMilliseconds: number;       // Aggregate immediate continuation roundtrip time
     turnaroundMaximumMs: number;           // Slowest immediate continuation roundtrip
+    pcmHoldSamples: number;                // PCM payloads completed before their batch returned
+    pcmHoldMilliseconds: number;           // Aggregate completed-PCM hold time
+    pcmHoldMaximumMs: number;              // Longest completed-PCM hold time
+    discReadCalls: number;                 // Underlying mounted-Blob reads
+    discReadRequestedBytes: number;        // Bytes requested from mounted Blobs
+    discReadReturnedBytes: number;         // Bytes returned from mounted Blobs
+    discReadMilliseconds: number;          // Aggregate synchronous WORKERFS read time
+    discSeekCalls: number;                 // WORKERFS logical seek operations
+    discSeekMilliseconds: number;          // Aggregate synchronous WORKERFS seek time
 }
 
-// INTERFACE :: {coreMilliseconds:NUMBER, extractionMilliseconds:NUMBER, videoMilliseconds:NUMBER, audioMilliseconds:NUMBER, workerMilliseconds:NUMBER}
+// INTERFACE :: {coreMilliseconds:NUMBER, extractionMilliseconds:NUMBER, videoMilliseconds:NUMBER, audioMilliseconds:NUMBER, workerMilliseconds:NUMBER, discReadCalls:NUMBER, discReadRequestedBytes:NUMBER, discReadReturnedBytes:NUMBER, discReadMilliseconds:NUMBER, discSeekCalls:NUMBER, discSeekMilliseconds:NUMBER}
 // One emulated frame's measured worker stages.
 interface FramePerformance {
     readonly coreMilliseconds: number;          // Native core execution time
@@ -133,6 +152,12 @@ interface FramePerformance {
     readonly videoMilliseconds: number;         // RGBA conversion time
     readonly audioMilliseconds: number;         // PCM conversion time
     readonly workerMilliseconds: number;        // Complete worker time for the frame
+    readonly discReadCalls: number;              // Underlying mounted-Blob reads during the frame
+    readonly discReadRequestedBytes: number;     // Bytes requested from mounted Blobs during the frame
+    readonly discReadReturnedBytes: number;      // Bytes returned from mounted Blobs during the frame
+    readonly discReadMilliseconds: number;       // Synchronous WORKERFS read time during the frame
+    readonly discSeekCalls: number;              // WORKERFS logical seeks during the frame
+    readonly discSeekMilliseconds: number;       // Synchronous WORKERFS seek time during the frame
 }
 
 /**
@@ -155,7 +180,9 @@ export default class WorkerRuntime {
     private _geometryKey = "";                                  // Last emitted geometry identity
     private _stopped = false;                                   // Whether core stop was already attempted
     private _performance = createPerformanceAccumulator();      // Current bounded timing window
+    private _performanceWindowFrames = 60;                       // Approximately one emulated second for the active machine
     private _lastProductiveTickCompletedAt: number | null = null; // Previous productive batch completion
+    private _diagnosticsEnabled = false;                           // Whether this session emits development-only transport timestamps
 
     // CONSTRUCTOR :: workerCore, NUMBER?, (VOID -> NUMBER)? -> workerRuntime
     // Retains the core and creates a bounded transferable video pool.
@@ -296,6 +323,8 @@ export default class WorkerRuntime {
             const machine = await this._core.start(command.payload);
             if (!isPsxMachineInfo(machine)) throw new Error("Core returned invalid machine information");
             this._pacer = new FramePacer(machine.framesPerSecond);
+            this._performanceWindowFrames = Math.max(1, Math.round(machine.framesPerSecond));
+            this._diagnosticsEnabled = command.payload.diagnosticVariant === "instrumented";
             this._state = "running";
             this._geometryKey = [
                 machine.geometry.width,
@@ -332,9 +361,15 @@ export default class WorkerRuntime {
             : playbackRate + this._pacer!.maximumFramesPerTick;
         const pacing = this._pacer!.advance(timestamp, maximumFrames);
         const output: WorkerOutput[] = [];
+        const pcmReadyTimes: number[] = [];
         let droppedVideoFrames = 0;
         if (pacing.frames > 0) {
             this._performance.batches++;
+            this._performance.batchFrames += pacing.frames;
+            this._performance.batchMaximumFrames = Math.max(
+                this._performance.batchMaximumFrames,
+                pacing.frames,
+            );
             if (continuation && this._lastProductiveTickCompletedAt !== null) {
                 recordTurnaround(
                     this._performance,
@@ -389,12 +424,15 @@ export default class WorkerRuntime {
                 if (frame.audio.length % 2 !== 0) throw new Error("Core returned non-stereo audio");
                 const audioStartedAt = this._clock();
                 const samples = convertAudioSamples(frame.audio);
-                audioMilliseconds = Math.max(0, this._clock() - audioStartedAt);
+                const audioReadyAt = this._clock();
+                audioMilliseconds = Math.max(0, audioReadyAt - audioStartedAt);
+                pcmReadyTimes.push(audioReadyAt);
                 output.push({
                     type: "sound",
                     generation: this._generation,
                     samples: samples.buffer as ArrayBuffer,
                     frames: samples.length / 2,
+                    ...(this._diagnosticsEnabled ? { producedAtMs: audioReadyAt } : {}),
                 });
             }
             for (const rumble of frame.rumble ?? []) {
@@ -408,6 +446,12 @@ export default class WorkerRuntime {
                 videoMilliseconds,
                 audioMilliseconds,
                 workerMilliseconds: Math.max(0, this._clock() - frameStartedAt),
+                discReadCalls: nativeTiming.discReadCalls ?? 0,
+                discReadRequestedBytes: nativeTiming.discReadRequestedBytes ?? 0,
+                discReadReturnedBytes: nativeTiming.discReadReturnedBytes ?? 0,
+                discReadMilliseconds: nativeTiming.discReadMilliseconds ?? 0,
+                discSeekCalls: nativeTiming.discSeekCalls ?? 0,
+                discSeekMilliseconds: nativeTiming.discSeekMilliseconds ?? 0,
             });
         }
         if (pacing.droppedMilliseconds > 0 || droppedVideoFrames > 0) {
@@ -419,8 +463,15 @@ export default class WorkerRuntime {
             });
         }
         if (pacing.frames > 0) {
-            this._lastProductiveTickCompletedAt = this._clock();
-            if (this._performance.frames >= PERFORMANCE_WINDOW_FRAMES) {
+            const completedAt = this._clock();
+            this._lastProductiveTickCompletedAt = completedAt;
+            recordBatchPerformance(
+                this._performance,
+                Math.max(0, completedAt - tickStartedAt),
+                pcmReadyTimes,
+                completedAt,
+            );
+            if (this._performance.frames >= this._performanceWindowFrames) {
                 output.push({
                     type: "performance",
                     generation: this._generation,
@@ -476,13 +527,15 @@ export default class WorkerRuntime {
  *
  */
 
-const PERFORMANCE_WINDOW_FRAMES = 120;
-
 // HELPER :: VOID -> performanceAccumulator
 // Creates one empty bounded worker-timing window.
 const createPerformanceAccumulator = (): PerformanceAccumulator => ({
     frames: 0,
     batches: 0,
+    batchFrames: 0,
+    batchMaximumFrames: 0,
+    batchMilliseconds: 0,
+    batchMaximumMs: 0,
     coreMilliseconds: 0,
     extractionMilliseconds: 0,
     videoMilliseconds: 0,
@@ -492,6 +545,15 @@ const createPerformanceAccumulator = (): PerformanceAccumulator => ({
     turnaroundSamples: 0,
     turnaroundMilliseconds: 0,
     turnaroundMaximumMs: 0,
+    pcmHoldSamples: 0,
+    pcmHoldMilliseconds: 0,
+    pcmHoldMaximumMs: 0,
+    discReadCalls: 0,
+    discReadRequestedBytes: 0,
+    discReadReturnedBytes: 0,
+    discReadMilliseconds: 0,
+    discSeekCalls: 0,
+    discSeekMilliseconds: 0,
 });
 
 // HELPER :: coreRunTiming?, NUMBER -> coreRunTiming
@@ -502,6 +564,12 @@ const normalizeCoreTiming = (timing: CoreRunTiming | undefined, fallbackMillisec
     return {
         coreMilliseconds: Math.max(0, fallbackMilliseconds),
         extractionMilliseconds: 0,
+        discReadCalls: 0,
+        discReadRequestedBytes: 0,
+        discReadReturnedBytes: 0,
+        discReadMilliseconds: 0,
+        discSeekCalls: 0,
+        discSeekMilliseconds: 0,
     };
 };
 
@@ -518,6 +586,30 @@ const recordFramePerformance = (
     accumulator.audioMilliseconds += frame.audioMilliseconds;
     accumulator.workerMilliseconds += frame.workerMilliseconds;
     accumulator.workerMaximumMs = Math.max(accumulator.workerMaximumMs, frame.workerMilliseconds);
+    accumulator.discReadCalls += frame.discReadCalls;
+    accumulator.discReadRequestedBytes += frame.discReadRequestedBytes;
+    accumulator.discReadReturnedBytes += frame.discReadReturnedBytes;
+    accumulator.discReadMilliseconds += frame.discReadMilliseconds;
+    accumulator.discSeekCalls += frame.discSeekCalls;
+    accumulator.discSeekMilliseconds += frame.discSeekMilliseconds;
+};
+
+// HELPER :: performanceAccumulator, NUMBER, [NUMBER], NUMBER -> VOID
+// Adds one productive batch duration and each completed PCM payload's wait until batch return.
+const recordBatchPerformance = (
+    accumulator: PerformanceAccumulator,
+    milliseconds: number,
+    pcmReadyTimes: ReadonlyArray<number>,
+    completedAt: number,
+): void => {
+    accumulator.batchMilliseconds += milliseconds;
+    accumulator.batchMaximumMs = Math.max(accumulator.batchMaximumMs, milliseconds);
+    for (const readyAt of pcmReadyTimes) {
+        const holdMilliseconds = Math.max(0, completedAt - readyAt);
+        accumulator.pcmHoldSamples++;
+        accumulator.pcmHoldMilliseconds += holdMilliseconds;
+        accumulator.pcmHoldMaximumMs = Math.max(accumulator.pcmHoldMaximumMs, holdMilliseconds);
+    }
 };
 
 // HELPER :: performanceAccumulator, NUMBER -> VOID
@@ -533,6 +625,10 @@ const recordTurnaround = (accumulator: PerformanceAccumulator, milliseconds: num
 const performanceSnapshot = (accumulator: PerformanceAccumulator): PsxPerformanceTiming => ({
     frames: accumulator.frames,
     batches: accumulator.batches,
+    batchAverageFrames: accumulator.batchFrames / accumulator.batches,
+    batchMaximumFrames: accumulator.batchMaximumFrames,
+    batchAverageMs: accumulator.batchMilliseconds / accumulator.batches,
+    batchMaximumMs: accumulator.batchMaximumMs,
     coreAverageMs: accumulator.coreMilliseconds / accumulator.frames,
     extractionAverageMs: accumulator.extractionMilliseconds / accumulator.frames,
     videoAverageMs: accumulator.videoMilliseconds / accumulator.frames,
@@ -544,11 +640,22 @@ const performanceSnapshot = (accumulator: PerformanceAccumulator): PsxPerformanc
         ? 0
         : accumulator.turnaroundMilliseconds / accumulator.turnaroundSamples,
     turnaroundMaximumMs: accumulator.turnaroundMaximumMs,
+    pcmHoldSamples: accumulator.pcmHoldSamples,
+    pcmHoldAverageMs: accumulator.pcmHoldSamples === 0
+        ? 0
+        : accumulator.pcmHoldMilliseconds / accumulator.pcmHoldSamples,
+    pcmHoldMaximumMs: accumulator.pcmHoldMaximumMs,
+    discReadCalls: accumulator.discReadCalls,
+    discReadRequestedBytes: accumulator.discReadRequestedBytes,
+    discReadReturnedBytes: accumulator.discReadReturnedBytes,
+    discReadMilliseconds: accumulator.discReadMilliseconds,
+    discSeekCalls: accumulator.discSeekCalls,
+    discSeekMilliseconds: accumulator.discSeekMilliseconds,
 });
 
 // HELPER :: VOID -> NUMBER
-// Reads the realm's monotonic high-resolution clock for stage and roundtrip timing.
-const monotonicClock = (): number => performance.now();
+// Reads a cross-realm-comparable monotonic epoch timestamp for stage and transport timing.
+const monotonicClock = (): number => performance.timeOrigin + performance.now();
 
 // HELPER :: workerCommand, workerRequestType, psxRuntimeError -> workerOutput
 // Builds one cloneable correlated failure response.

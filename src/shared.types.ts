@@ -158,18 +158,31 @@ export interface PsxFrameEvent extends PsxGeometry {
     readonly rgba: Uint8ClampedArray;    // Width by height pixels with four bytes per pixel
 }
 
-// INTERFACE :: {samples:float32Array, frames:NUMBER}
+// INTERFACE :: {productionToPostMs:NUMBER, postToReceiptMs:NUMBER, productionToReceiptMs:NUMBER}
+// Development-only PCM transport timing spanning the worker batch and main-thread receipt.
+export interface PsxSoundTransportTiming {
+    readonly productionToPostMs: number;       // Completed conversion until endpoint post
+    readonly postToReceiptMs: number;          // Endpoint post until main-thread message receipt
+    readonly productionToReceiptMs: number;    // Complete worker-to-main transport interval
+}
+
+// INTERFACE :: {samples:float32Array, frames:NUMBER, transport:psxSoundTransportTiming?}
 // One interleaved stereo audio chunk emitted at the machine sample rate.
 export interface PsxSoundEvent {
     readonly samples: Float32Array;    // Left-right interleaved normalized samples
     readonly frames: number;           // Stereo frame count represented by samples
+    readonly transport?: PsxSoundTransportTiming; // Development-only timing when instrumentation is active
 }
 
-// INTERFACE :: {frames:NUMBER, batches:NUMBER, coreAverageMs:NUMBER, extractionAverageMs:NUMBER, videoAverageMs:NUMBER, audioAverageMs:NUMBER, workerAverageMs:NUMBER, workerMaximumMs:NUMBER, turnaroundSamples:NUMBER, turnaroundAverageMs:NUMBER, turnaroundMaximumMs:NUMBER}
+// INTERFACE :: {frames:NUMBER, batches:NUMBER, batchAverageFrames:NUMBER, batchMaximumFrames:NUMBER, batchAverageMs:NUMBER, batchMaximumMs:NUMBER, coreAverageMs:NUMBER, extractionAverageMs:NUMBER, videoAverageMs:NUMBER, audioAverageMs:NUMBER, workerAverageMs:NUMBER, workerMaximumMs:NUMBER, turnaroundSamples:NUMBER, turnaroundAverageMs:NUMBER, turnaroundMaximumMs:NUMBER, pcmHoldSamples:NUMBER, pcmHoldAverageMs:NUMBER, pcmHoldMaximumMs:NUMBER, discReadCalls:NUMBER, discReadRequestedBytes:NUMBER, discReadReturnedBytes:NUMBER, discReadMilliseconds:NUMBER, discSeekCalls:NUMBER, discSeekMilliseconds:NUMBER}
 // Low-frequency worker-stage timing aggregated over a bounded frame window.
 export interface PsxPerformanceTiming {
     readonly frames: number;                   // Emulated frames represented by this timing window
     readonly batches: number;                  // Productive worker ticks represented by the window
+    readonly batchAverageFrames: number;       // Average emulated frames per productive tick
+    readonly batchMaximumFrames: number;       // Largest productive tick in emulated frames
+    readonly batchAverageMs: number;           // Average productive tick duration
+    readonly batchMaximumMs: number;           // Slowest productive tick duration
     readonly coreAverageMs: number;            // Average native core execution time per frame
     readonly extractionAverageMs: number;      // Average native AV extraction time per frame
     readonly videoAverageMs: number;           // Average RGBA conversion time per frame
@@ -179,6 +192,15 @@ export interface PsxPerformanceTiming {
     readonly turnaroundSamples: number;        // Immediate worker/main continuation roundtrips measured
     readonly turnaroundAverageMs: number;      // Average immediate continuation roundtrip
     readonly turnaroundMaximumMs: number;      // Slowest immediate continuation roundtrip
+    readonly pcmHoldSamples: number;            // Completed PCM payloads measured before batch return
+    readonly pcmHoldAverageMs: number;          // Average completed-PCM wait until batch return
+    readonly pcmHoldMaximumMs: number;          // Longest completed-PCM wait until batch return
+    readonly discReadCalls: number;             // Underlying mounted-Blob reads in the window
+    readonly discReadRequestedBytes: number;    // Bytes requested from mounted Blobs in the window
+    readonly discReadReturnedBytes: number;     // Bytes returned from mounted Blobs in the window
+    readonly discReadMilliseconds: number;      // Synchronous WORKERFS read time in the window
+    readonly discSeekCalls: number;             // WORKERFS logical seek operations in the window
+    readonly discSeekMilliseconds: number;      // Synchronous WORKERFS seek time in the window
 }
 
 // INTERFACE :: {port:controllerPort, strong:NUMBER, weak:NUMBER}
@@ -541,7 +563,18 @@ export function isPsxFrameEvent(value: unknown): value is PsxFrameEvent {
 // True when value carries exactly two floating-point samples per declared stereo frame.
 export function isPsxSoundEvent(value: unknown): value is PsxSoundEvent {
     return isObject(value) && isNonNegativeInteger(value.frames) && isFloat32Array(value.samples)
-        && value.samples.length === value.frames * 2;
+        && value.samples.length === value.frames * 2
+        && (value.transport === undefined || isPsxSoundTransportTiming(value.transport));
+}
+
+// PREDICATE :: UNKNOWN -> BOOLEAN
+// True when value carries coherent non-negative PCM transport-stage durations.
+export function isPsxSoundTransportTiming(value: unknown): value is PsxSoundTransportTiming {
+    return isObject(value) && isFiniteNumber(value.productionToPostMs) && value.productionToPostMs >= 0
+        && isFiniteNumber(value.postToReceiptMs) && value.postToReceiptMs >= 0
+        && isFiniteNumber(value.productionToReceiptMs) && value.productionToReceiptMs >= 0
+        && value.productionToReceiptMs >= value.productionToPostMs
+        && value.productionToReceiptMs >= value.postToReceiptMs;
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN
@@ -549,8 +582,17 @@ export function isPsxSoundEvent(value: unknown): value is PsxSoundEvent {
 export function isPsxPerformanceTiming(value: unknown): value is PsxPerformanceTiming {
     if (!isObject(value) || !isPositiveInteger(value.frames) || !isPositiveInteger(value.batches)
         || value.batches > value.frames || !isNonNegativeInteger(value.turnaroundSamples)
-        || value.turnaroundSamples > value.batches) return false;
+        || value.turnaroundSamples > value.batches || !isPositiveInteger(value.batchMaximumFrames)
+        || !isNonNegativeInteger(value.pcmHoldSamples) || value.pcmHoldSamples > value.frames
+        || !isNonNegativeInteger(value.discReadCalls)
+        || !isNonNegativeInteger(value.discReadRequestedBytes)
+        || !isNonNegativeInteger(value.discReadReturnedBytes)
+        || value.discReadReturnedBytes > value.discReadRequestedBytes
+        || !isNonNegativeInteger(value.discSeekCalls)) return false;
     const timings = [
+        value.batchAverageFrames,
+        value.batchAverageMs,
+        value.batchMaximumMs,
         value.coreAverageMs,
         value.extractionAverageMs,
         value.videoAverageMs,
@@ -559,12 +601,22 @@ export function isPsxPerformanceTiming(value: unknown): value is PsxPerformanceT
         value.workerMaximumMs,
         value.turnaroundAverageMs,
         value.turnaroundMaximumMs,
+        value.pcmHoldAverageMs,
+        value.pcmHoldMaximumMs,
+        value.discReadMilliseconds,
+        value.discSeekMilliseconds,
     ];
     return timings.every((timing) => isFiniteNumber(timing) && timing >= 0)
+        && (value.batchAverageFrames as number) >= 1
+        && (value.batchMaximumFrames as number) >= (value.batchAverageFrames as number)
+        && (value.batchMaximumMs as number) >= (value.batchAverageMs as number)
         && (value.workerMaximumMs as number) >= (value.workerAverageMs as number)
         && (value.turnaroundMaximumMs as number) >= (value.turnaroundAverageMs as number)
+        && (value.pcmHoldMaximumMs as number) >= (value.pcmHoldAverageMs as number)
         && (value.turnaroundSamples !== 0
-            || (value.turnaroundAverageMs === 0 && value.turnaroundMaximumMs === 0));
+            || (value.turnaroundAverageMs === 0 && value.turnaroundMaximumMs === 0))
+        && (value.pcmHoldSamples !== 0
+            || (value.pcmHoldAverageMs === 0 && value.pcmHoldMaximumMs === 0));
 }
 
 // PREDICATE :: UNKNOWN -> BOOLEAN
