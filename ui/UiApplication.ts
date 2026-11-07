@@ -1984,8 +1984,9 @@ export default class UiApplication {
     private _syncTouchController(): void {
         const root = element<HTMLElement>(this._document, "touch-controller");
         const playStage = element<HTMLElement>(this._document, "play-stage");
+        const inputActive = this._player?.status === "running" || this._player?.status === "paused";
         const controllerType = this._player?.session?.machine.controllers[1] ?? "dualshock";
-        this._touchController.attach(this._player?.input ?? null);
+        this._touchController.attach(inputActive ? this._player?.input ?? null : null);
         if (this._touchController.controllerType !== controllerType) {
             this._touchController.controllerType = controllerType;
         }

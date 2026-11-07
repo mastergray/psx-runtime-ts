@@ -176,10 +176,12 @@ export default class TouchController {
     // Releases and destroys the active touch input channel.
     detach(): void {
         if (this._destroyed) return;
+        const channel = this._channel;
         this.releaseAll();
-        this._channel?.destroy();
         this._channel = null;
         this._input = null;
+        try { channel?.destroy(); }
+        catch { /* The owning player may already have destroyed the coordinator. */ }
         this._applyState();
     }
 
@@ -187,11 +189,19 @@ export default class TouchController {
     // Clears every pointer, digital hold and analog axis owned by this surface.
     releaseAll(): void {
         if (this._destroyed) return;
+        const channel = this._channel;
+        this._channel = null;
         for (const pointerId of [...this._buttonPointers.keys()]) this._releaseButtonPointer(pointerId);
         this._releaseDpad();
         this._releaseStick("left");
         this._releaseStick("right");
-        this._channel?.releaseAll();
+        try {
+            channel?.releaseAll();
+            if (this._input !== null) this._channel = channel;
+        } catch {
+            this._input = null;
+        }
+        this._applyState();
     }
 
     // METHOD :: VOID -> VOID

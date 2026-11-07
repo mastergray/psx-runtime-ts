@@ -1296,6 +1296,48 @@ try {
             stored: localStorage.getItem("psx-runtime:ui:on-screen-controller"),
             notice: document.querySelector("#screen-notice")?.textContent,
         }));
+        const touchLifecycle = await page.evaluate(async () => {
+            const { default: TouchController } = await import("/ui-build/ui/TouchController.js");
+            const root = document.createElement("section");
+            root.innerHTML = [
+                "<div data-touch-dpad></div>",
+                '<div data-touch-stick="left"></div>',
+                '<div data-touch-stick="right"></div>',
+            ].join("");
+            document.body.append(root);
+            let coordinatorDestroyed = false;
+            let releaseCalls = 0;
+            const assertCoordinator = () => {
+                if (coordinatorDestroyed) throw new Error("The PlayStation input coordinator has been destroyed.");
+            };
+            const controller = new TouchController({ root, target: window, document });
+            controller.attach({
+                machine: {},
+                createChannel: () => ({
+                    press: assertCoordinator,
+                    release: assertCoordinator,
+                    setAxis: assertCoordinator,
+                    releaseAll: () => {
+                        releaseCalls++;
+                        assertCoordinator();
+                    },
+                    destroy: assertCoordinator,
+                }),
+                onTick: () => () => undefined,
+                onRumble: () => () => undefined,
+            });
+            controller.enabled = true;
+            coordinatorDestroyed = true;
+            window.dispatchEvent(new Event("blur"));
+            const result = {
+                releaseCalls,
+                active: root.dataset.active,
+                disabled: root.getAttribute("aria-disabled"),
+            };
+            controller.destroy();
+            root.remove();
+            return result;
+        });
         await page.click("[data-open-dialog='memory']");
         await page.waitForFunction(() => document.querySelector("#memory-dialog")?.hasAttribute("open"));
         const memoryImportInitial = await page.evaluate(() => ({
@@ -1791,6 +1833,8 @@ try {
                 && touchViewHidden.hidden
                 && touchViewHidden.stageVisible === "false" && touchViewHidden.stored === "false"
                 && touchViewHidden.notice === "View applied: Fit."
+                && touchLifecycle.releaseCalls === 1 && touchLifecycle.active === "false"
+                && touchLifecycle.disabled === "true"
                 && memoryImportInitial.dialogOpen && memoryImportInitial.cardOneDisabled
                 && memoryImportInitial.cardTwoDisabled
                 && memoryImportReady.feedback?.includes("ready. Choose the card slot")
@@ -1877,6 +1921,7 @@ try {
             touchViewCanceled,
             touchViewShown,
             touchViewHidden,
+            touchLifecycle,
             memoryImportInitial,
             memoryImportReady,
             memoryImported,
