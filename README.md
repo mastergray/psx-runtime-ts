@@ -107,7 +107,9 @@ the production interface.
 Presentation Mode provides a controller-first, television-scale view of the
 same running session. The D-pad or left stick moves focus, Cross activates,
 Circle goes back, and L3+R3 opens or closes the presentation menu. That menu
-keeps the stored Library visible, highlights the active title, reports its
+shows **Select Game** instead of **Resume** while idle; activating it or moving
+right focuses the first stored title. The menu keeps the stored Library
+visible, highlights the active title, reports its
 aggregate browser storage and launches single-disc games directly. Multi-disc
 titles open a controller-focused disc picker, and startup remains covered by a
 status overlay until it completes. Reset, in-session disc switching and

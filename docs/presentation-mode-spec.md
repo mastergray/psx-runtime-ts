@@ -79,7 +79,7 @@ and disc on the right.
 
 The left column contains:
 
-- Resume;
+- Resume while a session exists, or Select Game while idle;
 - soft Reset;
 - Switch Disc for the active multi-disc title;
 - Fit, Integer, Fill and Stretch scaling, including a pending selection before
@@ -88,6 +88,9 @@ The left column contains:
 
 The explicit **Resume** action returns to the active session; closing through
 the menu gesture or Back preserves a pause that existed before the menu opened.
+With no active session and at least one playable stored title, **Select Game**
+becomes the initial action focus. Activating it or pressing Right moves focus to
+the first Library title.
 
 Scaling remains enabled with no active session. Changing it updates the shared
 View selection and the next game adopts that scaling as soon as its display is
@@ -128,9 +131,9 @@ Automated acceptance requires:
 
 1. menu-gesture tests proving partial, held, released and repeated chord edges;
 2. a browser probe proving mode entry, the reduced action set, TV layout,
-   local-chrome removal, controller focus movement, direct Library launch,
-   conditional disc selection and loading status, Play Mode exit and reload
-   restoration;
+   local-chrome removal, Select Game activation and Right navigation, direct
+   Library launch, conditional disc selection and loading status, Play Mode
+   exit and reload restoration;
 3. the existing M12 production probe to remain green; and
 4. TypeScript checks and the complete specification suite to pass.
 

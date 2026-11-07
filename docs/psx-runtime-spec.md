@@ -1243,7 +1243,9 @@ pause does not. Activation buttons must release before runtime input reattaches.
 
 The menu supports direct launch from the stored library, a controller-focused
 disc-selection modal for multi-disc games, in-session disc insertion, soft
-reset and scaling. Game startup uses a blocking status overlay. Firmware,
+reset and scaling. With no active session, the first action becomes **Select
+Game** and either its activation or Right focuses the first stored title. Game
+startup uses a blocking status overlay. Firmware,
 import, deletion, renaming, named states, audio controls, controller
 configuration and memory-card administration remain in Play Mode.
 The complete behavior and physical acceptance procedure are specified in

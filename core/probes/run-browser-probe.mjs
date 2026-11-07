@@ -781,6 +781,7 @@ try {
                 storedGamesHeadingAbsent: ![...document.querySelectorAll("#presentation-library-view h3")]
                     .some((heading) => heading.textContent?.includes("Stored games")),
                 resumeLabel: document.querySelector("#presentation-resume strong")?.textContent,
+                resumeDetail: document.querySelector("#presentation-resume small")?.textContent,
                 idleScalingEnabled: !document.querySelector("#presentation-scaling")?.hasAttribute("disabled"),
                 idleSwitchDiscDisabled: document.querySelector("#presentation-switch-disc")?.hasAttribute("disabled"),
                 noticePlacement,
@@ -858,11 +859,26 @@ try {
             await mode.enter();
             await new Promise((resolve) => requestAnimationFrame(() => resolve()));
             const multi = document.querySelector('[data-game-id="multi"]');
+            const selectGame = document.querySelector("#presentation-resume");
+            const selectGameInitial = {
+                label: selectGame?.querySelector("strong")?.textContent,
+                detail: selectGame?.querySelector("small")?.textContent,
+                disabled: selectGame?.hasAttribute("disabled"),
+                focused: document.activeElement?.id,
+            };
+            selectGame?.click();
+            const clickFocus = document.activeElement?.getAttribute("data-game-id");
+            selectGame?.focus();
+            dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+            const rightFocus = document.activeElement?.getAttribute("data-game-id");
             const before = {
                 rows: document.querySelectorAll(".presentation-game-row").length,
                 dropdowns: document.querySelectorAll(".presentation-game-row select").length,
                 playButtons: document.querySelectorAll(".presentation-game-play").length,
                 pickerInitiallyHidden: document.querySelector("#presentation-disc-picker")?.hasAttribute("hidden"),
+                selectGameInitial,
+                clickFocus,
+                rightFocus,
             };
             multi?.querySelector("button")?.click();
             const pickerOptions = [...document.querySelectorAll("#presentation-disc-options button")]
@@ -905,7 +921,8 @@ try {
                 && entered.header === "// Presentation Mode" && entered.headerStatus === "No game loaded"
                 && entered.libraryHeading === "// Library" && entered.libraryCount === "0 Titles (0 MB)"
                 && entered.storedGamesHeadingAbsent
-                && entered.resumeLabel === "Resume" && entered.idleScalingEnabled && entered.idleSwitchDiscDisabled
+                && entered.resumeLabel === "Select Game" && entered.resumeDetail === "Choose from Library"
+                && entered.idleScalingEnabled && entered.idleSwitchDiscDisabled
                 && entered.noticePlacement.visible && entered.noticePlacement.transform === "none"
                 && entered.noticePlacement.rightGap >= 16 && entered.noticePlacement.rightGap <= 37
                 && entered.noticePlacement.bottomGap >= 16 && entered.noticePlacement.bottomGap <= 37
@@ -920,6 +937,11 @@ try {
                 && restored.libraryVisible && restored.stored === "presentation"
                 && libraryContract.rows === 2 && libraryContract.dropdowns === 0
                 && libraryContract.playButtons === 2 && libraryContract.pickerInitiallyHidden
+                && libraryContract.selectGameInitial.label === "Select Game"
+                && libraryContract.selectGameInitial.detail === "Choose from Library"
+                && !libraryContract.selectGameInitial.disabled
+                && libraryContract.selectGameInitial.focused === "presentation-resume"
+                && libraryContract.clickFocus === "single" && libraryContract.rightFocus === "single"
                 && libraryContract.pickerOptions.join(",") === "Disc 1,Disc 2"
                 && libraryContract.started?.gameId === "multi" && libraryContract.started?.discIndex === 1
                 && libraryContract.loading.visible && libraryContract.loading.status === "Starting “Multi Disc”…"

@@ -86,7 +86,8 @@ export default class PresentationMode {
     // Binds every Presentation action and restores a persisted TV skin without forcing fullscreen.
     initialize(): void {
         element<HTMLButtonElement>(this._document, "presentation-resume").addEventListener("click", () => {
-            void this.closeMenu(true);
+            if (this._snapshot.session === null) this._input.focusFirst("content");
+            else void this.closeMenu(true);
         });
         element<HTMLButtonElement>(this._document, "presentation-reset").addEventListener("click", () => {
             void this._run("Resetting the session…", () => this._config.reset(), "Session reset.", true);
@@ -367,7 +368,10 @@ export default class PresentationMode {
             `${this._snapshot.games.length} Title${this._snapshot.games.length === 1 ? "" : "s"} (${formatStorageSize(storedBytes)})`,
         );
         const resume = element<HTMLButtonElement>(this._document, "presentation-resume");
-        resume.disabled = session === null || this._busy;
+        const canSelectGame = this._snapshot.firmwareReady && this._snapshot.games.length > 0;
+        resume.disabled = this._busy || (session === null && !canSelectGame);
+        this._setText("presentation-resume-label", session === null ? "Select Game" : "Resume");
+        this._setText("presentation-resume-detail", session === null ? "Choose from Library" : "Return to the game");
         this._renderSessionActions();
         this._renderLibrary();
         this._renderDiscPicker();
