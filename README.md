@@ -96,9 +96,11 @@ System, Game, Library, Memory Cards and View workflows against the real
 runtime and browser stores. The central stage reflects firmware-required,
 ready, starting, running, paused, stopping and failed states; no mock-only
 formats or settings are exposed.
-The top-level Audio modal controls output gain and persists the audio-buffering
-mode. System contains only Firmware and Controls. Production sessions use
-sequential-read reuse without measurement overhead; explicit development
+The top-level Audio modal controls output gain and persists Adaptive, Low
+Latency or Stable Playback buffering. An inline help tip explains the delay and
+stability tradeoff for each choice without keeping diagnostic text on screen.
+System contains only Firmware and Controls. Production sessions always use
+sequential-read reuse without measurement overhead. Explicit development
 compositions retain instrumented variants and downloadable diagnostics outside
 the production interface.
 
