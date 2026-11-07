@@ -842,7 +842,35 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
 }
 .audio-buffer-control { padding-top: 18px; border-top: 1px solid var(--line); }
 .audio-buffer-control select { width: 100%; }
-.audio-buffer-control > small { color: var(--muted); font: 0.72rem/1.35 "Share Tech Mono", monospace; }
+.audio-buffer-heading { display: flex; align-items: center; gap: 8px; }
+.audio-buffer-help-toggle {
+    width: 20px;
+    height: 20px;
+    min-height: 20px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--line-bright);
+    border-radius: 50%;
+    background: transparent;
+    color: var(--cyan);
+    font: 0.72rem/1 "Share Tech Mono", monospace;
+    cursor: help;
+}
+.audio-buffer-help-toggle:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.audio-buffer-help-panel {
+    padding: 11px;
+    display: grid;
+    gap: 9px;
+    border: 1px solid var(--line-bright);
+    border-radius: 6px;
+    background: #07111d;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+.audio-buffer-help-panel[hidden] { display: none; }
+.audio-buffer-help-panel p { margin: 0; display: grid; gap: 2px; }
+.audio-buffer-help-panel strong { color: var(--text-bright); font: 0.72rem "Share Tech Mono", monospace; }
+.audio-buffer-help-panel span { color: var(--muted); font: 0.68rem/1.35 "Share Tech Mono", monospace; }
 @media (max-width: 1180px) {
     .command-bar { align-items: stretch; overflow-x: auto; }
     .runtime-status { margin-left: auto; }

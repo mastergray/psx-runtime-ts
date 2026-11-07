@@ -331,13 +331,20 @@
             <output id="volume-value" for="volume-level">15%</output>
           </section>
           <section class="dialog-section audio-buffer-control">
-            <label for="audio-buffer-mode">Audio Buffering</label>
+            <div class="audio-buffer-heading">
+              <label for="audio-buffer-mode">Audio Buffering</label>
+              <button id="audio-buffer-help-toggle" class="audio-buffer-help-toggle" type="button" aria-label="Explain audio buffering" aria-controls="audio-buffer-help-panel" aria-expanded="false">?</button>
+            </div>
+            <div id="audio-buffer-help-panel" class="audio-buffer-help-panel" hidden>
+              <p><strong>Adaptive</strong><span>Begins with low delay and adds protection if audio playback starves. This is the recommended default.</span></p>
+              <p><strong>Low Latency</strong><span>Minimizes sound delay. Slower devices may experience more stuttering.</span></p>
+              <p><strong>Stable Playback</strong><span>Uses a larger buffer to reduce stuttering. Sound may play with more delay.</span></p>
+            </div>
             <select id="audio-buffer-mode">
               <option value="adaptive">Adaptive (Recommended)</option>
               <option value="low-latency">Low Latency</option>
               <option value="stable">Stable Playback</option>
             </select>
-            <small>Adaptive adds buffering after starvation; Low Latency minimizes delay; Stable Playback keeps a larger cushion.</small>
           </section>
         </div>
       </form>

@@ -365,6 +365,12 @@ export default class UiApplication {
             const audio = this._sessionAudio();
             if (audio !== null) audio.bufferMode = value;
         });
+        element<HTMLButtonElement>(this._document, "audio-buffer-help-toggle").addEventListener("click", (event) => {
+            const toggle = event.currentTarget as HTMLButtonElement;
+            const panel = element<HTMLElement>(this._document, "audio-buffer-help-panel");
+            panel.hidden = !panel.hidden;
+            toggle.setAttribute("aria-expanded", String(!panel.hidden));
+        });
 
         element<HTMLSelectElement>(this._document, "scaling-mode").addEventListener("change", () => {
             this._syncViewActions();

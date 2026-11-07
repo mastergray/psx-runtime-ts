@@ -1169,8 +1169,11 @@ try {
             const dialog = document.querySelector("#volume-dialog");
             const range = document.querySelector("#volume-level");
             const bufferMode = document.querySelector("#audio-buffer-mode");
+            const helpToggle = document.querySelector("#audio-buffer-help-toggle");
+            const helpPanel = document.querySelector("#audio-buffer-help-panel");
             if (!(trigger instanceof HTMLButtonElement) || !(dialog instanceof HTMLDialogElement)
-                || !(range instanceof HTMLInputElement) || !(bufferMode instanceof HTMLSelectElement)) {
+                || !(range instanceof HTMLInputElement) || !(bufferMode instanceof HTMLSelectElement)
+                || !(helpToggle instanceof HTMLButtonElement) || !(helpPanel instanceof HTMLElement)) {
                 throw new Error("Missing Audio controls");
             }
             trigger.disabled = false;
@@ -1180,6 +1183,8 @@ try {
             const initialBufferMode = bufferMode.value;
             bufferMode.value = "stable";
             bufferMode.dispatchEvent(new Event("change", { bubbles: true }));
+            helpToggle.click();
+            const helpText = helpPanel.textContent?.replace(/\s+/g, " ").trim() ?? "";
             const result = {
                 label: trigger.textContent,
                 controls: trigger.getAttribute("aria-controls"),
@@ -1192,6 +1197,12 @@ try {
                 bufferMode: bufferMode.value,
                 bufferOptions: [...bufferMode.options].map(({ value, textContent }) => [value, textContent]),
                 bufferStored: localStorage.getItem("psx-runtime:ui:audio-buffer-mode"),
+                helpOpen: helpToggle.getAttribute("aria-expanded") === "true",
+                helpVisible: !helpPanel.hidden && getComputedStyle(helpPanel).display !== "none",
+                helpSections: helpPanel.querySelectorAll("p").length,
+                helpText,
+                helpUsesSemicolons: helpText.includes(";"),
+                persistentExplanationAbsent: dialog.querySelector(".audio-buffer-control > small") === null,
                 telemetryAbsent: document.querySelector("#audio-buffer-status, #audio-worker-status") === null,
                 developmentControlsAbsent: document.querySelector("#system-settings-tab, #system-settings-panel, #diagnostic-variant, #download-diagnostics") === null,
             };
@@ -1781,10 +1792,16 @@ try {
                 && audioControl.label === "Audio" && audioControl.controls === "volume-dialog"
                 && audioControl.open && audioControl.closed && audioControl.value === "42"
                 && audioControl.output === "42%" && audioControl.ranges === 1
-                && audioControl.extraControls === 1 && audioControl.developmentControlsAbsent
+                && audioControl.extraControls === 2 && audioControl.developmentControlsAbsent
                 && audioControl.initialBufferMode === "adaptive"
                 && audioControl.bufferMode === "stable"
                 && audioControl.bufferStored === "stable"
+                && audioControl.helpOpen && audioControl.helpVisible
+                && audioControl.helpSections === 3 && !audioControl.helpUsesSemicolons
+                && audioControl.helpText.includes("Adaptive")
+                && audioControl.helpText.includes("Low Latency")
+                && audioControl.helpText.includes("Stable Playback")
+                && audioControl.persistentExplanationAbsent
                 && audioControl.telemetryAbsent
                 && audioControl.bufferOptions.length === 3
                 && audioControl.bufferOptions.some(([value, label]) => value === "adaptive" && label === "Adaptive (Recommended)")
