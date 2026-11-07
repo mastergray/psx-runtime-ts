@@ -419,8 +419,16 @@ button[hidden], [hidden] { display: none !important; }
 .app-shell[data-mode="presentation"] .screen-stage::after,
 .app-shell[data-mode="presentation"] .touch-controller,
 .app-shell[data-mode="presentation"] .stage-telemetry,
-.app-shell[data-mode="presentation"] .signal-bars,
-.app-shell[data-mode="presentation"] .screen-notice { display: none; }
+.app-shell[data-mode="presentation"] .signal-bars { display: none; }
+
+.app-shell[data-mode="presentation"] .screen-notice {
+    left: auto;
+    top: auto;
+    right: clamp(16px, 3vw, 36px);
+    bottom: clamp(16px, 3vw, 36px);
+    transform: none;
+    max-width: min(420px, calc(100% - 32px));
+}
 
 .presentation-hint {
     position: absolute;

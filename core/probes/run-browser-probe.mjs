@@ -746,6 +746,18 @@ try {
             const command = document.querySelector(".command-bar");
             const playStage = document.querySelector("#play-stage")?.getBoundingClientRect();
             const actions = [...document.querySelectorAll(".presentation-actions [data-presentation-focus]")];
+            const notice = document.querySelector("#screen-notice");
+            if (!(notice instanceof HTMLElement)) throw new Error("Missing production screen notice");
+            notice.hidden = false;
+            const noticeRect = notice.getBoundingClientRect();
+            const noticeStyle = getComputedStyle(notice);
+            const noticePlacement = {
+                visible: noticeStyle.display !== "none",
+                rightGap: innerWidth - noticeRect.right,
+                bottomGap: innerHeight - noticeRect.bottom,
+                transform: noticeStyle.transform,
+            };
+            notice.hidden = true;
             return {
                 mode: app?.getAttribute("data-mode"),
                 stored: localStorage.getItem("psx-runtime:ui:presentation-mode"),
@@ -771,6 +783,7 @@ try {
                 resumeLabel: document.querySelector("#presentation-resume strong")?.textContent,
                 idleScalingEnabled: !document.querySelector("#presentation-scaling")?.hasAttribute("disabled"),
                 idleSwitchDiscDisabled: document.querySelector("#presentation-switch-disc")?.hasAttribute("disabled"),
+                noticePlacement,
             };
         });
         await page.keyboard.press("ArrowRight");
@@ -893,6 +906,9 @@ try {
                 && entered.libraryHeading === "// Library" && entered.libraryCount === "0 Titles (0 MB)"
                 && entered.storedGamesHeadingAbsent
                 && entered.resumeLabel === "Resume" && entered.idleScalingEnabled && entered.idleSwitchDiscDisabled
+                && entered.noticePlacement.visible && entered.noticePlacement.transform === "none"
+                && entered.noticePlacement.rightGap >= 16 && entered.noticePlacement.rightGap <= 37
+                && entered.noticePlacement.bottomGap >= 16 && entered.noticePlacement.bottomGap <= 37
                 && entered.actions[1]?.startsWith("Reset")
                 && entered.actions[2]?.startsWith("Switch Disc")
                 && entered.actions[3]?.startsWith("Scaling")

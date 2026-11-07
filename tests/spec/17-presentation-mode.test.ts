@@ -1,15 +1,22 @@
 import CTGTest, { CTGTestPredicates as P } from "ctg-js-test";
 
 import MenuGestureDetector from "../../ui/PresentationMode/MenuGestureDetector.ts";
+import RuntimeShortcuts from "../../ui/RuntimeShortcuts.ts";
 import { isUiQuickStatePreferences } from "../../ui/types.ts";
 
+import type { PsxButton, PsxButtonControl, PsxPlaybackRate } from "../../src/index.ts";
 import type { UiMenuGestureSample } from "../../ui/PresentationMode/types.ts";
+import type { RuntimeQuickStateAction } from "../../ui/RuntimeShortcuts.ts";
+import type { UiQuickStateSlot } from "../../ui/types.ts";
 import type { TestFile } from "../run.ts";
 
 const pad = (id: string, pressed: ReadonlyArray<number>, length = 16): UiMenuGestureSample => ({
     id,
     buttons: Array.from({ length }, (_, index) => pressed.includes(index)),
 });
+
+const controls = (port: 1 | 2, ...buttons: PsxButton[]): ReadonlyArray<PsxButtonControl> =>
+    buttons.map((button) => ({ port, button }));
 
 const testFile: TestFile = {
     label: "M13 Presentation mode",
@@ -67,6 +74,75 @@ const testFile: TestFile = {
                     unknownSlot: false,
                     decomposed: false,
                 }))
+                .start(undefined),
+        },
+        {
+            label: "runtime fast-forward chords hold, cycle, and release on the same controller port",
+            run: () => CTGTest.init("runtime fast-forward shortcuts")
+                .stage("sample shortcut edges and holds", () => {
+                    const rates: PsxPlaybackRate[] = [];
+                    const selections: PsxPlaybackRate[] = [];
+                    const shortcuts = new RuntimeShortcuts({
+                        setPlaybackRate: (rate) => { rates.push(rate); },
+                        selectFastForwardRate: (rate) => { selections.push(rate); },
+                        runQuickState: () => undefined,
+                    });
+                    shortcuts.update(controls(1, "l3", "r1"), true);
+                    shortcuts.update(controls(1, "l3", "r1"), true);
+                    shortcuts.update([], true);
+                    shortcuts.update(controls(1, "l3", "r2"), true);
+                    shortcuts.update(controls(1, "l3", "r2"), true);
+                    shortcuts.update([], true);
+                    shortcuts.update(controls(1, "l3", "r1"), true);
+                    shortcuts.update([], true);
+                    shortcuts.update(controls(1, "l3", "l2"), true);
+                    shortcuts.update([], true);
+                    shortcuts.update([
+                        ...controls(1, "l3"),
+                        ...controls(2, "r1"),
+                    ], true);
+                    shortcuts.update(controls(1, "l3", "r1"), true);
+                    shortcuts.update([], false);
+                    return { rates, selections, selected: shortcuts.selectedFastForwardRate };
+                })
+                .assert("rate transitions", ({ subject }) => subject, P.equals<unknown>({
+                    rates: [2, 1, 5, 1, 7, 1, 5, 1],
+                    selections: [5],
+                    selected: 5,
+                }))
+                .start(undefined),
+        },
+        {
+            label: "runtime quick-state chords fire once per rising edge",
+            run: () => CTGTest.init("runtime quick-state shortcuts")
+                .stage("sample state shortcut edges", () => {
+                    const actions: Array<readonly [RuntimeQuickStateAction, UiQuickStateSlot]> = [];
+                    const shortcuts = new RuntimeShortcuts({
+                        setPlaybackRate: () => undefined,
+                        selectFastForwardRate: () => undefined,
+                        runQuickState: (action, slot) => { actions.push([action, slot]); },
+                    });
+                    shortcuts.update(controls(1, "r3", "l1"), true);
+                    shortcuts.update(controls(1, "r3", "l1"), true);
+                    shortcuts.update([], true);
+                    shortcuts.update(controls(2, "r3", "l2"), true);
+                    shortcuts.update([], true);
+                    shortcuts.update(controls(1, "r3", "r1"), true);
+                    shortcuts.update([], true);
+                    shortcuts.update(controls(2, "r3", "r2"), true);
+                    shortcuts.update([], true);
+                    shortcuts.update([
+                        ...controls(1, "r3"),
+                        ...controls(2, "l1"),
+                    ], true);
+                    return actions;
+                })
+                .assert("state operations", ({ subject }) => subject, P.equals<unknown>([
+                    ["save", 1],
+                    ["save", 2],
+                    ["load", 1],
+                    ["load", 2],
+                ]))
                 .start(undefined),
         },
     ],

@@ -1074,7 +1074,8 @@ The harness is a consumer of the package, not a second runtime. It provides:
 - same-player runtime shortcuts: hold L3 + R1 for the selected fast-forward
   rate, press L3 + R2 to cycle `×2`, `×5` and `×7`, hold L3 + L1 for direct
   `×2`, or hold L3 + L2 for direct `×7`; releasing the hold returns to
-  `×1`, and an on-canvas indicator shows the active accelerated rate;
+  `×1`, with rate changes reported through the same visible notice surface as
+  quick-state operations;
 - per-game controller quick-state assignments: the States surface provides Q1
   and Q2 radio controls for compatible named states, R3 + L1/L2 overwrites the
   assigned state, and R3 + R1/R2 loads it, with edge triggering and visible

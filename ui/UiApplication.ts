@@ -11,6 +11,7 @@ import {
 import ControlSettings from "./ControlSettings.js";              // Owns persistent keyboard and gamepad mappings
 import { summarizeMemoryCard } from "./MemoryCardDirectory.js"; // Interprets card directory entries for read-only display
 import PresentationMode from "./PresentationMode/PresentationMode.js"; // Owns the controller-first television skin
+import RuntimeShortcuts from "./RuntimeShortcuts.js";          // Interprets runtime speed and quick-state controller chords
 import TouchController from "./TouchController.js";            // Routes the production touch surface into session input
 import {
     isUiControllerTypePreferences, // Validates per-game emulated controller preferences
@@ -27,6 +28,7 @@ import type {
     PsxFirmwareRecord,  // Stored firmware metadata rendered by System
     PsxMachineInfo,     // Active core and content identity used for state compatibility
     PsxControllerType,  // Per-game emulated controller device selected for one port
+    PsxPlaybackRate,    // Normal or accelerated execution multiplier selected by shortcuts
     PsxPlayerStatus,    // Lifecycle status rendered by the stage
     PsxRegion,          // Selected firmware region
     PsxScalingMode,     // Display layout selected in View
@@ -47,6 +49,7 @@ import type {
     UiViewMode,             // Deferred windowed or fullscreen View selection
 } from "./types.js";
 import type { UiPresentationSnapshot } from "./PresentationMode/types.js"; // Runtime and library data shown in TV mode
+import type { RuntimeQuickStateAction } from "./RuntimeShortcuts.js"; // Save or load action requested by a controller chord
 
 const PROFILE_ID = "web-emulator";
 const CARD_IDS = Object.freeze({ 1: "card-1", 2: "card-2" });
@@ -74,6 +77,7 @@ export default class UiApplication {
     private readonly _buildUrl: string;                           // PlayStation core build root
     private readonly _controls: ControlSettings;                  // Persistent two-player physical input configuration
     private readonly _presentation: PresentationMode;             // Controller-first fullscreen television skin
+    private readonly _runtimeShortcuts: RuntimeShortcuts;         // Same-player fast-forward and quick-state chord interpreter
     private readonly _touchController: TouchController;           // Player-one pointer controller rendered below or over the stage
     private readonly _firmware = new Map<PsxRegion, PsxFirmwareRecord>(); // Stored firmware records by region
     private _adapter: LibretroPsxAdapter | null = null;           // Loaded core metadata and worker factory
@@ -99,6 +103,8 @@ export default class UiApplication {
     private _memoryImportBusy = false;                            // Whether one card replacement is reading or persisting bytes
     private _touchControllerVisible = false;                      // Persisted preference controlling touch-surface presentation
     private _audioBufferMode: PsxAudioBufferMode;                 // Browser-wide audio output strategy preference
+    private _runtimeShortcutFrame: number | null = null;          // Pending input-snapshot polling frame
+    private _quickStateOperationInProgress = false;               // Prevents overlapping controller-triggered state operations
 
     // CONSTRUCTOR :: uiApplicationConfig -> uiApplication
     // Retains validated composition dependencies; initialize() binds the document and loads persistent state.
@@ -120,6 +126,13 @@ export default class UiApplication {
         this._controllerTypePreferences = loadControllerTypePreferences(localStorage);
         this._quickStatePreferences = loadQuickStatePreferences(localStorage);
         this._audioBufferMode = loadAudioBufferMode(localStorage);
+        this._runtimeShortcuts = new RuntimeShortcuts({
+            setPlaybackRate: (rate) => this._setShortcutPlaybackRate(rate),
+            selectFastForwardRate: (rate) => {
+                this._showNotice(`Fast-forward speed selected: ×${rate}.`);
+            },
+            runQuickState: (action, slot) => { void this._runQuickStateShortcut(action, slot); },
+        });
         this._presentation = new PresentationMode({
             document: this._document,
             storage: localStorage,
@@ -457,6 +470,7 @@ export default class UiApplication {
             this._renderStage("failed", message);
         });
         this._syncTouchController();
+        if (this._runtimeShortcutFrame === null) this._scheduleRuntimeShortcutPoll();
     }
 
     // METHOD :: psxPlayerStatus -> VOID
@@ -1108,6 +1122,62 @@ export default class UiApplication {
         persistQuickStatePreferences(browserStorage(this._document), this._quickStatePreferences);
     }
 
+    // METHOD :: runtimeQuickStateAction, uiQuickStateSlot -> PROMISE(VOID)
+    // Runs one controller-requested state operation against the active game's persistent quick-slot assignment.
+    private async _runQuickStateShortcut(action: RuntimeQuickStateAction, slot: UiQuickStateSlot): Promise<void> {
+        const shortcutName = QUICK_STATE_NAMES[slot - 1]!;
+        if (this._quickStateOperationInProgress) {
+            this._showNotice("Another quick-state operation is still in progress.");
+            return;
+        }
+        this._quickStateOperationInProgress = true;
+        try {
+            const player = this._player;
+            const session = player?.session;
+            if (player === null || session === null || session === undefined) {
+                throw new Error("Start a game before using quick states.");
+            }
+            const gameId = session.machine.gameId;
+            this._stateRecords = await this._storage.listStates(PROFILE_ID, gameId);
+            const assignedName = this._quickStateNameFor(gameId, slot);
+            const name = assignedName ?? shortcutName;
+            if (action === "save") {
+                await player.saveState(name);
+                this._assignQuickState(gameId, slot, name);
+            } else {
+                if (assignedName === null) {
+                    throw new Error(`${shortcutName} has no saved state. Assign one in Game or use its save shortcut first.`);
+                }
+                const record = this._stateRecords.find((candidate) => candidate.name === name);
+                if (record === undefined) {
+                    throw new Error(`${shortcutName} has no saved state. Assign one in Game or use its save shortcut first.`);
+                }
+                if (!stateCompatible(record, session.machine)) {
+                    throw new Error(`The state assigned to ${shortcutName} belongs to a different core build.`);
+                }
+                await player.loadState(name);
+                this._selectedLibraryDiscIndex = record.metadata.discIndex;
+            }
+            this._stateRecords = await this._storage.listStates(PROFILE_ID, gameId);
+            const activeSession = player.session;
+            if (activeSession !== null && element<HTMLDialogElement>(this._document, "game-dialog").open) {
+                this._renderActiveGame(activeSession);
+            }
+            const message = action === "save"
+                ? `Saved ${shortcutName} to “${name}”.`
+                : `Loaded ${shortcutName} from “${name}”.`;
+            this._panelFeedback("state-feedback", message, "success");
+            this._showNotice(message);
+            this._presentation.sync();
+        } catch (error) {
+            const message = `${action === "save" ? "Save" : "Load"} ${shortcutName} failed: ${errorMessage(error)}`;
+            this._panelFeedback("state-feedback", message, "error");
+            this._showNotice(message);
+        } finally {
+            this._quickStateOperationInProgress = false;
+        }
+    }
+
     // METHOD :: STRING, STRING -> VOID
     // Clears deleted state names from both quick slots and removes empty per-game records.
     private _clearQuickStateName(gameId: string, name: string): void {
@@ -1588,6 +1658,39 @@ export default class UiApplication {
         } catch (error) {
             this._showNotice(errorMessage(error));
         }
+    }
+
+    // METHOD :: psxPlaybackRate -> VOID
+    // Applies a shortcut multiplier and reports the changed execution speed through the shared notice surface.
+    private _setShortcutPlaybackRate(rate: PsxPlaybackRate): void {
+        const player = this._player;
+        if (player === null || player.session === null
+            || (player.status !== "running" && player.status !== "paused")) return;
+        try {
+            if (player.playbackRate !== rate) player.setPlaybackRate(rate);
+            this._showNotice(rate === 1 ? "Normal speed." : `Fast-forward ×${rate}.`);
+        } catch (error) {
+            this._showNotice(`Fast-forward failed: ${errorMessage(error)}`);
+        }
+    }
+
+    // METHOD :: VOID -> VOID
+    // Schedules the next effective-input sample used by runtime controller shortcuts.
+    private _scheduleRuntimeShortcutPoll(): void {
+        this._runtimeShortcutFrame = browserWindow(this._document).requestAnimationFrame(() => {
+            this._pollRuntimeShortcuts();
+        });
+    }
+
+    // METHOD :: VOID -> VOID
+    // Samples merged keyboard, gamepad, and touch buttons without coupling shortcuts to a physical source.
+    private _pollRuntimeShortcuts(): void {
+        const player = this._player;
+        const active = player !== null && player.session !== null
+            && (player.status === "running" || player.status === "paused")
+            && this._document.querySelector('[data-capturing="true"]') === null;
+        this._runtimeShortcuts.update(player?.input?.snapshot ?? [], active);
+        this._scheduleRuntimeShortcutPoll();
     }
 
     // METHOD :: VOID -> PROMISE(VOID)

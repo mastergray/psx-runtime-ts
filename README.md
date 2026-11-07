@@ -134,7 +134,9 @@ named state to Q1 or Q2 per game; controller save overwrites that assignment
 and controller load restores it. Assigning one slot's state to the other slot
 swaps the two assignments. Assignments are stored locally per game and survive
 page reloads. Accelerated execution skips audio and returns to normal speed
-when the hold chord is released.
+when the hold chord is released. Fast-forward changes and quick-state results
+use the same on-screen notice surface, placed in the lower-right corner during
+Presentation Mode.
 
 The **View** surface configures the on-screen controller. Automatic visibility
 shows it on touch-capable devices when no standard gamepad is connected; Show
