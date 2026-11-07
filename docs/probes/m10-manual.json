@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-11-07",
+  "physicalInput": {
+    "keyboard": true,
+    "gamepad": true,
+    "concurrentPorts": true,
+    "disconnectRelease": true,
+    "pass": true
+  },
+  "audio": {
+    "gestureUnlock": true,
+    "pcm": true,
+    "xa": true,
+    "cdda": true,
+    "synchronized": true,
+    "pass": true
+  }
+}
