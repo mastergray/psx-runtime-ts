@@ -12,6 +12,7 @@ const mime = new Map([
     [".json", "application/json; charset=utf-8"],
     [".wasm", "application/wasm"],
     [".css", "text/css; charset=utf-8"],
+    [".svg", "image/svg+xml; charset=utf-8"],
 ]);
 
 const server = createServer((request, response) => {

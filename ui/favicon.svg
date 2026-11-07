@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>[PSX]</title>
+  <rect width="64" height="64" rx="13" fill="#123954"/>
+  <rect x="3" y="3" width="58" height="58" rx="10" fill="#185173" stroke="#66c7ff" stroke-width="2"/>
+  <g transform="translate(3.8 40) scale(.022 -.022)" fill="#f0f7ff">
+    <path id="left-bracket" d="M70 816H314V719H183V-20H314V-117H70Z"/>
+    <path id="letter-p" transform="translate(332)" d="M70 700H496L598 597V359L495 255H186V0H70ZM444 353 484 393V562L444 602H186V353Z"/>
+    <path id="letter-s" transform="translate(970)" d="M55 103V191H169V138L207 100H425L465 140V269L426 308H160L57 410V597L160 700H468L571 597V508H457V562L418 600H210L171 562V446L210 408H476L579 305V105L474 0H158Z"/>
+    <path id="letter-x" transform="translate(1599)" d="M253 361 20 700H150L318 453L486 700H616L384 357L626 0H496L318 264L140 0H10Z"/>
+    <path id="right-bracket" transform="translate(2235)" d="M18-117V-20H150V719H18V816H262V-117Z"/>
+  </g>
+</svg>

@@ -108,6 +108,7 @@ const routes = new Map([
     ["/core/probes/m10-release-probe.html", ["core/probes/m10-release-probe.html", "text/html; charset=utf-8"]],
     ["/core/probes/m11-touch-probe.html", ["core/probes/m11-touch-probe.html", "text/html; charset=utf-8"]],
     ["/ui/index.html", ["ui/index.html", "text/html; charset=utf-8"]],
+    ["/ui/favicon.svg", ["ui/favicon.svg", "image/svg+xml; charset=utf-8"]],
     ["/ui/styles.css", ["ui/styles.css", "text/css; charset=utf-8"]],
     ["/vendor/fflate.js", ["node_modules/fflate/esm/browser.js", "text/javascript; charset=utf-8"]],
     ["/node_modules/fflate/esm/browser.js", ["node_modules/fflate/esm/browser.js", "text/javascript; charset=utf-8"]],
@@ -976,6 +977,23 @@ try {
             unsupportedSettingsAbsent: ["rewind", "reverb", "internal-resolution", "fast-boot"]
                 .every((id) => document.querySelector(`#${id}`) === null),
         }));
+        const favicon = await page.evaluate(async () => {
+            const link = document.querySelector('link[rel="icon"]');
+            if (!(link instanceof HTMLLinkElement)) return null;
+            const response = await fetch(link.href);
+            const source = await response.text();
+            return {
+                href: link.getAttribute("href"),
+                type: link.type,
+                sizes: link.sizes.value,
+                status: response.status,
+                contentType: response.headers.get("content-type"),
+                terminalMark: source.includes("<title>[PSX]</title>")
+                    && ["letter-p", "letter-s", "letter-x"].every((id) => source.includes(`id="${id}"`)),
+                themePalette: ["#123954", "#185173", "#66c7ff", "#f0f7ff"]
+                    .every((color) => source.includes(color)),
+            };
+        });
         await page.click("[data-open-dialog='system']");
         const system = await page.evaluate(() => {
             const input = document.querySelector("#firmware-file");
@@ -1786,6 +1804,10 @@ try {
             ok: desktop.stage === "firmware-required" && desktop.title === "[ FIRMWARE REQUIRED ]"
                 && desktop.canvas && desktop.wordmarkAbsent && desktop.gameDisabled && desktop.libraryDisabled && desktop.pageFits
                 && desktop.unsupportedSettingsAbsent && system.open && system.slots === 3
+                && favicon?.href === "/ui/favicon.svg?v=5" && favicon.type === "image/svg+xml"
+                && favicon.sizes === "any" && favicon.status === 200
+                && favicon.contentType?.startsWith("image/svg+xml")
+                && favicon.terminalMark && favicon.themePalette
                 && system.defaultRegion === "ntsc-u" && system.forgetHidden
                 && system.systemStopHidden && system.storeHidden
                 && system.newFirmware.visible && system.newFirmware.label === "Check And Store"
@@ -1932,6 +1954,7 @@ try {
                 && landscape.touchTargetSizes.every(({ width, height }) => width >= 44 && height >= 44)
                 && pageErrors.length === 0,
             desktop,
+            favicon,
             system,
             controlsInitial,
             controlsAssigned,
