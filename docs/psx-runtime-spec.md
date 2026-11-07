@@ -887,11 +887,10 @@ prebuffer, Stable Playback uses 80 ms, and the default Adaptive mode begins at
 20 ms then uses 80 ms for the remainder of the audio session after its first
 device-timeline underrun.
 
-The top-level Audio surface persists this choice alongside output gain and
-reports the selected backend, session's cumulative underruns, recent queue
-depth, rolling real-time core-audio production and the largest recent delivery
-gap. The Worklet counts contiguous rendering starvation as one underrun and
-prebuffers again before resuming output.
+The top-level Audio surface persists this choice alongside output gain. Runtime
+telemetry remains available to development diagnostics rather than appearing in
+the production controls. The Worklet counts contiguous rendering starvation as
+one underrun and prebuffers again before resuming output.
 
 The mobile-performance diagnostic path emits approximately one-second
 aggregates. It separates native core execution, disc access, AV extraction,

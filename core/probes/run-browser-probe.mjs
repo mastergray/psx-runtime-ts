@@ -1192,7 +1192,7 @@ try {
                 bufferMode: bufferMode.value,
                 bufferOptions: [...bufferMode.options].map(({ value, textContent }) => [value, textContent]),
                 bufferStored: localStorage.getItem("psx-runtime:ui:audio-buffer-mode"),
-                bufferStatus: document.querySelector("#audio-buffer-status")?.textContent,
+                telemetryAbsent: document.querySelector("#audio-buffer-status, #audio-worker-status") === null,
                 developmentControlsAbsent: document.querySelector("#system-settings-tab, #system-settings-panel, #diagnostic-variant, #download-diagnostics") === null,
             };
             dialog.close();
@@ -1785,7 +1785,7 @@ try {
                 && audioControl.initialBufferMode === "adaptive"
                 && audioControl.bufferMode === "stable"
                 && audioControl.bufferStored === "stable"
-                && audioControl.bufferStatus === "Audio: 0 underruns · 0 ms queued · Output idle"
+                && audioControl.telemetryAbsent
                 && audioControl.bufferOptions.length === 3
                 && audioControl.bufferOptions.some(([value, label]) => value === "adaptive" && label === "Adaptive (Recommended)")
                 && audioControl.bufferOptions.some(([value, label]) => value === "low-latency" && label === "Low Latency")

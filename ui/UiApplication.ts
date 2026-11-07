@@ -99,9 +99,6 @@ export default class UiApplication {
     private _memoryImportBusy = false;                            // Whether one card replacement is reading or persisting bytes
     private _touchControllerVisible = false;                      // Persisted preference controlling touch-surface presentation
     private _audioBufferMode: PsxAudioBufferMode;                 // Browser-wide audio output strategy preference
-    private _audioQueueSnapshotMs = 0;                            // Queue depth captured before Audio pauses the active session
-    private _audioProductionSnapshot: number | null = null;       // Core-audio throughput captured before modal-owned pause
-    private _audioGapSnapshotMs = 0;                              // Longest delivery gap captured before modal-owned pause
 
     // CONSTRUCTOR :: uiApplicationConfig -> uiApplication
     // Retains validated composition dependencies; initialize() binds the document and loads persistent state.
@@ -367,7 +364,6 @@ export default class UiApplication {
             persistAudioBufferMode(browserStorage(this._document), value);
             const audio = this._sessionAudio();
             if (audio !== null) audio.bufferMode = value;
-            this._renderAudioBufferStatus();
         });
 
         element<HTMLSelectElement>(this._document, "scaling-mode").addEventListener("change", () => {
@@ -535,12 +531,6 @@ export default class UiApplication {
             openDialog.close();
             this._switchingDialogs = false;
         }
-        if (dialogId === "volume") {
-            const audio = this._sessionAudio();
-            this._audioQueueSnapshotMs = audio?.queuedMs ?? 0;
-            this._audioProductionSnapshot = audio?.productionRate ?? null;
-            this._audioGapSnapshotMs = audio?.maximumSoundGapMs ?? 0;
-        }
         if (this._player?.status === "running") {
             await this._player.pause();
             this._resumeAfterDialog = true;
@@ -554,7 +544,6 @@ export default class UiApplication {
         }
         if (dialogId === "memory") await this._refreshMemoryCards();
         if (dialogId === "view") this._resetViewForm();
-        if (dialogId === "volume") this._renderAudioBufferStatus();
         if (dialogId === "game") {
             this._selectedGamePanel = this._player?.session === null || this._player?.session === undefined
                 ? "import"
@@ -2009,27 +1998,6 @@ export default class UiApplication {
     // Returns the Audio modal's volume slider as a normalized Web Audio gain.
     private _selectedVolume(): number {
         return Number(element<HTMLInputElement>(this._document, "volume-level").value) / 100;
-    }
-
-    // METHOD :: VOID -> VOID
-    // Renders cumulative underruns and the queue depth captured before modal-owned pause.
-    private _renderAudioBufferStatus(): void {
-        const audio = this._sessionAudio();
-        const underruns = audio?.underrunCount ?? 0;
-        const queued = Math.round(Math.max(audio?.queuedMs ?? 0, this._audioQueueSnapshotMs));
-        const production = this._audioProductionSnapshot ?? audio?.productionRate ?? null;
-        const maximumGap = Math.round(Math.max(audio?.maximumSoundGapMs ?? 0, this._audioGapSnapshotMs));
-        const recovery = audio?.isAdaptiveRecovery === true ? " · stable recovery active" : "";
-        const backend = audio === null
-            ? "Output idle"
-            : audio.backend === "worklet" ? "AudioWorklet" : "Scheduled fallback";
-        const productionStatus = production === null
-            ? ""
-            : ` · ${Math.round(production * 100)}% real-time production · ${maximumGap} ms max gap`;
-        this._setText(
-            "audio-buffer-status",
-            `Audio: ${underruns} ${underruns === 1 ? "underrun" : "underruns"} · ${queued} ms queued · ${backend}${productionStatus}${recovery}`,
-        );
     }
 
     // METHOD :: uiStageState -> STRING
