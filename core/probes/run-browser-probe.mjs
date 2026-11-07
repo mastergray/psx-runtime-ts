@@ -1591,6 +1591,9 @@ try {
         await page.waitForFunction(() => document.querySelector("#view-dialog")?.hasAttribute("open") === false
             && document.querySelector("#touch-controller")?.hasAttribute("hidden") === false);
         const mobile = await page.evaluate(() => {
+            const audioButton = document.querySelector("#volume-session");
+            const audioButtonStyle = getComputedStyle(audioButton);
+            const audioLabelStyle = getComputedStyle(audioButton, "::after");
             const targets = [
                 ...document.querySelectorAll("#touch-controller button"),
                 document.querySelector(".touch-dpad"),
@@ -1606,7 +1609,18 @@ try {
                 .map((candidate) => `${node.getAttribute("data-touch-button") ?? node.className}:${candidate.getAttribute("data-touch-button") ?? candidate.className}`));
             return {
                 pageFits: document.documentElement.scrollHeight <= document.documentElement.clientHeight,
-                audioLabel: getComputedStyle(document.querySelector("#volume-session"), "::after").content,
+                audioLabel: audioLabelStyle.content,
+                audioAlignment: {
+                    buttonWidth: audioButton.getBoundingClientRect().width,
+                    contentWidth: audioButton.getBoundingClientRect().width
+                        - Number.parseFloat(audioButtonStyle.borderLeftWidth)
+                        - Number.parseFloat(audioButtonStyle.borderRightWidth),
+                    labelWidth: Number.parseFloat(audioLabelStyle.width),
+                    buttonFontSize: audioButtonStyle.fontSize,
+                    buttonGap: audioButtonStyle.gap,
+                    labelDisplay: audioLabelStyle.display,
+                    labelTextAlign: audioLabelStyle.textAlign,
+                },
                 stageWidth: document.querySelector("#screen-stage")?.getBoundingClientRect().width,
                 stageHeight: document.querySelector("#screen-stage")?.getBoundingClientRect().height,
                 controllerWidth: document.querySelector("#touch-controller")?.getBoundingClientRect().width,
@@ -1841,6 +1855,11 @@ try {
                 && centeredNotice.horizontalDelta < 1 && centeredNotice.verticalDelta < 1
                 && mobile.pageFits
                 && mobile.audioLabel === '"AUDIO"'
+                && Math.abs(mobile.audioAlignment.contentWidth - mobile.audioAlignment.labelWidth) < 0.5
+                && mobile.audioAlignment.buttonFontSize === "0px"
+                && mobile.audioAlignment.buttonGap === "0px"
+                && mobile.audioAlignment.labelDisplay === "grid"
+                && mobile.audioAlignment.labelTextAlign === "center"
                 && typeof mobile.stageWidth === "number" && mobile.stageWidth <= 390
                 && typeof mobile.stageHeight === "number" && mobile.stageHeight > 0
                 && typeof mobile.controllerWidth === "number" && mobile.controllerWidth <= 390

@@ -860,8 +860,8 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
     .app-shell { padding: 67px 8px 8px; }
     .command-bar { min-height: 58px; gap: 6px; padding-inline: 7px; }
     .main-nav, .session-actions { gap: 3px; }
-    .session-actions button { width: 40px; padding: 0; overflow: hidden; font-size: 0; }
-    .session-actions button::first-letter { font-size: 0.8rem; }
+    .session-actions button { width: 40px; padding: 0; gap: 0; overflow: hidden; font-size: 0; }
+    .session-actions button::after { width: 100%; display: grid; place-items: center; line-height: 1; text-align: center; }
     #pause-session::after { content: "Ⅱ"; font-size: 0.9rem; }
     #reset-session::after { content: "↻"; font-size: 1.15rem; }
     #mute-session::after { content: "♪"; font-size: 1rem; }
