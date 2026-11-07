@@ -841,11 +841,8 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
     text-align: right;
 }
 .audio-buffer-control { padding-top: 18px; border-top: 1px solid var(--line); }
-.system-settings > .audio-buffer-control { padding-top: 0; border-top: 0; }
-.audio-buffer-control select, .diagnostic-control select { width: 100%; }
-.audio-buffer-control > small, .diagnostic-control > small { color: var(--muted); font: 0.72rem/1.35 "Share Tech Mono", monospace; }
-.diagnostic-control { padding-top: 18px; border-top: 1px solid var(--line); }
-.diagnostic-actions { display: flex; justify-content: flex-start; }
+.audio-buffer-control select { width: 100%; }
+.audio-buffer-control > small { color: var(--muted); font: 0.72rem/1.35 "Share Tech Mono", monospace; }
 .dialog-section > .audio-buffer-status {
     color: var(--muted);
     font: 0.72rem "Share Tech Mono", monospace;
@@ -868,7 +865,7 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
     #pause-session::after { content: "Ⅱ"; font-size: 0.9rem; }
     #reset-session::after { content: "↻"; font-size: 1.15rem; }
     #mute-session::after { content: "♪"; font-size: 1rem; }
-    #volume-session::after { content: "VOL"; font-size: 0.58rem; }
+    #volume-session::after { content: "AUDIO"; font-size: 0.52rem; }
     .runtime-status { display: none; }
     .play-stage { height: calc(100dvh - 75px); min-height: 360px; }
     .screen-stage { border-radius: 11px; }

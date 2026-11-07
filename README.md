@@ -96,13 +96,11 @@ System, Game, Library, Memory Cards and View workflows against the real
 runtime and browser stores. The central stage reflects firmware-required,
 ready, starting, running, paused, stopping and failed states; no mock-only
 formats or settings are exposed.
-The top-level Volume modal controls only output gain. System contains Firmware,
-Controls and Settings tabs; Settings persists the audio-buffering mode and
-contains explicit development variants and downloadable mobile diagnostics.
-Production sessions use sequential-read reuse without measurement overhead.
-Instrumented variants aggregate approximately one-second windows across core
-execution, disc I/O, AV extraction, video/audio conversion and main-thread
-turnaround.
+The top-level Audio modal controls output gain and persists the audio-buffering
+mode. System contains only Firmware and Controls. Production sessions use
+sequential-read reuse without measurement overhead; explicit development
+compositions retain instrumented variants and downloadable diagnostics outside
+the production interface.
 
 Presentation Mode provides a controller-first, television-scale view of the
 same running session. The D-pad or left stick moves focus, Cross activates,
