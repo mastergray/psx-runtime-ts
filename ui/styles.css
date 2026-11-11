@@ -776,6 +776,7 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
 .library-layout { min-height: 460px; display: grid; grid-template-columns: minmax(260px, 0.85fr) minmax(340px, 1.4fr); overflow: hidden; }
 .library-list { max-height: 60dvh; overflow: auto; border-right: 1px solid var(--line); background: rgba(3, 9, 16, 0.5); }
 .library-item { width: 100%; min-height: 74px; padding: 12px 15px; display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; text-align: left; }
+.library-item[aria-expanded="true"] { background: rgba(55, 146, 198, 0.08); }
 .library-item[aria-selected="true"] { background: linear-gradient(90deg, rgba(55, 146, 198, 0.2), transparent); box-shadow: inset 3px 0 var(--cyan); }
 .library-item strong { min-width: 0; overflow: hidden; color: var(--text-bright); text-overflow: ellipsis; white-space: nowrap; }
 .library-item span { color: var(--muted); font: 0.72rem "Share Tech Mono", monospace; }

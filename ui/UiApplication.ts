@@ -559,6 +559,8 @@ export default class UiApplication {
             this._selectSystemPanel(this._hasSelectedFirmware() ? this._selectedSystemPanel : "firmware");
         }
         if (dialogId === "library") {
+            this._selectedLibraryGameId = null;
+            this._selectedLibraryDiscIndex = 0;
             this._libraryFeedback(null);
             this._renderLibrary();
         }
@@ -795,7 +797,7 @@ export default class UiApplication {
                 entryChoice.hidden = false;
                 this._feedback("game", "Choose the disc-set entry, then check and store the game.", "idle");
             } else {
-                this._feedback("game", "ZIP recognized. Check and store it before launch, or choose Start to do both.", "idle");
+                this._feedback("game", "ZIP recognized. Check and store it before launch.", "idle");
             }
         } catch (error) {
             this._feedback("game", `ZIP inspection failed: ${errorMessage(error)}`, "error");
@@ -867,8 +869,8 @@ export default class UiApplication {
         const store = element<HTMLButtonElement>(this._document, "store-game");
         const start = element<HTMLButtonElement>(this._document, "start-imported-game");
         const clear = element<HTMLButtonElement>(this._document, "clear-game");
-        store.textContent = stored ? "Checked And Stored" : "Check And Store";
-        store.disabled = !hasSelection || stored || busy;
+        store.hidden = stored;
+        store.disabled = !hasSelection || busy;
         start.hidden = !stored;
         start.disabled = !stored || busy;
         clear.hidden = !hasSelection;
@@ -1467,12 +1469,12 @@ export default class UiApplication {
     }
 
     // METHOD :: VOID -> PROMISE(VOID)
-    // Reloads the persistent library and retains a valid details selection.
+    // Reloads the persistent library and clears a details selection that no longer exists.
     private async _refreshLibrary(): Promise<void> {
         this._games = await this._gameStore.list();
-        if (this._selectedLibraryGameId === null
-            || !this._games.some(({ gameId }) => gameId === this._selectedLibraryGameId)) {
-            this._selectedLibraryGameId = this._games[0]?.gameId ?? null;
+        if (this._selectedLibraryGameId !== null
+            && !this._games.some(({ gameId }) => gameId === this._selectedLibraryGameId)) {
+            this._selectedLibraryGameId = null;
             this._selectedLibraryDiscIndex = 0;
         }
         this._renderLibrary();
@@ -1487,13 +1489,16 @@ export default class UiApplication {
     // Renders stored games, total storage, and the selected game's supported actions.
     private _renderLibrary(): void {
         const list = element<HTMLElement>(this._document, "library-list");
+        const activeGameId = this._player?.session?.machine.gameId ?? null;
         this._setText("library-count", `${String(this._games.length).padStart(2, "0")} TITLES`);
         list.replaceChildren(...this._games.map((game) => {
             const item = this._document.createElement("button");
             item.type = "button";
             item.className = "library-item";
             item.setAttribute("role", "option");
-            item.setAttribute("aria-selected", String(game.gameId === this._selectedLibraryGameId));
+            item.setAttribute("aria-selected", String(game.gameId === activeGameId));
+            item.setAttribute("aria-expanded", String(game.gameId === this._selectedLibraryGameId));
+            item.setAttribute("aria-controls", "library-detail");
             const title = this._document.createElement("strong");
             title.textContent = game.displayTitle;
             const discs = this._document.createElement("span");
@@ -1502,7 +1507,7 @@ export default class UiApplication {
             size.textContent = formatBytes(game.totalBytes);
             item.append(title, discs, size);
             item.addEventListener("click", () => {
-                this._selectedLibraryGameId = game.gameId;
+                this._selectedLibraryGameId = this._selectedLibraryGameId === game.gameId ? null : game.gameId;
                 this._selectedLibraryDiscIndex = 0;
                 this._renderLibrary();
             });
@@ -1513,7 +1518,7 @@ export default class UiApplication {
         if (game === undefined) {
             const placeholder = this._document.createElement("div");
             placeholder.className = "library-placeholder";
-            placeholder.textContent = "[ NO STORED GAMES ]";
+            placeholder.textContent = this._games.length === 0 ? "[ NO STORED GAMES ]" : "[ SELECT A GAME ]";
             detail.replaceChildren(placeholder);
             return;
         }
