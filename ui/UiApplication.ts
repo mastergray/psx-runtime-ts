@@ -1491,14 +1491,25 @@ export default class UiApplication {
         const list = element<HTMLElement>(this._document, "library-list");
         const activeGameId = this._player?.session?.machine.gameId ?? null;
         this._setText("library-count", `${String(this._games.length).padStart(2, "0")} TITLES`);
-        list.replaceChildren(...this._games.map((game) => {
+        if (this._games.length === 0) {
+            const placeholder = this._document.createElement("div");
+            placeholder.className = "library-placeholder";
+            placeholder.textContent = "[ NO STORED GAMES ]";
+            list.replaceChildren(placeholder);
+            return;
+        }
+        list.replaceChildren(...this._games.map((game, index) => {
+            const expanded = game.gameId === this._selectedLibraryGameId;
+            const detailId = `library-game-detail-${index}`;
+            const entry = this._document.createElement("div");
+            entry.className = "library-entry";
+            entry.setAttribute("role", "listitem");
             const item = this._document.createElement("button");
             item.type = "button";
             item.className = "library-item";
-            item.setAttribute("role", "option");
-            item.setAttribute("aria-selected", String(game.gameId === activeGameId));
-            item.setAttribute("aria-expanded", String(game.gameId === this._selectedLibraryGameId));
-            item.setAttribute("aria-controls", "library-detail");
+            item.setAttribute("aria-current", String(game.gameId === activeGameId));
+            item.setAttribute("aria-expanded", String(expanded));
+            item.setAttribute("aria-controls", detailId);
             const title = this._document.createElement("strong");
             title.textContent = game.displayTitle;
             const discs = this._document.createElement("span");
@@ -1511,25 +1522,23 @@ export default class UiApplication {
                 this._selectedLibraryDiscIndex = 0;
                 this._renderLibrary();
             });
-            return item;
+            entry.append(item);
+            if (expanded) {
+                const detail = this._gameDetail(game);
+                detail.id = detailId;
+                detail.setAttribute("role", "region");
+                detail.setAttribute("aria-label", `${game.displayTitle} details`);
+                entry.append(detail);
+            }
+            return entry;
         }));
-        const detail = element<HTMLElement>(this._document, "library-detail");
-        const game = this._games.find(({ gameId }) => gameId === this._selectedLibraryGameId);
-        if (game === undefined) {
-            const placeholder = this._document.createElement("div");
-            placeholder.className = "library-placeholder";
-            placeholder.textContent = this._games.length === 0 ? "[ NO STORED GAMES ]" : "[ SELECT A GAME ]";
-            detail.replaceChildren(placeholder);
-            return;
-        }
-        detail.replaceChildren(this._gameDetail(game));
     }
 
     // METHOD :: psxStoredGame -> HTMLElement
     // Builds safe Library details and binds launch, rename, and removal actions.
     private _gameDetail(game: PsxStoredGame): HTMLElement {
         const wrapper = this._document.createElement("div");
-        wrapper.className = "game-detail";
+        wrapper.className = "game-detail library-item-detail";
         const eyebrow = this._document.createElement("p");
         eyebrow.className = "eyebrow";
         eyebrow.textContent = "// STORED GAME";

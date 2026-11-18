@@ -773,15 +773,16 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
 .archive-actions { display: flex; gap: 5px; }
 .archive-actions button { min-width: 42px; padding: 0 10px; font-size: 0.78rem; }
 
-.library-layout { min-height: 460px; display: grid; grid-template-columns: minmax(260px, 0.85fr) minmax(340px, 1.4fr); overflow: hidden; }
-.library-list { max-height: 60dvh; overflow: auto; border-right: 1px solid var(--line); background: rgba(3, 9, 16, 0.5); }
-.library-item { width: 100%; min-height: 74px; padding: 12px 15px; display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; text-align: left; }
+.library-layout { min-height: 0; max-height: 60dvh; flex: 0 1 auto; overflow: hidden; }
+.library-list { max-height: 60dvh; overflow: auto; background: rgba(3, 9, 16, 0.5); scrollbar-color: var(--line-bright) transparent; scrollbar-width: thin; }
+.library-entry { border-bottom: 1px solid var(--line); }
+.library-item { width: 100%; min-height: 74px; padding: 12px 15px; display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; border: 0; border-radius: 0; text-align: left; }
 .library-item[aria-expanded="true"] { background: rgba(55, 146, 198, 0.08); }
-.library-item[aria-selected="true"] { background: linear-gradient(90deg, rgba(55, 146, 198, 0.2), transparent); box-shadow: inset 3px 0 var(--cyan); }
+.library-item[aria-current="true"] { background: linear-gradient(90deg, rgba(55, 146, 198, 0.2), transparent); box-shadow: inset 3px 0 var(--cyan); }
 .library-item strong { min-width: 0; overflow: hidden; color: var(--text-bright); text-overflow: ellipsis; white-space: nowrap; }
 .library-item span { color: var(--muted); font: 0.72rem "Share Tech Mono", monospace; }
-.library-detail { padding: clamp(20px, 4vw, 40px); overflow: auto; }
-.library-placeholder { height: 100%; min-height: 250px; display: grid; place-items: center; color: #536b80; font-family: "Share Tech Mono", monospace; }
+.library-item-detail { padding: clamp(20px, 4vw, 40px); border-top: 1px solid var(--line); background: rgba(3, 10, 18, 0.7); }
+.library-placeholder { height: 100%; min-height: 320px; display: grid; place-items: center; color: #536b80; font-family: "Share Tech Mono", monospace; }
 .game-detail { display: grid; gap: 22px; }
 .game-detail .eyebrow { margin: 0; }
 .game-detail h3 { margin: -14px 0 0; color: var(--text-bright); font-size: clamp(1.4rem, 4vw, 2.4rem); font-weight: 500; }
@@ -907,9 +908,8 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
     .section-heading p { text-align: left; }
     .presentation-library-heading { align-items: end; flex-direction: row; }
     .presentation-library-heading p { text-align: right; }
-    .library-layout { min-height: 0; grid-template-columns: 1fr; }
-    .library-list { max-height: 210px; border-right: 0; border-bottom: 1px solid var(--line); }
-    .library-detail { max-height: 52dvh; }
+    .library-layout { min-height: 0; }
+    .library-list { border-bottom: 0; }
     .game-metrics { grid-template-columns: 1fr; }
     .card-grid { grid-template-columns: 1fr; }
     .active-disc-controls, .state-create-row, .state-item { grid-template-columns: 1fr; }
@@ -930,7 +930,7 @@ input[type="file"]::file-selector-button { margin-right: 12px; border: 0; backgr
     .stage-message { width: calc(100% - 30px); }
     .stage-message h1 { font-size: 1.35rem; }
     .stage-telemetry { display: none; }
-    .dialog-content, .library-detail { padding: 16px; }
+    .dialog-content, .library-item-detail { padding: 16px; }
     .control-device-row { grid-template-columns: 1fr; }
     .control-device-row button { width: 100%; }
     .control-map { table-layout: fixed; font-size: 0.7rem; }
